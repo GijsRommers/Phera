@@ -6,14 +6,15 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+phera-db-drivers.workspace = true
 phera-sqlite.workspace = true
 phera-io-pool.workspace = true
 phera-extension-api.workspace = true
 tokio.workspace = true
-tokio-postgres.workspace = true
+postgres-types.workspace = true
 mysql_async.workspace = true
-bytes.workspace = true
-chrono.workspace = true
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true

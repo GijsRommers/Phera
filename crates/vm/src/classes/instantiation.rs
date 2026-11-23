@@ -1,6 +1,6 @@
 //! Allocation prepares constructors before sends and shallow clones preserve nested handles.
 
-use phera_bytecode::{ClassKind, Reg, SymbolId};
+use phera_bytecode::{ClassKind, Reg, SymbolId, Target};
 use phera_extension_api::NativeError;
 use phera_value::Value;
 
@@ -41,24 +41,6 @@ impl Vm {
         }
     }
 
-    /// Remember which class a named class symbol of the running file means.
-    /// Relative names (`self`, `parent`, `static`) depend on the frame and
-    /// are never linked. A declared class cannot go away, so the link holds
-    /// for the rest of the request.
-    pub(crate) fn link_class_symbol(&self, symbol: SymbolId, class: &Rc<super::Class>) {
-        let Some(frame) = self.current() else {
-            return;
-        };
-        let relative = frame
-            .unit()
-            .symbols
-            .get(symbol.index())
-            .is_none_or(|symbol| matches!(symbol.written.as_str(), "self" | "parent" | "static"));
-        if !relative && let Some(slot) = frame.cache().classes.get(symbol.index()) {
-            *slot.borrow_mut() = Some(class.clone());
-        }
-    }
-
     /// Literal class cache is keyed by unit/symbol, filled after successful lookup.
     /// Relative keywords bypass it. Linked classes cannot be replaced in a request,
     /// and the unit/class owners keep identities alive until request teardown.
@@ -75,25 +57,13 @@ impl Vm {
             let name = self.class_symbol(symbol)?;
             return self.new_named_object(&name);
         }
-        let cached = frame
-            .cache()
-            .classes
-            .get(symbol.index())
-            .and_then(|slot| slot.borrow().clone());
-        let class = if let Some(class) = cached {
-            class
-        } else {
-            let class = self
+        let key = self.code.unit_symbol_key(frame.frame.function, symbol);
+        let class = match self.classes.by_key(key) {
+            Some(class) => class.clone(),
+            None => self
                 .classes
                 .get(written)
-                .ok_or_else(|| NativeError::error(format!("Class \"{written}\" not found")))?;
-            if let Some(slot) = self
-                .current()
-                .and_then(|frame| frame.cache().classes.get(symbol.index()))
-            {
-                *slot.borrow_mut() = Some(class.clone());
-            }
-            class
+                .ok_or_else(|| Self::class_miss(written, "Class"))?,
         };
         self.new_linked_object(class)
     }
@@ -103,7 +73,7 @@ impl Vm {
         let class = self
             .classes
             .get(name)
-            .ok_or_else(|| NativeError::error(format!("Class \"{name}\" not found")))?;
+            .ok_or_else(|| Self::class_miss(name, "Class"))?;
         self.new_linked_object(class)
     }
 
@@ -114,9 +84,19 @@ impl Vm {
                 "Instantiation of class Closure is not allowed",
             ));
         }
-        if class.kind == ClassKind::Interface {
+        if class.name == "Generator" {
+            return Err(NativeError::error(
+                crate::generators::class::INSTANTIATION_ERROR,
+            ));
+        }
+        if matches!(class.kind, ClassKind::Interface | ClassKind::Trait) {
+            let kind = if class.kind == ClassKind::Trait {
+                "trait"
+            } else {
+                "interface"
+            };
             return Err(NativeError::error(format!(
-                "Cannot instantiate interface {}",
+                "Cannot instantiate {kind} {}",
                 class.name
             )));
         }
@@ -126,22 +106,32 @@ impl Vm {
                 class.name
             )));
         }
-        let object = self.classes.allocate(class.clone());
-        // Mirrors the default loop below for classes whose defaults are all literals.
-        if let Some(template) = &class.property_template {
-            object.update(|properties| *properties = template.clone());
+        if class.kind == ClassKind::Enum {
+            return Err(NativeError::error(format!(
+                "Cannot instantiate enum {}",
+                class.name
+            )));
+        }
+        Self::check_script_construction(&class)?;
+        let properties = if let Some(template) = &class.property_template {
+            template.clone()
         } else {
+            let mut properties = phera_value::Properties::for_class(&*class);
             for property in &class.defaults {
                 if property.initialized {
                     let value = if let Some(initializer) = &property.initializer {
-                        self.evaluate_initializer(initializer, &property.declaring)?
+                        self.evaluate_property_initializer(initializer, property)?
                     } else {
                         property.value.clone()
                     };
-                    object.set(property.key.clone(), value);
+                    properties.insert(property.key.clone(), value);
                 }
             }
-        }
+            properties
+        };
+        let object = self
+            .classes
+            .allocate_with_properties(class.clone(), properties);
         if class.is_throwable {
             self.initialize_throwable(&object, crate::exceptions::TraceOrigin::Construction);
         }
@@ -159,47 +149,28 @@ impl Vm {
             let invocation = super::Invocation::Constructor;
             return self.prepare_resolved_method(class, Some(object), resolved, invocation);
         }
-        self.prepare_method(
+        let prepared = self.prepare_method(
             class,
-            Some(object),
+            Some(object.clone()),
             "__construct",
             super::Invocation::Constructor,
-        )
+        );
+        // A constructor that may not be called leaves an object that was
+        // never constructed: PHP runs no destructor for it.
+        if prepared.is_err() {
+            object.mark_destructed();
+        }
+        prepared
     }
 
-    /// Clone bypasses constructors and copies only the property table, not nested objects.
-    pub(crate) fn clone_object(
-        &mut self,
-        destination: Reg,
-        source: Reg,
-    ) -> Result<(), NativeError> {
-        let Value::Object(original) = self.read_local(source) else {
-            return Err(NativeError::error("__clone method called on non-object"));
-        };
-        let class = self
-            .classes
-            .get(original.class.name())
-            .ok_or_else(|| internal_error!("clone class"))?;
-        if class.is_throwable {
-            return Err(NativeError::error(format!(
-                "Trying to clone an uncloneable object of class {}",
-                class.name
-            )));
+    pub(crate) fn check_script_construction(class: &super::Class) -> Result<(), NativeError> {
+        if let Some(message) = class
+            .hooks
+            .as_ref()
+            .and_then(|hooks| hooks.construction_error)
+        {
+            return Err(NativeError::error(message));
         }
-        if class.origin == crate::classes::class::ClassOrigin::Closure {
-            let native = original.native.borrow();
-            let state = native
-                .as_ref()
-                .and_then(|state| state.downcast_ref::<crate::closures::ClosureState>())
-                .ok_or_else(|| internal_error!("clone closure"))?;
-            let cloned = self.allocate_closure(state.duplicate())?;
-            self.set(destination, Value::Object(cloned));
-            return Ok(());
-        }
-        let cloned = self.classes.allocate(class);
-        cloned.update(|properties| *properties = original.to_array());
-        self.track_object_property_references(&cloned)?;
-        self.set(destination, Value::Object(cloned));
         Ok(())
     }
 
@@ -215,10 +186,64 @@ impl Vm {
             Value::Object(object) => self
                 .classes
                 .get(object.class.name())
-                .is_some_and(|class| class.is_a(&name)),
+                .is_some_and(|class| self.class_matches(&class, &name)),
             _ => false,
         };
         self.set(destination, Value::Bool(matches));
+        Ok(())
+    }
+
+    /// The four `instanceof` branches, out of line: one arm of `execute`
+    /// leads here, so that its other arms keep their shape.
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn instance_of_branches(
+        &mut self,
+        instruction: phera_bytecode::Instruction,
+        work: &mut usize,
+    ) -> Result<(), NativeError> {
+        use phera_bytecode::Instruction as I;
+        match instruction {
+            I::InstanceOfBranch { src, class, target } => {
+                self.instance_of_branch(src, class, target, false, work)
+            }
+            I::InstanceOfBranchIf { src, class, target } => {
+                self.instance_of_branch(src, class, target, true, work)
+            }
+            I::DynamicInstanceOfBranch { src, class, target } => {
+                self.dynamic_instance_of_branch(src, class, target, false, work)
+            }
+            I::DynamicInstanceOfBranchIf { src, class, target } => {
+                self.dynamic_instance_of_branch(src, class, target, true, work)
+            }
+            _ => Err(internal_error!("instanceof branch")),
+        }
+    }
+
+    /// `instanceof` whose answer only decides a jump: compute it exactly as
+    /// `instance_of` does, then jump when it equals `when`.
+    fn instance_of_branch(
+        &mut self,
+        source: Reg,
+        symbol: SymbolId,
+        target: Target,
+        when: bool,
+        work: &mut usize,
+    ) -> Result<(), NativeError> {
+        let name = self.class_symbol(symbol)?;
+        let matches = match self.read_local(source) {
+            Value::Object(object) => self
+                .classes
+                .get(object.class.name())
+                .is_some_and(|class| self.class_matches(&class, &name)),
+            _ => false,
+        };
+        if matches == when {
+            if self.backward(target) {
+                *work += 1;
+            }
+            self.jump(target)?;
+        }
         Ok(())
     }
 
@@ -234,34 +259,38 @@ impl Vm {
 }
 
 impl Vm {
-    /// Mirrors class_symbol's binding rules while sharing immutable PHP name strings.
-    pub(crate) fn class_symbol_value(&self, symbol: SymbolId) -> Result<Value, NativeError> {
-        let frame = self
-            .current()
-            .ok_or_else(|| internal_error!("class name frame"))?;
-        let name = &frame
-            .unit()
-            .symbols
-            .get(symbol.index())
-            .ok_or_else(|| internal_error!("class name symbol"))?
-            .written;
-        let class = match name.as_str() {
+    /// The class a relative symbol names in the running frame: `self`,
+    /// `static`, `parent`, or a trait method's own class. `Some(None)` when
+    /// the frame has no such class; `None` for a symbol that names a class
+    /// by its name.
+    pub(crate) fn relative_class(&self, symbol: SymbolId) -> Option<Option<Rc<super::Class>>> {
+        let frame = self.current()?;
+        let name = &frame.unit().symbols.get(symbol.index())?.written;
+        Some(match name.as_str() {
+            phera_bytecode::TRAIT_CLASS_NAME => self
+                .code
+                .facts(frame.frame.function)
+                .class
+                .map(|class| self.classes.class(class))
+                .or_else(|| frame.scope())
+                .cloned(),
             "self" => frame.scope().cloned(),
             "static" => frame.called(),
             "parent" => frame.scope().and_then(|scope| scope.parent.clone()),
-            _ => {
-                return frame
-                    .cache()
-                    .class_names
-                    .get(symbol.index())
-                    .cloned()
-                    .ok_or_else(|| internal_error!("class name cache"));
-            }
-        };
-        if let Some(class) = class {
-            return Ok(class.name_value.clone());
+            _ => return None,
+        })
+    }
+
+    /// Mirrors class_symbol's binding rules while sharing immutable PHP name strings.
+    pub(crate) fn class_symbol_value(&self, symbol: SymbolId) -> Result<Value, NativeError> {
+        match self.relative_class(symbol) {
+            Some(Some(class)) => Ok(class.name_value.clone()),
+            // Preserve exact diagnostics for missing relative scopes in the resolver.
+            Some(None) => self.class_symbol(symbol).map(Value::from),
+            None => self
+                .current()
+                .and_then(|frame| frame.cache().class_names.get(symbol.index()).cloned())
+                .ok_or_else(|| internal_error!("class name cache")),
         }
-        // Preserve exact diagnostics for missing relative scopes in the resolver.
-        self.class_symbol(symbol).map(Value::from)
     }
 }

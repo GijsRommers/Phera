@@ -45,6 +45,7 @@ fn enc_float(f: f64) -> String {
 fn enc_key(k: &ArrayKey) -> String {
     match k {
         ArrayKey::Int(i) => format!("I:{i}"),
+        ArrayKey::Interned(s) => format!("S:{}", hex(s.as_bytes())),
         ArrayKey::String(s) => format!("S:{}", hex(s.as_bytes())),
     }
 }
@@ -55,6 +56,7 @@ fn enc_value(v: &Value) -> String {
         Value::Bool(b) => format!("B:{}", u8::from(*b)),
         Value::Int(i) => format!("I:{i}"),
         Value::Float(f) => enc_float(*f),
+        Value::InternedStr(s) => format!("S:{}", hex(s.as_bytes())),
         Value::String(s) => format!("S:{}", hex(s.as_bytes())),
         Value::Array(a) => {
             let mut s = String::from("A(");
@@ -85,13 +87,7 @@ fn enc_value(v: &Value) -> String {
 }
 
 fn enc_err(e: &OpError) -> String {
-    let class = match e.kind {
-        ErrorKind::Error => "Error",
-        ErrorKind::TypeError => "TypeError",
-        ErrorKind::ValueError => "ValueError",
-        ErrorKind::ArithmeticError => "ArithmeticError",
-        ErrorKind::DivisionByZeroError => "DivisionByZeroError",
-    };
+    let class = e.kind.class_name();
     format!("E:{class}:{}", e.message)
 }
 

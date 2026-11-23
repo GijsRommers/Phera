@@ -35,6 +35,7 @@ impl Compiler<'_> {
         | ast::ExpressionKind::MethodCall { target, .. }
         | ast::ExpressionKind::Index { target, .. } = &root.kind
         {
+            self.note_hook_backing(root);
             chain.push(root);
             root = target;
         }
@@ -55,7 +56,36 @@ impl Compiler<'_> {
         let destination = self.literal(Constant::Null, line)?;
         let mut current = self.compile_expression(root)?;
         let mut exits = Vec::new();
+        // A long chain carries its value in one register and hands each
+        // step's temporaries back (see `chains`); a short one needs no moves.
+        let carrier = if chain.len() >= crate::expressions::chains::LONG_CHAIN {
+            let carrier = self.allocate_register()?;
+            self.emit(
+                Instruction::Move {
+                    destination: carrier,
+                    source: current,
+                },
+                line,
+            );
+            current = carrier;
+            Some((carrier, self.mark_temporaries()))
+        } else {
+            None
+        };
         for access in chain.into_iter().rev() {
+            if let Some((carrier, mark)) = carrier
+                && current != carrier
+            {
+                self.emit(
+                    Instruction::Move {
+                        destination: carrier,
+                        source: current,
+                    },
+                    line,
+                );
+                current = carrier;
+                self.release_temporaries(mark);
+            }
             if matches!(
                 access.kind,
                 ast::ExpressionKind::Property { nullsafe: true, .. }
@@ -70,21 +100,33 @@ impl Compiler<'_> {
                 ));
             }
             if let ast::ExpressionKind::MethodCall {
-                name: ast::MemberName::Identifier(name),
-                arguments,
-                ..
+                name, arguments, ..
             } = &access.kind
             {
-                self.emit(
-                    Instruction::MethodCall {
-                        receiver: current,
-                        method: name.name.clone(),
-                    },
-                    line,
-                );
+                let line = self.member_line(name);
+                match name {
+                    ast::MemberName::Identifier(name) => self.emit(
+                        Instruction::MethodCall {
+                            receiver: current,
+                            method: name.name.clone(),
+                        },
+                        line,
+                    ),
+                    ast::MemberName::Expression(name) => {
+                        let method = self.compile_expression(name)?;
+                        self.emit(
+                            Instruction::DynamicMethodCall {
+                                receiver: current,
+                                method,
+                            },
+                            line,
+                        )
+                    }
+                };
                 current = self.compile_arguments(arguments, line)?;
                 continue;
             }
+            let line = self.access_line(access);
             let step = match &access.kind {
                 ast::ExpressionKind::Property { name, .. } => {
                     let name = match name {

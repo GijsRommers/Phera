@@ -23,7 +23,7 @@ phpstan_version = subprocess.check_output([args.phpstan, '--version'], text=True
 reasons = (corpus / 'DIFFERENCES.md').read_text() if (corpus / 'DIFFERENCES.md').exists() else ''
 explanations = set()
 for line in reasons.splitlines():
-    match = re.match(r'\| `([^`]+)` \| ([01]) \| (\[[^]]*\]) \| (\[[^]]*\]) \|', line)
+    match = re.match(r'\| `([^`]+)` \| ([0-5]) \| (\[[^]]*\]) \| (\[[^]]*\]) \|', line)
     if match:
         name, level, stan, check = match.groups()
         explanations.add((name, int(level), tuple(json.loads(stan)), tuple(json.loads(check))))
@@ -32,7 +32,8 @@ for line in reasons.splitlines():
 def run(file):
     result = []
     phpstan_lines = []
-    for level in (0, 1):
+    levels = [int(row.split(':', 1)[0]) for row in file.with_suffix('.expect').read_text().splitlines()]
+    for level in levels:
         cache = args.output / f'{file.stem}.level{level}.json'
         source_hash = hashlib.sha256(file.read_bytes()).hexdigest()
         previous = json.loads(cache.read_text()) if args.reuse_phpstan and cache.exists() else {}

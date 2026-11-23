@@ -2,6 +2,7 @@
 //! the comparison that a `SORT_*` flag selects.
 
 use std::cmp::Ordering;
+use std::rc::Rc;
 
 use phera_extension_api::value::{compare, to_float, to_php_string};
 use phera_extension_api::{Context, NativeError, Value};
@@ -10,6 +11,15 @@ use crate::constants::{
     SORT_FLAG_CASE, SORT_LOCALE_STRING, SORT_NATURAL, SORT_NUMERIC, SORT_STRING,
 };
 use crate::natural::natural_compare;
+
+/// Native comparisons can also involve a scalar and an object. Two arrays
+/// may reach an object comparison at any depth.
+pub(super) fn needs_context_comparison(left: &Value, right: &Value) -> bool {
+    matches!(
+        (&*left.deref(), &*right.deref()),
+        (Value::Object(_), _) | (_, Value::Object(_)) | (Value::Array(_), Value::Array(_))
+    )
+}
 
 /// A `$flags` argument such as `SORT_STRING | SORT_FLAG_CASE`.
 #[derive(Clone, Copy)]
@@ -25,6 +35,30 @@ pub(super) enum SortFlags {
 }
 
 impl SortFlags {
+    /// The regular comparator used by PHP's multisort and unique passes
+    /// groups enum cases by identity.
+    pub(super) async fn compare_unstable(
+        self,
+        context: &mut dyn Context,
+        left: &Value,
+        right: &Value,
+    ) -> Result<Ordering, NativeError> {
+        let order = self.compare_with_objects(context, left, right).await?;
+        if matches!(self, Self::Regular)
+            && order == Ordering::Greater
+            && let Value::Object(right) = &*right.deref()
+            && right.class.is_enum()
+        {
+            return Ok(match &*left.deref() {
+                Value::Object(left) if left.class.is_enum() => {
+                    Rc::as_ptr(left).cmp(&Rc::as_ptr(right))
+                }
+                _ => Ordering::Less,
+            });
+        }
+        Ok(order)
+    }
+
     /// `SORT_STRING`, the comparison of `array_diff`, `array_intersect` and
     /// `array_unique` by default.
     pub(super) const STRING: Self = Self::String { ignore_case: false };
@@ -39,6 +73,25 @@ impl SortFlags {
             SORT_STRING | SORT_LOCALE_STRING => Self::String { ignore_case },
             SORT_NATURAL => Self::Natural { ignore_case },
             _ => Self::Regular,
+        }
+    }
+
+    pub(super) async fn compare_with_objects(
+        self,
+        context: &mut dyn Context,
+        left: &Value,
+        right: &Value,
+    ) -> Result<Ordering, NativeError> {
+        match self {
+            Self::Regular if needs_context_comparison(left, right) => {
+                Ok(context.compare(left, right).await?.cmp(&0))
+            }
+            Self::String { .. } | Self::Natural { .. } if left.is_object() || right.is_object() => {
+                let left = Value::String(context.stringify(left).await?);
+                let right = Value::String(context.stringify(right).await?);
+                self.compare(context, &left, &right)
+            }
+            _ => self.compare(context, left, right),
         }
     }
 

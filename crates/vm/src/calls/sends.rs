@@ -1,8 +1,11 @@
 //! Sends place values in the callee's reserved window, in source evaluation order.
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use phera_bytecode::Reg;
 use phera_extension_api::NativeError;
-use phera_value::Value;
+use phera_value::{PhpString, Value};
 
 use crate::calls::call_state::CallTarget;
 use crate::calls::call_view::CallView;
@@ -12,8 +15,25 @@ use crate::{AccessPath, Vm};
 /// Computed values cannot bind aliases; locals and paths preserve their writable origin.
 pub(crate) enum SentArgument {
     Value(Reg),
+    /// A computed value that was written as a call or as `new`
+    /// (`end(explode(',', $list))`): a by-reference parameter takes it
+    /// with a notice, where it rejects any other computed value.
+    Result(Reg),
+    /// A literal of the file (`SendConst`), sent as a value.
+    Literal(Value),
     Local(Reg),
     Path(AccessPath),
+}
+
+impl SentArgument {
+    /// The argument of a `SendValue`: a computed value, and whether it was
+    /// written as a call or as `new`.
+    pub(crate) fn computed(source: Reg, of_call: bool) -> Self {
+        match of_call {
+            true => SentArgument::Result(source),
+            false => SentArgument::Value(source),
+        }
+    }
 }
 
 impl Vm {
@@ -24,9 +44,16 @@ impl Vm {
         let parameters = view.parameters();
         let receiving = parameters.receiving(index);
         let reference = receiving.is_some_and(|parameter| parameters.by_reference(parameter))
-            || (index == 0 && !matches!(argument, SentArgument::Value(_)) && view.is_extract());
+            || (index == 0
+                && !matches!(
+                    argument,
+                    SentArgument::Value(_) | SentArgument::Result(_) | SentArgument::Literal(_)
+                )
+                && view.is_extract());
         let value = match (reference, argument) {
-            (true, SentArgument::Value(_)) => {
+            (true, SentArgument::Value(_) | SentArgument::Literal(_))
+                if receiving.is_some_and(|parameter| parameters.requires_reference(parameter)) =>
+            {
                 return Err(NativeError::error(format!(
                     "{}(): Argument #{} (${}) could not be passed by reference",
                     view.name(),
@@ -40,9 +67,78 @@ impl Vm {
             (false, SentArgument::Path(place)) => {
                 self.read_place(&place, crate::access_mode::Missing::Warn)?
             }
-            (false, SentArgument::Value(source)) => self.get(source),
+            // What a call returned, for a parameter that must be a
+            // reference: the reference itself when the function returned
+            // one (`function &f()`), else the value with PHP's notice.
+            (true, SentArgument::Result(source))
+                if receiving.is_some_and(|parameter| parameters.requires_reference(parameter)) =>
+            {
+                // Not `get`, which reads through a reference.
+                let held = self
+                    .current()
+                    .and_then(|frame| frame.slots(&self.registers).get(source.index()).cloned())
+                    .flatten()
+                    .unwrap_or_default();
+                match held {
+                    reference @ Value::Reference(_) => reference,
+                    value => {
+                        phera_extension_api::Context::notice(
+                            self,
+                            "Only variables should be passed by reference".into(),
+                        );
+                        Value::Reference(Rc::new(RefCell::new(value)))
+                    }
+                }
+            }
+            (_, SentArgument::Value(source) | SentArgument::Result(source)) => self.get(source),
+            (_, SentArgument::Literal(value)) => value,
         };
         self.store_sent_value(index, value)
+    }
+
+    /// Borrow the cached ordinary property before entering the magic send path.
+    pub(crate) fn send_path(&mut self, place: AccessPath) -> Result<bool, NativeError> {
+        if !place.has_properties()? {
+            self.send(SentArgument::Path(place))?;
+            return Ok(true);
+        }
+        let view = CallView::top(&self.code, &self.call_stack)?;
+        let index = view.argument_index()?;
+        let parameters = view.parameters();
+        let reference = parameters
+            .receiving(index)
+            .is_some_and(|parameter| parameters.by_reference(parameter))
+            || (index == 0 && view.is_extract());
+        if !reference && let Some(value) = self.read_property_site(&place)? {
+            self.store_sent_value(index, value)?;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    /// A property send can run __get, retaining its return reference if needed.
+    pub(crate) async fn send_magic_place(&mut self, place: &AccessPath) -> Result<(), NativeError> {
+        let view = CallView::top(&self.code, &self.call_stack)?;
+        let index = view.argument_index()?;
+        let parameters = view.parameters();
+        let reference = parameters
+            .receiving(index)
+            .is_some_and(|parameter| parameters.by_reference(parameter))
+            || (index == 0 && view.is_extract());
+        if reference {
+            self.reference_property_path(
+                place.clone(),
+                crate::property_hook_continuation::ReferenceCompletion::Argument(index),
+            )
+            .await
+        } else {
+            self.read_property_path(
+                place.clone(),
+                phera_bytecode::FetchMode::Read,
+                crate::property_hook_continuation::ReadCompletion::Argument(index),
+            )
+            .await
+        }
     }
 
     /// Put an argument at position `index` of the innermost prepared call,
@@ -54,30 +150,19 @@ impl Vm {
         mut value: Value,
     ) -> Result<(), NativeError> {
         let view = CallView::top(&self.code, &self.call_stack)?;
-        let slot = view.slots().slot(index);
         let parameters = view.parameters();
-        let named = view.details.and_then(|details| details.named.clone());
-        let mut extra = false;
-        if let Some(name) = &named {
-            extra = parameters.position_of(name.as_bytes()).is_none();
-            let duplicate = match extra {
-                true => view
-                    .details
-                    .is_some_and(|details| details.extra_named.iter().any(|(_, key)| key == name)),
-                false => self
-                    .registers
-                    .window(slot, 1)
-                    .first()
-                    .is_some_and(Option::is_some),
-            };
-            if duplicate {
-                return Err(NativeError::error(format!(
-                    "Named parameter ${} overwrites previous argument",
-                    name.to_string_lossy()
-                )));
-            }
-        }
-        let mut deferred = false;
+        // Declared parameter slots are reserved at the start of the window.
+        let slot = if index < parameters.len() {
+            view.call.base() + index
+        } else {
+            view.slots().slot(index)
+        };
+        let named = view.details.and_then(|details| details.named.as_ref());
+        let extra = match named {
+            Some(name) => self.check_named_send(&view, slot, name)?,
+            None => false,
+        };
+        let mut deferred = None;
         if let Some(declaration) = parameters
             .receiving(index)
             .and_then(|parameter| parameters.ty(parameter))
@@ -85,26 +170,72 @@ impl Vm {
         {
             match crate::types::widen_int_to_float(&value, declaration.mask) {
                 Some(float) => value = float,
-                None => deferred = true,
+                None => {
+                    let string_argument = declaration
+                        .mask
+                        .intersects(phera_bytecode::TypeMask::STRING)
+                        && value.is_object();
+                    deferred = Some(string_argument);
+                }
             }
         }
         let was_named = named.is_some();
         self.registers.grow_to(slot + 1);
         self.registers.put(slot, value);
-        if let Some(name) = named {
-            let details = self.call_stack.top_details_mut()?;
-            details.named = None;
-            if extra {
-                details.extra_named.push((index, name));
-            }
+        if was_named {
+            self.finish_named_send(index, extra)?;
         }
         let call = self.call_stack.top_call_mut()?;
         call.mark_sent(index, !extra);
-        if deferred {
+        if let Some(string_argument) = deferred {
             call.flags.insert(CallFlags::DEFERRED_CHECKS);
+            if string_argument {
+                call.flags.insert(CallFlags::STRING_ARGUMENT);
+            }
         }
         if was_named {
             call.flags.insert(CallFlags::NAMED);
+        }
+        Ok(())
+    }
+
+    /// Named sends may overwrite a parameter or a previous variadic key.
+    #[cold]
+    #[inline(never)]
+    fn check_named_send(
+        &self,
+        view: &CallView<'_>,
+        slot: usize,
+        name: &PhpString,
+    ) -> Result<bool, NativeError> {
+        let extra = view.parameters().position_of(name.as_bytes()).is_none();
+        let duplicate = match extra {
+            true => view
+                .details
+                .is_some_and(|details| details.extra_named.iter().any(|(_, key)| key == name)),
+            false => self
+                .registers
+                .window(slot, 1)
+                .first()
+                .is_some_and(Option::is_some),
+        };
+        if duplicate {
+            return Err(NativeError::error(format!(
+                "Named parameter ${} overwrites previous argument",
+                name.to_string_lossy()
+            )));
+        }
+        Ok(extra)
+    }
+
+    /// Move a variadic name into the window after the corresponding value is ready.
+    #[cold]
+    #[inline(never)]
+    fn finish_named_send(&mut self, index: usize, extra: bool) -> Result<(), NativeError> {
+        let details = self.call_stack.top_details_mut()?;
+        let name = details.named.take();
+        if extra && let Some(name) = name {
+            details.extra_named.push((index, name));
         }
         Ok(())
     }

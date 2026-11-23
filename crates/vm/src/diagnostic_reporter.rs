@@ -1,23 +1,33 @@
-//! Request-local diagnostic reporter state kept separate from register execution.
+//! `@trigger_error('hidden')` temporarily replaces the active reporting mask.
 
 use phera_value::CollectDiagnostics;
+
+use crate::Vm;
+
+const FATAL_REPORTING_MASK: i64 = 4437;
 
 /// Owns the request state for diagnostic reporter.
 pub(crate) struct DiagnosticReporter {
     /// Request-owned operator diagnostics.
     operator_diagnostics: CollectDiagnostics,
     /// Request-owned suppression.
-    suppression: usize,
+    suppression: Vec<i64>,
     /// Request-owned diagnostic capture.
     diagnostic_capture: Option<Vec<Vec<u8>>>,
+    /// How many diagnostics the request raised so far: a class whose
+    /// linking raised one is not shared with other requests (see
+    /// `crate::classes::worker_classes`), since its diagnostic, and a user
+    /// error handler it may have run, belong to the request that linked it.
+    pub(crate) raised: u64,
 }
 
 impl DiagnosticReporter {
     pub(crate) fn new() -> Self {
         Self {
             operator_diagnostics: CollectDiagnostics::default(),
-            suppression: 0,
+            suppression: Vec::new(),
             diagnostic_capture: None,
+            raised: 0,
         }
     }
 }
@@ -40,46 +50,56 @@ impl DiagnosticReporter {
         !self.operator_diagnostics.entries.is_empty()
     }
 
-    /// PHP @ suppresses ordinary diagnostics within its nested expression.
-    pub(crate) fn begin_silence(&mut self) {
-        self.suppression += 1;
+    pub(crate) fn silence(&self) -> usize {
+        self.suppression.len()
     }
 
-    pub(crate) fn end_silence(&mut self) {
-        self.suppression = self.suppression.saturating_sub(1);
-    }
-
-    /// Fatal errors remain visible even when raised inside @.
-    /// Cold unwind paths restore suppression from lexical instruction ranges.
-    pub(crate) fn restore_silence(&mut self, depth: usize) {
-        self.suppression = depth;
-    }
-
-    pub(crate) fn end_all_silence(&mut self) {
-        self.suppression = 0;
-    }
-
-    pub(crate) fn is_visible(&self) -> bool {
-        self.suppression == 0
-    }
-
-    /// Return output for the embedding VM, or retain it while capturing diagnostics.
-    pub(crate) fn report(
-        &mut self,
-        kind: &str,
-        message: String,
-        file: &str,
-        line: usize,
-    ) -> Option<Vec<u8>> {
-        if !self.is_visible() {
-            return None;
+    pub(crate) fn suspend_silence(&mut self, depth: usize) -> Vec<i64> {
+        if depth < self.suppression.len() {
+            self.suppression.split_off(depth)
+        } else {
+            Vec::new()
         }
-        let bytes = format!("\n{kind}: {message} in {file} on line {line}\n").into_bytes();
+    }
+
+    pub(crate) fn resume_silence(&mut self, masks: Vec<i64>) {
+        self.suppression.extend(masks);
+    }
+
+    /// Captured diagnostics do not reach the script's output.
+    pub(super) fn display(&mut self, bytes: Vec<u8>) -> Option<Vec<u8>> {
         if let Some(capture) = &mut self.diagnostic_capture {
             capture.push(bytes);
             None
         } else {
             Some(bytes)
+        }
+    }
+}
+
+impl Vm {
+    pub(crate) fn begin_silence(&mut self) {
+        let reporting = self.error_handlers.reporting;
+        self.diagnostic_reporter.suppression.push(reporting);
+        if reporting & !FATAL_REPORTING_MASK != 0 {
+            self.error_handlers.reporting &= FATAL_REPORTING_MASK;
+            self.mark_reporting_ini_modified();
+        }
+    }
+
+    pub(crate) fn end_silence(&mut self) {
+        if let Some(saved) = self.diagnostic_reporter.suppression.pop()
+            && self.error_handlers.reporting & !FATAL_REPORTING_MASK == 0
+            && saved & !FATAL_REPORTING_MASK != 0
+        {
+            self.error_handlers.reporting = saved;
+        }
+    }
+
+    /// Unwinding an abandoned expression has the same mask rules as leaving it normally.
+    pub(crate) fn restore_silence(&mut self, depth: usize) {
+        while self.diagnostic_reporter.silence() > depth {
+            self.end_silence();
         }
     }
 }

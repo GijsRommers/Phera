@@ -4,7 +4,7 @@ use phera_extension_api::Value;
 
 use super::{rows, scalar};
 use crate::drivers::Prepared;
-use crate::placeholders::Sql;
+use crate::placeholders::{Sql, Syntax};
 use crate::pool::Lease;
 
 pub async fn dirty(driver: &mut Lease, name: &str) {
@@ -52,9 +52,10 @@ pub async fn dirty(driver: &mut Lease, name: &str) {
 pub async fn clean(driver: &mut Lease, name: &str) {
     let missing = driver
         .execute(
-            &Sql::parse("SELECT * FROM phera_pool_dirty".into()).unwrap(),
+            &Sql::parse("SELECT * FROM phera_pool_dirty".into(), Syntax::MYSQL).unwrap(),
             &Prepared::Emulated,
             &[],
+            Default::default(),
         )
         .await;
     assert!(missing.is_err(), "temporary table survived reset");
@@ -97,7 +98,7 @@ pub async fn clean(driver: &mut Lease, name: &str) {
         );
         assert_eq!(driver.last_id(None).await.unwrap(), "0");
     }
-    assert_eq!(rows(driver, "SELECT 1").await.values[0][0], Value::Int(1));
+    assert_eq!(scalar(driver, "SELECT 1").await, Value::Int(1));
 }
 
 /// A clean connection survives being reset many times in a row.
@@ -105,11 +106,11 @@ pub async fn reset_repeatedly(driver: &mut Lease) {
     for _ in 0..100 {
         driver.reset().await.unwrap();
     }
-    assert_eq!(rows(driver, "SELECT 1").await.values[0][0], Value::Int(1));
+    assert_eq!(scalar(driver, "SELECT 1").await, Value::Int(1));
 }
 
-/// Private tokio-postgres type-info statements cannot survive DISCARD ALL.
-pub async fn custom_types_retire_client() {
+/// DISCARD ALL removes custom types before the same socket is lent again.
+pub async fn reset_removes_custom_types() {
     let pool = super::TestPool::new("pgsql", super::options(1));
     let mut first = pool.connect().await;
     let original = super::id(&mut first, "pgsql").await;
@@ -127,7 +128,7 @@ pub async fn custom_types_retire_client() {
     );
     drop(first);
     let mut second = pool.connect().await;
-    assert_ne!(super::id(&mut second, "pgsql").await, original);
+    assert_eq!(super::id(&mut second, "pgsql").await, original);
     second
         .run_unprepared("CREATE TEMP TABLE pool_custom_init(id INT)")
         .await

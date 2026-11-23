@@ -16,6 +16,26 @@ use crate::{ConstId, FunctionId, IterId, NameId, PathId, Reg, StaticId, SymbolId
 ///   it never leaves `dst` half written.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Instruction {
+    /// Detach the frame after binding arguments and evaluating defaults.
+    GeneratorStart,
+    /// Publish a key and value. Resuming supplies the expression result in dst.
+    Yield {
+        dst: Reg,
+        key: Option<Reg>,
+        value: Option<Reg>,
+    },
+    /// Suspend on a delegate until its iteration has finished.
+    YieldFrom {
+        dst: Reg,
+        src: Reg,
+    },
+    /// Finish a generator with a return value independent of its declared type.
+    GeneratorReturn {
+        src: Reg,
+    },
+    /// Publish deprecation or discard diagnostics for an attributed declaration.
+    AttributeDiagnostics,
+
     /// Validate and coerce a pending return before calling finally; retain reference cells.
     CheckReturn {
         source: Reg,
@@ -48,6 +68,13 @@ pub enum Instruction {
         class: Reg,
         name: NameId,
     },
+    /// `FetchClassConstant` of a class the source names (`Post::LIMIT`):
+    /// the class is found by its symbol's name key, without a string.
+    FetchNamedClassConstant {
+        dst: Reg,
+        class: SymbolId,
+        name: NameId,
+    },
     /// Does nothing. Left behind when the compiler removes an instruction.
     Nop,
     /// Link a declaration once execution reaches its source position.
@@ -76,12 +103,26 @@ pub enum Instruction {
     Clone {
         dst: Reg,
         src: Reg,
+        with: Option<Reg>,
     },
     /// Test a resolved class or interface name without invoking autoloaders.
     InstanceOf {
         dst: Reg,
         src: Reg,
         class: SymbolId,
+    },
+    /// `src instanceof class`, branching on the answer instead of storing it:
+    /// jump to `target` when the answer is false. `InstanceOfBranchIf` jumps
+    /// when it is true.
+    InstanceOfBranch {
+        src: Reg,
+        class: SymbolId,
+        target: Target,
+    },
+    InstanceOfBranchIf {
+        src: Reg,
+        class: SymbolId,
+        target: Target,
     },
 
     // ----- Loading values -------------------------------------------------
@@ -163,6 +204,12 @@ pub enum Instruction {
         path: PathId,
         src: Reg,
     },
+    /// `<path> = $local`; `dst` is the value read after intermediate properties.
+    AssignPathFromLocal {
+        path: PathId,
+        src: Reg,
+        dst: Reg,
+    },
     /// `<path> op= src`; `dst` receives the new value.
     AssignOpPath {
         op: BinaryOp,
@@ -224,9 +271,22 @@ pub enum Instruction {
     },
 
     // ----- Operators ------------------------------------------------------
-    /// Compare a register to an integer and branch when the result is false.
-    /// The literal and target fit inline; no temporary boolean register is needed.
+    /// Compare a register to an integer literal and branch on the result,
+    /// jumping to `target` when the comparison is false. The literal and
+    /// target fit inline; no temporary boolean register is needed. Only
+    /// comparison operators appear here. The true case is `BinaryIntBranchIf`:
+    /// `when` cannot be decided by inverting `op`, because PHP's orderings are
+    /// not exact negations of each other (NAN compares false to everything,
+    /// including itself).
     BinaryIntBranch {
+        op: BinaryOp,
+        lhs: Reg,
+        rhs: i32,
+        target: Target,
+    },
+    /// Compare a register to an integer literal and branch on the result,
+    /// jumping to `target` when the comparison is true.
+    BinaryIntBranchIf {
         op: BinaryOp,
         lhs: Reg,
         rhs: i32,
@@ -245,6 +305,26 @@ pub enum Instruction {
         dst: Reg,
         lhs: Reg,
         rhs: Reg,
+    },
+    /// Compare two registers and branch on the result, jumping to `target`
+    /// when the comparison is false: the condition of an `if`, `while`, `for`,
+    /// `do-while`, ternary, `&&`, `||` or `!` written as one instruction,
+    /// without a temporary boolean. Only comparison operators appear here.
+    /// The comparison itself is `Binary`'s, so the two stay in step. The true
+    /// case is `BinaryBranchIf`.
+    BinaryBranch {
+        op: BinaryOp,
+        lhs: Reg,
+        rhs: Reg,
+        target: Target,
+    },
+    /// Compare two registers and branch on the result, jumping to `target`
+    /// when the comparison is true.
+    BinaryBranchIf {
+        op: BinaryOp,
+        lhs: Reg,
+        rhs: Reg,
+        target: Target,
     },
     Unary {
         op: UnaryOp,
@@ -362,10 +442,16 @@ pub enum Instruction {
     InitDynamicCall {
         callee: Reg,
     },
-    /// Passes a computed value. If the parameter is by reference, PHP
-    /// rejects this, except for function results, which pass with a notice.
+    /// Passes a computed value. A by-reference parameter rejects it, unless
+    /// the argument was written as a call or as `new` (`of_call`):
+    ///
+    /// ```php
+    /// end(explode(',', $list));   // Notice: Only variables should be passed by reference
+    /// end($a . $b);               // Error: could not be passed by reference
+    /// ```
     SendValue {
         src: Reg,
+        of_call: bool,
     },
     /// Passes a local variable: by reference if the parameter wants one,
     /// otherwise its value.
@@ -387,6 +473,41 @@ pub enum Instruction {
     /// Runs the prepared call; `dst` receives the return value.
     Call {
         dst: Reg,
+        result: CallResult,
+    },
+    /// `Assign` of a temporary read nowhere else: the value moves into the
+    /// local and `src` is left empty, where `Assign` would copy it and a
+    /// `Clear` release it afterwards.
+    AssignTake {
+        local: Reg,
+        src: Reg,
+    },
+    /// `SendValue` of a temporary read nowhere else: `src` is left empty
+    /// after the send, so no `Clear` follows.
+    SendTake {
+        src: Reg,
+        /// As in [`Instruction::SendValue`].
+        of_call: bool,
+    },
+    /// `local = constants[constant]`: a literal assigned where it is read,
+    /// in place of a `LoadConst` into a temporary and an `AssignTake` of it.
+    AssignConst {
+        local: Reg,
+        constant: ConstId,
+    },
+    /// Sends `constants[constant]`: a literal sent where it is read, in
+    /// place of a `LoadConst` into a temporary and a `SendTake` of it.
+    SendConst {
+        constant: ConstId,
+    },
+    /// The method call that [`crate::MethodSite`] `site` of the running
+    /// function describes, made at once when it is plain; otherwise the
+    /// `InitMethodCall`, `Send`s and `Call` that follow make it. `dst`
+    /// receives the return value.
+    CallMethod {
+        site: crate::MethodSiteId,
+        dst: Reg,
+        result: CallResult,
     },
     /// Calls a function declared unconditionally at the top level of this
     /// file, which therefore exists before any of the file's code runs. The
@@ -399,6 +520,7 @@ pub enum Instruction {
         args: Reg,
         count: u16,
         dst: Reg,
+        result: CallResult,
     },
     /// `f(...)`: instead of calling, puts the prepared callee into `dst` as a
     /// callable value.
@@ -431,6 +553,8 @@ pub enum Instruction {
         src: Reg,
     },
     ReturnNull,
+    /// A typed magic method fell off the end without returning a value.
+    ReturnMissing,
 
     // ----- Declarations and constants -------------------------------------
     /// Declares a function when execution reaches this point. Functions
@@ -494,6 +618,17 @@ pub enum Instruction {
         source: Reg,
         class: Reg,
     },
+    /// The evaluated-target form of `InstanceOfBranch` / `InstanceOfBranchIf`.
+    DynamicInstanceOfBranch {
+        src: Reg,
+        class: Reg,
+        target: Target,
+    },
+    DynamicInstanceOfBranchIf {
+        src: Reg,
+        class: Reg,
+        target: Target,
+    },
     /// Resolve literal static syntax before arguments. Both operands index immutable
     /// symbol data; method lookup spelling is already lowercase in the symbol table.
     /// This Copy/plain-data instruction owns no PHP values or runtime cache state.
@@ -526,6 +661,72 @@ pub enum Instruction {
         dst: Reg,
         function: FunctionId,
         binding: ClosureBinding,
+    },
+    /// A class constant whose identifier is computed, e.g. `Foo::{$name}`.
+    FetchDynamicClassConstant {
+        dst: Reg,
+        class: Reg,
+        name: Reg,
+    },
+    /// Compile and execute a string in the caller's scope.
+    Eval {
+        dst: Reg,
+        source: Reg,
+    },
+    BuiltinUnary {
+        op: crate::BuiltinUnary,
+        dst: Reg,
+        src: Reg,
+    },
+    /// The built-in an unqualified call in a namespace means, behind its
+    /// `GuardBuiltin`: as `BuiltinUnary`, except that a failure (a
+    /// `TypeError` for `strlen([])`) is raised as from a call of the
+    /// function, with its frame in the trace, as PHP calls it there.
+    NamespacedBuiltin {
+        op: crate::BuiltinUnary,
+        dst: Reg,
+        src: Reg,
+    },
+    /// Before an unqualified built-in call in a namespace (`is_null($x)` in
+    /// `namespace App;`): falls through to the built-in's own instruction
+    /// when the call means the global function, and jumps to `call`, the
+    /// general call, when a function of the namespace (`App\is_null`) was
+    /// declared when the site first ran. As in PHP, a site keeps what it
+    /// found then.
+    GuardBuiltin {
+        function: SymbolId,
+        call: Target,
+    },
+    /// Calls a statically known builtin with positional by-value arguments.
+    CallNativeDirect {
+        function: SymbolId,
+        args: Reg,
+        count: u16,
+        dst: Reg,
+        result: CallResult,
+    },
+    BuiltinFrame {
+        op: crate::BuiltinFrame,
+        dst: Reg,
+    },
+    ArrayKeyExists {
+        dst: Reg,
+        key: Reg,
+        array: Reg,
+    },
+    InLiteralArray {
+        dst: Reg,
+        needle: Reg,
+        haystack: ConstId,
+        strict: bool,
+    },
+    InitUserCallback {
+        callback: Reg,
+        arguments: crate::CallbackArguments,
+    },
+    SendUserCallback {
+        src: Reg,
+        arguments: crate::CallbackArguments,
     },
 }
 
@@ -597,8 +798,10 @@ pub enum FetchMode {
     Read,
     /// For `??`: missing things are null, silently.
     Quiet,
-    /// For `isset` and `empty`: native properties can supply a presence check.
+    /// For `isset`: native properties and overloaded dimensions can check presence.
     Isset,
+    /// For `empty`: overloaded dimensions check presence and then read the value.
+    Empty,
     /// For `[$a, $b] = $value`: missing keys warn; null yields null silently,
     /// while other non-array values warn and yield null in PHP 8.5.
     Destructure,
@@ -639,6 +842,8 @@ pub enum FinallyEntry {
     Break,
     /// A loop continuation waits at the continuation.
     Continue,
+    /// A jump to a PHP label waits at the continuation.
+    Goto,
 }
 
 /// Explicit uses warn for undefined values; arrows capture them silently.
@@ -654,4 +859,11 @@ pub enum CaptureKind {
 pub enum ClosureBinding {
     Bound,
     Static,
+}
+
+/// A caller may discard the result of a call used as a statement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CallResult {
+    Used,
+    Discarded,
 }

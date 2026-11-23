@@ -5,6 +5,7 @@
 
 mod classes;
 mod exceptions;
+pub mod legacy_tls;
 pub mod oracle;
 pub mod scripts;
 pub mod serve;
@@ -12,7 +13,10 @@ pub mod serve;
 pub use classes::{call_method, instantiate};
 pub use exceptions::materialize_exception;
 
-use std::rc::Rc;
+use std::{
+    rc::Rc,
+    task::{Context as TaskContext, Poll, Waker},
+};
 
 use phera_value::{CollectDiagnostics, Diagnostics, Object, PhpArray, Value};
 
@@ -73,7 +77,7 @@ impl Context for TestContext {
 
     fn create_object(&mut self, class: &str, properties: PhpArray) -> NativeResult {
         let object = Object::new(1, Rc::new(classes::NamedClass(class.to_string())));
-        object.update(|table| *table = properties);
+        object.update(|table| table.replace_all(properties));
         Ok(Value::Object(Rc::new(object)))
     }
 
@@ -86,11 +90,8 @@ impl Context for TestContext {
     }
 }
 
-/// Calls a sync native function the way the VM does: arguments are prepared
-/// against the signature first, then the body runs.
-///
-/// Fails for a name that is not registered and for async functions, which
-/// need a runtime to await them.
+/// Prepares native arguments and runs a handler that can complete immediately.
+/// A handler waiting on the runtime needs an integration test instead.
 pub fn call(
     registry: &Registry,
     context: &mut TestContext,
@@ -100,11 +101,37 @@ pub fn call(
     let entry: &FunctionEntry = registry
         .get_function(name)
         .ok_or_else(|| NativeError::error(format!("Call to undefined function {name}()")))?;
+    if matches!(
+        entry.handler,
+        NativeFn::DeprecatedSync(_) | NativeFn::DeprecatedAsync(_)
+    ) && let Some(message) = phera_source::deprecations::kept_notice(
+        phera_source::deprecations::ItemKind::Function,
+        entry.name,
+    ) {
+        crate::Context::deprecated(context, message.into());
+    }
     crate::prepare_arguments(entry, &mut arguments, context)?;
-    match entry.handler {
-        NativeFn::Sync(function) => function(context, &arguments),
-        NativeFn::Async(_) => Err(NativeError::error(format!(
-            "{name}() is async and cannot be called from testing::call"
-        ))),
+    let handler = if matches!(arguments.first(), Some(Value::Object(_))) {
+        registry
+            .object_handler(entry.name)
+            .map_or(entry.handler, NativeFn::Async)
+    } else {
+        entry.handler
+    };
+    match handler {
+        NativeFn::Sync(function) | NativeFn::DeprecatedSync(function) => {
+            function(context, &arguments)
+        }
+        NativeFn::Async(function) | NativeFn::DeprecatedAsync(function) => {
+            match function(context, arguments)
+                .as_mut()
+                .poll(&mut TaskContext::from_waker(Waker::noop()))
+            {
+                Poll::Ready(result) => result,
+                Poll::Pending => Err(NativeError::error(format!(
+                    "{name}() suspended without a test runtime"
+                ))),
+            }
+        }
     }
 }

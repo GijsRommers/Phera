@@ -2,10 +2,6 @@
 
 use phera_extension_api::Registry;
 
-/// The PHP version Phera reports. Code checks this to decide which language
-/// features it may use.
-const VERSION: (i64, i64, i64) = (8, 5, 0);
-
 const OS: &str = if cfg!(target_os = "macos") {
     "Darwin"
 } else if cfg!(target_os = "windows") {
@@ -38,8 +34,6 @@ const ERROR_LEVELS: &[(&str, i64)] = &[
     ("E_USER_ERROR", 256),
     ("E_USER_WARNING", 512),
     ("E_USER_NOTICE", 1024),
-    // No longer raised and no longer part of E_ALL, but old code names it.
-    ("E_STRICT", 2048),
     ("E_RECOVERABLE_ERROR", 4096),
     ("E_DEPRECATED", 8192),
     ("E_USER_DEPRECATED", 16384),
@@ -47,8 +41,13 @@ const ERROR_LEVELS: &[(&str, i64)] = &[
 ];
 
 pub(crate) fn register(registry: &mut Registry) {
-    let (major, minor, release) = VERSION;
-    registry.constant("PHP_VERSION", "8.5.0");
+    let mut version = phera_extension_api::PHP_VERSION
+        .split('.')
+        .map(|part| part.parse::<i64>().unwrap_or_default());
+    let major = version.next().unwrap_or_default();
+    let minor = version.next().unwrap_or_default();
+    let release = version.next().unwrap_or_default();
+    registry.constant("PHP_VERSION", phera_extension_api::PHP_VERSION);
     registry.constant("PHP_MAJOR_VERSION", major);
     registry.constant("PHP_MINOR_VERSION", minor);
     registry.constant("PHP_RELEASE_VERSION", release);
@@ -56,6 +55,8 @@ pub(crate) fn register(registry: &mut Registry) {
     registry.constant("PHP_EXTRA_VERSION", "");
     registry.constant("PHP_DEBUG", false);
     registry.constant("PHP_ZTS", false);
+    registry.constant("ZEND_DEBUG_BUILD", false);
+    registry.constant("ZEND_THREAD_SAFE", false);
 
     registry.constant("PHP_OS", OS);
     registry.constant("PHP_OS_FAMILY", OS_FAMILY);
@@ -82,9 +83,12 @@ pub(crate) fn register(registry: &mut Registry) {
     registry.constant("PHP_FLOAT_MIN", f64::MIN_POSITIVE);
     registry.constant("PHP_FLOAT_DIG", 15);
     registry.constant("NAN", f64::NAN);
+    registry.constant("DEBUG_BACKTRACE_PROVIDE_OBJECT", 1_i64);
+    registry.constant("DEBUG_BACKTRACE_IGNORE_ARGS", 2_i64);
     registry.constant("INF", f64::INFINITY);
 
     for &(name, level) in ERROR_LEVELS {
         registry.constant(name, level);
     }
+    registry.deprecated_constant("E_STRICT", 2048);
 }

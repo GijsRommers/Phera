@@ -1,7 +1,7 @@
 //! Deep input must never overflow the stack: a stack overflow cannot be caught
-//! and would abort the whole server process. Nesting beyond the parser's limit
-//! is an error; long left-deep chains, which generated code does produce, parse
-//! and drop fine.
+//! and would abort the whole server process. Nesting beyond the parser's limits
+//! is an error (PHP's "memory exhausted", or Phera's own limit); long chains,
+//! which generated code does produce, parse and drop fine.
 //!
 //! Every case runs on a deliberately small 2 MB stack, the default for threads
 //! in Rust, to prove the caller's stack size does not matter.
@@ -29,7 +29,7 @@ fn nested(open: &str, close: &str, depth: usize) -> String {
 
 fn assert_too_deep(name: &str, source: String) {
     match on_small_stack(source) {
-        Err(message) if message.contains("too deep") => {}
+        Err(message) if message.contains("too deep") || message == "memory exhausted" => {}
         other => panic!("{name}: expected a nesting error, got {other:?}"),
     }
 }
@@ -62,10 +62,6 @@ fn nesting_beyond_the_limit_is_an_error() {
             format!("<?php {}{}", "if(1){".repeat(DEEP), "}".repeat(DEEP)),
         ),
         (
-            "elseif chain",
-            format!("<?php if(1){{}}{}", "elseif(1){}".repeat(DEEP)),
-        ),
-        (
             "else if chain",
             format!("<?php if(1){{}}{}", "else if(1){}".repeat(DEEP)),
         ),
@@ -95,7 +91,9 @@ fn realistic_nesting_is_fine() {
         nested("[", "]", 300),
         nested("f(", ")", 300),
         format!("<?php {}{}", "if(1){".repeat(300), "}".repeat(300)),
-        format!("<?php if(1){{}}{}", "elseif(1){}".repeat(900)),
+        // At the limits: PHP's for statements, Phera's for arrays.
+        format!("<?php {}{}", "if(1){".repeat(1600), "}".repeat(1600)),
+        nested("[", "]", 2400),
     ] {
         assert_eq!(on_small_stack(source), Ok(()));
     }
@@ -109,6 +107,18 @@ fn long_chains_parse_and_drop() {
             "concatenation",
             format!("<?php {}'a';", "'a'.".repeat(DEEP)),
         ),
+        (
+            "assigned sum",
+            format!("<?php $total = {}1;", "1+".repeat(DEEP)),
+        ),
+        (
+            "exit argument",
+            format!("<?php exit({}1);", "1+".repeat(DEEP)),
+        ),
+        (
+            "clone argument",
+            format!("<?php clone({}1);", "1+".repeat(DEEP)),
+        ),
         ("logical or", format!("<?php {}1;", "1||".repeat(DEEP))),
         ("pipe", format!("<?php 1{};", "|>f(...)".repeat(DEEP))),
         ("indexing", format!("<?php $a{};", "[1]".repeat(DEEP))),
@@ -118,6 +128,18 @@ fn long_chains_parse_and_drop() {
         ("static calls", format!("<?php A{};", "::b()".repeat(DEEP))),
         ("statements", format!("<?php {}", "$a=1;".repeat(DEEP))),
         ("array items", format!("<?php $a=[{}];", "1,".repeat(DEEP))),
+        (
+            "elseif ladder",
+            format!("<?php if(1){{}}{}", "elseif(1){}".repeat(DEEP)),
+        ),
+        (
+            "assigned chain",
+            format!("<?php $x={}1;", "1+".repeat(DEEP)),
+        ),
+        (
+            "short ternaries",
+            format!("<?php $x=1{};", "?:1".repeat(DEEP)),
+        ),
     ];
 
     for (name, source) in cases {

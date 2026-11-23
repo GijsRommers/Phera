@@ -1,43 +1,78 @@
 //! PHP string offset reads use byte positions, including negative offsets.
 
 use phera_extension_api::{NativeError, NativeResult};
-use phera_value::{ArrayKey, PhpString, Value};
+use phera_value::{ArrayKey, Value};
 
 use crate::{Vm, access_mode::Missing};
 
 impl Vm {
-    /// A missing byte yields an empty string; ordinary reads also warn.
+    /// One byte of a string, as `$s[2]` or `$s[-1]`.
+    ///
+    /// What a position outside the string gives depends on who asks:
+    ///
+    /// ```php
+    /// $s = "abc";
+    /// echo $s[3];          // "" and "Warning: Uninitialized string offset 3"
+    /// isset($s[3]);        // false
+    /// $s[3] ?? 'default';  // 'default'
+    /// isset($s["x"]);      // false: not a position at all
+    /// echo $s["x"];        // TypeError
+    /// ```
+    ///
+    /// So for `isset`, `empty` and `??` the answer is null, which is how
+    /// they see "not there".
     pub(crate) fn read_string_offset(
         &mut self,
-        string: &PhpString,
+        string: &[u8],
         key: ArrayKey,
         missing: Missing,
     ) -> NativeResult {
+        let asking_whether_it_exists = missing != Missing::Warn;
         let index = match key {
             ArrayKey::Int(index) => index,
-            ArrayKey::String(key) => {
-                let name = key.to_string_lossy();
-                name.parse::<i64>().map_err(|_| {
-                    NativeError::type_error("Cannot access offset of type string on string")
-                })?
+            ArrayKey::Interned(_) | ArrayKey::String(_) => {
+                let bytes = key.as_str_bytes().expect("checked string key");
+                match String::from_utf8_lossy(bytes).parse::<i64>() {
+                    Ok(index) => index,
+                    // `isset` also takes an integer with spaces around it
+                    // (`" 1"`), as PHP's numeric strings allow.
+                    Err(_) if asking_whether_it_exists => match whole_integer(bytes) {
+                        Some(index) => index,
+                        None => return Ok(Value::Null),
+                    },
+                    Err(_) => {
+                        return Err(NativeError::type_error(
+                            "Cannot access offset of type string on string",
+                        ));
+                    }
+                }
             }
         };
-        let index = if index < 0 {
+        let from_start = if index < 0 {
             string.len() as i64 + index
         } else {
             index
         };
-        let value = if let Some(byte) = usize::try_from(index)
+        let byte = usize::try_from(from_start)
             .ok()
-            .and_then(|index| string.as_bytes().get(index))
-        {
-            Value::from(vec![*byte])
-        } else {
-            if missing == Missing::Warn {
-                self.warn(format!("Uninitialized string offset {index}"))
+            .and_then(|position| string.get(position));
+        Ok(match byte {
+            Some(byte) => Value::from(vec![*byte]),
+            None if asking_whether_it_exists => Value::Null,
+            None => {
+                self.warn(format!("Uninitialized string offset {index}"));
+                Value::from("")
             }
-            Value::from("")
-        };
-        Ok(value)
+        })
+    }
+}
+
+/// The integer a numeric string stands for, when all of it is one integer:
+/// `" 12"` and `"12 "` are 12; `"12x"`, `"1.5"` and `""` are none.
+fn whole_integer(bytes: &[u8]) -> Option<i64> {
+    let parsed = phera_value::parse_numeric(bytes);
+    match parsed.value {
+        Some(phera_value::NumVal::Int(index)) if parsed.exact => Some(index),
+        _ => None,
     }
 }

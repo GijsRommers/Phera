@@ -9,8 +9,10 @@
 //! The source PCRE2 compiles is the pattern body after `transform`, with
 //! PHP's match limits put in front of it as `(*LIMIT_...)` directives.
 
-use crate::pattern;
+use crate::mark::Marks;
+use crate::settings::Settings;
 use crate::transform::{self, Source};
+use crate::{mark_pattern, pattern};
 use pcre2::bytes::{CaptureLocations, Regex, RegexBuilder};
 use pcre2_sys::{
     PCRE2_ERROR_BAD_SUBPATTERN_REFERENCE, PCRE2_ERROR_CLASS_RANGE_ORDER,
@@ -21,10 +23,6 @@ use pcre2_sys::{
 };
 use std::cell::{Cell, OnceCell};
 
-/// `pcre.backtrack_limit` in php.ini, at its default.
-const BACKTRACK_LIMIT: u32 = 1_000_000;
-/// `pcre.recursion_limit` in php.ini, at its default.
-const RECURSION_LIMIT: u32 = 100_000;
 /// `PCRE_JIT_STACK_MAX_SIZE` in php-src's php_pcre.c.
 const JIT_STACK_MAX_SIZE: usize = 192 * 1024;
 
@@ -44,6 +42,7 @@ const REPORTED_ONE_BYTE_LATER: [u32; 9] = [
 
 pub(crate) struct Compiled {
     pub regex: Regex,
+    pub marks: Option<Box<Marks>>,
     /// Whether the subject is UTF-8: `/u`, or `(*UTF)` in the pattern.
     pub utf: bool,
     /// The pattern for the retry after an empty match (see `scan.rs`),
@@ -80,7 +79,7 @@ impl Compiled {
 
 /// Compiles a pattern with its delimiters and modifiers. The error is PHP's
 /// warning text, without the function name.
-pub(crate) fn compile(bytes: &[u8]) -> Result<Compiled, String> {
+pub(crate) fn compile(bytes: &[u8], settings: Settings) -> Result<Compiled, String> {
     let parsed = pattern::parse(bytes)?;
     let options = &parsed.options;
     if options.utf {
@@ -95,12 +94,12 @@ pub(crate) fn compile(bytes: &[u8]) -> Result<Compiled, String> {
         .extended(options.extended)
         .utf(options.utf)
         .ucp(options.utf)
-        .jit_if_available(true)
+        .jit_if_available(settings.jit)
         .max_jit_stack_size(Some(JIT_STACK_MAX_SIZE));
     // Directives such as (*UTF) must stay first; the limits and the inline
     // options for U, J, n and r go right after them.
     let startup = transform::startup_end(&source.text);
-    let limits = limits(&source.text[..startup]);
+    let limits = limits(&source.text[..startup], settings);
     let inline = if options.inline.is_empty() {
         String::new()
     } else {
@@ -129,8 +128,18 @@ pub(crate) fn compile(bytes: &[u8]) -> Result<Compiled, String> {
     } else {
         regex
     };
+    let marks = mark_pattern::insert(&source, startup, parsed.body, options).map(|probe| {
+        Box::new(Marks::new(
+            builder.clone(),
+            probe,
+            &prefix,
+            source.closing,
+            options.anchored,
+        ))
+    });
     Ok(Compiled {
         regex,
+        marks,
         utf: options.utf || source.text[..startup].contains("(*UTF"),
         retry_source: format!("(*NOTEMPTY_ATSTART){anchored}"),
         retry_regex: OnceCell::new(),
@@ -194,9 +203,9 @@ fn compile_error(
 
 /// PHP's limits as directives. Directives in the pattern may lower them,
 /// never raise them.
-fn limits(startup: &str) -> String {
-    let mut match_limit = BACKTRACK_LIMIT;
-    let mut depth_limit = RECURSION_LIMIT;
+fn limits(startup: &str, settings: Settings) -> String {
+    let mut match_limit = settings.backtrack;
+    let mut depth_limit = settings.recursion;
     for directive in startup.split("(*").skip(1) {
         let Some((name, value)) = directive.trim_end_matches(')').split_once('=') else {
             continue;
@@ -205,8 +214,8 @@ fn limits(startup: &str) -> String {
             continue;
         };
         match name {
-            "LIMIT_MATCH" => match_limit = value.min(BACKTRACK_LIMIT),
-            "LIMIT_DEPTH" | "LIMIT_RECURSION" => depth_limit = value.min(RECURSION_LIMIT),
+            "LIMIT_MATCH" => match_limit = value.min(settings.backtrack),
+            "LIMIT_DEPTH" | "LIMIT_RECURSION" => depth_limit = value.min(settings.recursion),
             _ => {}
         }
     }

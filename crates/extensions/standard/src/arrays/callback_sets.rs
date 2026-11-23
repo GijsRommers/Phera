@@ -80,7 +80,7 @@ const ARRAY_UDIFF: FunctionEntry = FunctionEntry::asynchronous(
     // PHP checks the callbacks at the end before the arrays, and needs one
     // more argument per callback; run() does all of it, in that order.
     &[
-        Param::new("array", ParamType::Mixed).optional(),
+        Param::new("array", ParamType::Mixed).arity_checked_by_handler(),
         Param::new("rest", ParamType::Mixed).variadic(),
     ],
     array_udiff,
@@ -103,7 +103,7 @@ const ARRAY_UDIFF_ASSOC: FunctionEntry = FunctionEntry::asynchronous(
     // PHP checks the callbacks at the end before the arrays, and needs one
     // more argument per callback; run() does all of it, in that order.
     &[
-        Param::new("array", ParamType::Mixed).optional(),
+        Param::new("array", ParamType::Mixed).arity_checked_by_handler(),
         Param::new("rest", ParamType::Mixed).variadic(),
     ],
     array_udiff_assoc,
@@ -129,7 +129,7 @@ const ARRAY_UDIFF_UASSOC: FunctionEntry = FunctionEntry::asynchronous(
     // PHP checks the callbacks at the end before the arrays, and needs one
     // more argument per callback; run() does all of it, in that order.
     &[
-        Param::new("array", ParamType::Mixed).optional(),
+        Param::new("array", ParamType::Mixed).arity_checked_by_handler(),
         Param::new("rest", ParamType::Mixed).variadic(),
     ],
     array_udiff_uassoc,
@@ -155,7 +155,7 @@ const ARRAY_DIFF_UKEY: FunctionEntry = FunctionEntry::asynchronous(
     // PHP checks the callbacks at the end before the arrays, and needs one
     // more argument per callback; run() does all of it, in that order.
     &[
-        Param::new("array", ParamType::Mixed).optional(),
+        Param::new("array", ParamType::Mixed).arity_checked_by_handler(),
         Param::new("rest", ParamType::Mixed).variadic(),
     ],
     array_diff_ukey,
@@ -181,7 +181,7 @@ const ARRAY_DIFF_UASSOC: FunctionEntry = FunctionEntry::asynchronous(
     // PHP checks the callbacks at the end before the arrays, and needs one
     // more argument per callback; run() does all of it, in that order.
     &[
-        Param::new("array", ParamType::Mixed).optional(),
+        Param::new("array", ParamType::Mixed).arity_checked_by_handler(),
         Param::new("rest", ParamType::Mixed).variadic(),
     ],
     array_diff_uassoc,
@@ -207,7 +207,7 @@ const ARRAY_UINTERSECT: FunctionEntry = FunctionEntry::asynchronous(
     // PHP checks the callbacks at the end before the arrays, and needs one
     // more argument per callback; run() does all of it, in that order.
     &[
-        Param::new("array", ParamType::Mixed).optional(),
+        Param::new("array", ParamType::Mixed).arity_checked_by_handler(),
         Param::new("rest", ParamType::Mixed).variadic(),
     ],
     array_uintersect,
@@ -233,7 +233,7 @@ const ARRAY_UINTERSECT_ASSOC: FunctionEntry = FunctionEntry::asynchronous(
     // PHP checks the callbacks at the end before the arrays, and needs one
     // more argument per callback; run() does all of it, in that order.
     &[
-        Param::new("array", ParamType::Mixed).optional(),
+        Param::new("array", ParamType::Mixed).arity_checked_by_handler(),
         Param::new("rest", ParamType::Mixed).variadic(),
     ],
     array_uintersect_assoc,
@@ -259,7 +259,7 @@ const ARRAY_UINTERSECT_UASSOC: FunctionEntry = FunctionEntry::asynchronous(
     // PHP checks the callbacks at the end before the arrays, and needs one
     // more argument per callback; run() does all of it, in that order.
     &[
-        Param::new("array", ParamType::Mixed).optional(),
+        Param::new("array", ParamType::Mixed).arity_checked_by_handler(),
         Param::new("rest", ParamType::Mixed).variadic(),
     ],
     array_uintersect_uassoc,
@@ -285,7 +285,7 @@ const ARRAY_INTERSECT_UKEY: FunctionEntry = FunctionEntry::asynchronous(
     // PHP checks the callbacks at the end before the arrays, and needs one
     // more argument per callback; run() does all of it, in that order.
     &[
-        Param::new("array", ParamType::Mixed).optional(),
+        Param::new("array", ParamType::Mixed).arity_checked_by_handler(),
         Param::new("rest", ParamType::Mixed).variadic(),
     ],
     array_intersect_ukey,
@@ -311,7 +311,7 @@ const ARRAY_INTERSECT_UASSOC: FunctionEntry = FunctionEntry::asynchronous(
     // PHP checks the callbacks at the end before the arrays, and needs one
     // more argument per callback; run() does all of it, in that order.
     &[
-        Param::new("array", ParamType::Mixed).optional(),
+        Param::new("array", ParamType::Mixed).arity_checked_by_handler(),
         Param::new("rest", ParamType::Mixed).variadic(),
     ],
     array_intersect_uassoc,
@@ -330,7 +330,68 @@ fn array_intersect_uassoc(
     Box::pin(run(context, arguments, variant))
 }
 
+pub(super) fn intersect_strings(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    let variant = Variant {
+        function: "array_intersect",
+        result: SetResult::Intersection,
+        values: Values::Strings,
+        keys: Keys::Ignored,
+    };
+    run_builtin_string_set(context, arguments, variant)
+}
+
+pub(super) fn intersect_associative_strings(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    run_builtin_string_set(
+        context,
+        arguments,
+        Variant {
+            function: "array_intersect_assoc",
+            result: SetResult::Intersection,
+            values: Values::Strings,
+            keys: Keys::Exact,
+        },
+    )
+}
+
+pub(super) fn diff_associative_strings(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    run_builtin_string_set(
+        context,
+        arguments,
+        Variant {
+            function: "array_diff_assoc",
+            result: SetResult::Difference,
+            values: Values::Strings,
+            keys: Keys::Exact,
+        },
+    )
+}
+
+fn run_builtin_string_set(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+    variant: Variant,
+) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move {
+        run_set(context, &arguments, variant)
+            .await
+            .map_err(|error| context.native_call_error(variant.function, &arguments, error))
+    })
+}
+
 async fn run(context: &mut dyn Context, arguments: Vec<Value>, variant: Variant) -> NativeResult {
+    run_set(context, &arguments, variant).await
+}
+
+async fn run_set(context: &mut dyn Context, arguments: &[Value], variant: Variant) -> NativeResult {
     let name = variant.function;
     let user_data = variant.values == Values::Callback;
     let user_keys = variant.keys == Keys::Callback;

@@ -110,7 +110,8 @@ impl Vm {
             context,
             binding,
             captures: Vec::new(),
-            statics: Default::default(),
+            statics: (!self.code.function(index).statics.is_empty())
+                .then(|| Rc::new(std::cell::RefCell::new(Default::default()))),
         };
         let object = self.allocate_closure(state)?;
         Ok(object)

@@ -18,7 +18,9 @@ pub(super) enum Container {
 
 #[derive(Debug)]
 pub(super) enum Token {
-    /// A string, number, `true`, `false` or `null`.
+    /// The text is kept only when decoding.
+    String(Option<Vec<u8>>),
+    /// A number, `true`, `false` or `null`.
     Value(Value),
     Open(Container),
     Close(Container),
@@ -32,14 +34,16 @@ pub(super) struct Scanner<'a> {
     bytes: &'a [u8],
     pos: usize,
     flags: DecodeFlags,
+    build_values: bool,
 }
 
 impl<'a> Scanner<'a> {
-    pub fn new(bytes: &'a [u8], flags: DecodeFlags) -> Self {
+    pub fn new(bytes: &'a [u8], flags: DecodeFlags, build_values: bool) -> Self {
         Self {
             bytes,
             pos: 0,
             flags,
+            build_values,
         }
     }
 
@@ -66,7 +70,7 @@ impl<'a> Scanner<'a> {
             Some(b'}') => Token::Close(Container::Object),
             Some(b':') => Token::Colon,
             Some(b',') => Token::Comma,
-            Some(b'"') => Token::Value(Value::from(self.string()?)),
+            Some(b'"') => Token::String(self.string()?),
             Some(b'-' | b'0'..=b'9') => {
                 self.pos -= 1;
                 Token::Value(self.number()?)
@@ -128,8 +132,8 @@ impl<'a> Scanner<'a> {
     }
 
     /// The bytes of a string, after its opening quote, with escapes decoded.
-    fn string(&mut self) -> Result<Vec<u8>, Error> {
-        let mut output = Vec::new();
+    fn string(&mut self) -> Result<Option<Vec<u8>>, Error> {
+        let mut output = self.build_values.then(Vec::new);
         loop {
             match self.peek() {
                 None => return Err(Error::Control),
@@ -139,13 +143,21 @@ impl<'a> Scanner<'a> {
                 }
                 Some(b'\\') => {
                     self.pos += 1;
-                    self.escape(&mut output)?;
+                    self.escape(output.as_mut())?;
                 }
                 Some(0..=31) => return Err(Error::Control),
                 Some(_) => match self.utf8() {
-                    Ok(bytes) => output.extend_from_slice(bytes),
+                    Ok(bytes) => {
+                        if let Some(output) = &mut output {
+                            output.extend_from_slice(bytes);
+                        }
+                    }
                     Err(error) => match self.flags.invalid_utf8 {
-                        InvalidUtf8::Substitute => output.extend_from_slice("\u{fffd}".as_bytes()),
+                        InvalidUtf8::Substitute => {
+                            if let Some(output) = &mut output {
+                                output.extend_from_slice("\u{fffd}".as_bytes());
+                            }
+                        }
                         InvalidUtf8::Ignore => {}
                         InvalidUtf8::Fail => return Err(error),
                     },
@@ -154,7 +166,7 @@ impl<'a> Scanner<'a> {
         }
     }
 
-    fn escape(&mut self, output: &mut Vec<u8>) -> Result<(), Error> {
+    fn escape(&mut self, output: Option<&mut Vec<u8>>) -> Result<(), Error> {
         let byte = match self.take() {
             Some(b'"') => b'"',
             Some(b'\\') => b'\\',
@@ -166,13 +178,17 @@ impl<'a> Scanner<'a> {
             Some(b't') => 9,
             Some(b'u') => {
                 let scalar = self.unicode()?;
-                let mut bytes = [0; 4];
-                output.extend_from_slice(scalar.encode_utf8(&mut bytes).as_bytes());
+                if let Some(output) = output {
+                    let mut bytes = [0; 4];
+                    output.extend_from_slice(scalar.encode_utf8(&mut bytes).as_bytes());
+                }
                 return Ok(());
             }
             _ => return Err(Error::Syntax),
         };
-        output.push(byte);
+        if let Some(output) = output {
+            output.push(byte);
+        }
         Ok(())
     }
 
@@ -238,6 +254,9 @@ impl<'a> Scanner<'a> {
                 return Err(Error::Syntax);
             }
             self.digits();
+        }
+        if !self.build_values {
+            return Ok(Value::Null);
         }
         let text = std::str::from_utf8(self.bytes.get(start..self.pos).ok_or(Error::Syntax)?)
             .map_err(|_| Error::Syntax)?;

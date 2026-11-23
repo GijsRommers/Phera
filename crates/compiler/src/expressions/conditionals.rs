@@ -23,7 +23,22 @@ impl Compiler<'_> {
             ast::CastKind::Object => Unary::Object,
             _ => return Err(self.error("Cast not supported yet", line)),
         };
+        let start = self.position();
         let src = self.compile_expression(operand)?;
+        if operator == Unary::Int
+            && let [
+                Instruction::Load {
+                    destination,
+                    constant,
+                },
+            ] = &self.function.instructions[start..]
+            && *destination == src
+            && let Some(value) = self.function.constants.get_mut(*constant)
+            && let Constant::Bool(boolean) = value
+        {
+            *value = Constant::Int(i64::from(*boolean));
+            return Ok(src);
+        }
         let dst = self.allocate_register()?;
         self.emit(
             Instruction::Unary {
@@ -44,8 +59,35 @@ impl Compiler<'_> {
         otherwise: &ast::Expression,
         line: usize,
     ) -> Result<Reg, CompileError> {
-        let condition = self.compile_expression(condition)?;
         let dst = self.allocate_register()?;
+        if let Some(then_expression) = then {
+            // Both branches write `dst`, so the condition branches directly.
+            let jumps = self.compile_condition(condition, false, line)?;
+            let src = self.compile_expression(then_expression)?;
+            self.emit(
+                Instruction::Move {
+                    destination: dst,
+                    source: src,
+                },
+                line,
+            );
+            let end = self.emit(Instruction::Jump(Target(0)), line);
+            for jump in &jumps {
+                self.patch(*jump, self.position());
+            }
+            let src = self.compile_expression(otherwise)?;
+            self.emit(
+                Instruction::Move {
+                    destination: dst,
+                    source: src,
+                },
+                line,
+            );
+            self.patch(end, self.position());
+            return Ok(dst);
+        }
+        // `$condition ?: $otherwise` keeps the condition's own value.
+        let condition = self.compile_expression(condition)?;
         self.emit(
             Instruction::Move {
                 destination: dst,
@@ -61,16 +103,6 @@ impl Compiler<'_> {
             },
             line,
         );
-        if let Some(then_expression) = then {
-            let src = self.compile_expression(then_expression)?;
-            self.emit(
-                Instruction::Move {
-                    destination: dst,
-                    source: src,
-                },
-                line,
-            );
-        }
         let end = self.emit(Instruction::Jump(Target(0)), line);
         self.patch(jump, self.position());
         let src = self.compile_expression(otherwise)?;
@@ -83,6 +115,32 @@ impl Compiler<'_> {
         );
         self.patch(end, self.position());
         Ok(dst)
+    }
+
+    /// An evaluated string can observe and modify any caller variable.
+    pub(crate) fn compile_eval(&mut self, code: &ast::Expression) -> Result<Reg, CompileError> {
+        self.function.dynamic_scope = true;
+        let source = self.compile_expression(code)?;
+        let destination = self.allocate_register()?;
+        // Zend emits eval after visiting its operand. Heredoc's first string
+        // token starts after the opener, unlike an ordinary quoted literal.
+        let text = self
+            .source
+            .get(code.span.start..code.span.end)
+            .unwrap_or_default();
+        let content = text
+            .strip_prefix(b"b")
+            .or_else(|| text.strip_prefix(b"B"))
+            .unwrap_or(text);
+        let line = self.lines.line(code.span.start) + usize::from(content.starts_with(b"<<<"));
+        self.emit(
+            Instruction::Eval {
+                destination,
+                source,
+            },
+            line,
+        );
+        Ok(destination)
     }
 
     /// Includes need dynamic scope because included code sees local variables.

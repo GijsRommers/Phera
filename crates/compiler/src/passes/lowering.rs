@@ -1,5 +1,7 @@
 //! Instruction translation and interning of access paths.
 
+use std::collections::{HashMap, HashSet};
+
 use phera_bytecode::{
     CastKind, Function, FunctionId, IncludeKind, Instruction, IterId, Reg, RuntimeError, Target,
     UnaryOp,
@@ -11,7 +13,7 @@ use crate::{
     passes::lowering_tables::{binary, path, static_id},
 };
 
-impl Tables {
+impl Tables<'_> {
     /// Translate one IR instruction, appending any required preparation instructions first.
     pub(crate) fn instruction(
         &mut self,
@@ -22,6 +24,21 @@ impl Tables {
     ) {
         use ir::Instruction as Old;
         let instruction = match source {
+            Old::GeneratorStart => Instruction::GeneratorStart,
+            Old::Yield {
+                destination: dst,
+                key,
+                value,
+            } => Instruction::Yield { dst, key, value },
+            Old::YieldFrom {
+                destination: dst,
+                source: src,
+            } => Instruction::YieldFrom { dst, src },
+            Old::CheckReturn { .. } if function.is_generator => Instruction::Nop,
+            Old::Return(src) | Old::ReturnChecked { source: src } if function.is_generator => {
+                Instruction::GeneratorReturn { src }
+            }
+            Old::AttributeDiagnostics => Instruction::AttributeDiagnostics,
             Old::ThisOrNull { destination: dst } => Instruction::ThisOrNull { dst },
             Old::Capture { source: src, kind } => Instruction::Capture { src, kind },
             Old::Closure {
@@ -34,6 +51,7 @@ impl Tables {
                 binding,
             },
             Old::CheckReturn { source } => Instruction::CheckReturn { source },
+            Old::ReturnMissing => Instruction::ReturnMissing,
             Old::ReturnChecked { source } => Instruction::ReturnChecked { source },
             Old::FinallyCall {
                 state,
@@ -56,6 +74,11 @@ impl Tables {
                 method: self.symbol(&method, None, crate::policies::NameKind::Function),
                 binding,
             },
+            Old::DynamicClassConstant {
+                destination: dst,
+                class,
+                name,
+            } => Instruction::FetchDynamicClassConstant { dst, class, name },
             Old::ClassConstant {
                 destination,
                 class,
@@ -63,6 +86,15 @@ impl Tables {
             } => Instruction::FetchClassConstant {
                 dst: destination,
                 class,
+                name: self.name(&name),
+            },
+            Old::NamedClassConstant {
+                destination,
+                class,
+                name,
+            } => Instruction::FetchNamedClassConstant {
+                dst: destination,
+                class: self.symbol(&class, None, crate::policies::NameKind::Class),
                 name: self.name(&name),
             },
             Old::NewDynamic { class } => Instruction::NewDynamic { class },
@@ -105,9 +137,11 @@ impl Tables {
             Old::Clone {
                 destination,
                 source,
+                with,
             } => Instruction::Clone {
                 dst: destination,
                 src: source,
+                with,
             },
             Old::InstanceOf {
                 destination,
@@ -162,7 +196,10 @@ impl Tables {
                 function: self.symbol(&name, fallback, crate::policies::NameKind::Function),
             },
             Old::StartDynamicCall { callee } => Instruction::InitDynamicCall { callee },
-            Old::FinishCall { destination: dst } => Instruction::Call { dst },
+            Old::FinishCall {
+                destination: dst,
+                result,
+            } => Instruction::Call { dst, result },
             Old::FinishCallable { destination: dst } => Instruction::MakeCallable { dst },
             Old::Send { argument } => self.send_argument(function, argument),
             Old::IncPlace {
@@ -202,6 +239,15 @@ impl Tables {
                 mode,
             } => self.read_place(function, dst, place, mode),
             Old::Write { place, source: src } => self.write_place(function, place, src),
+            Old::WriteFromLocal {
+                place,
+                source: src,
+                destination: dst,
+            } => Instruction::AssignPathFromLocal {
+                path: path(self, function, place),
+                src,
+                dst,
+            },
             Old::Reference {
                 destination: dst,
                 place,
@@ -217,6 +263,20 @@ impl Tables {
             Old::Unset(place) => Instruction::UnsetPath {
                 path: path(self, function, place),
             },
+            // A register that a long `.` chain or interpolated string builds
+            // up appends in place (see `appending_registers`).
+            Old::Binary {
+                destination,
+                operator: ir::Binary::Concat,
+                left,
+                right,
+            } if destination == left && left != right && self.appending.contains(&destination) => {
+                Instruction::AssignOp {
+                    op: phera_bytecode::BinaryOp::Concat,
+                    local: destination,
+                    src: right,
+                }
+            }
             Old::Binary {
                 destination: dst,
                 operator: op,
@@ -266,6 +326,47 @@ impl Tables {
                     },
                 },
             },
+            Old::BuiltinUnary {
+                destination: dst,
+                operator: op,
+                source: src,
+            } => Instruction::BuiltinUnary { op, dst, src },
+            Old::NamespacedBuiltin {
+                destination: dst,
+                operator: op,
+                source: src,
+            } => Instruction::NamespacedBuiltin { op, dst, src },
+            Old::BuiltinFrame {
+                destination: dst,
+                operator: op,
+            } => Instruction::BuiltinFrame { op, dst },
+            Old::ArrayKeyExists {
+                destination: dst,
+                key,
+                array,
+            } => Instruction::ArrayKeyExists { dst, key, array },
+            Old::InLiteralArray {
+                destination: dst,
+                needle,
+                haystack,
+                strict,
+            } => Instruction::InLiteralArray {
+                dst,
+                needle,
+                haystack: self.literal_array(haystack),
+                strict,
+            },
+            Old::InitUserCallback {
+                callback,
+                arguments,
+            } => Instruction::InitUserCallback {
+                callback,
+                arguments,
+            },
+            Old::SendUserCallback {
+                source: src,
+                arguments,
+            } => Instruction::SendUserCallback { src, arguments },
             Old::Echo(src) => Instruction::Echo { src },
             Old::Jump(target) => Instruction::Jump {
                 target: Target(target.0 as u32),
@@ -291,6 +392,109 @@ impl Tables {
                 value,
                 target: Target(target.0 as u32),
             },
+            Old::BranchNotNull { value, target } => Instruction::JumpIfNotNull {
+                value,
+                target: Target(target.0 as u32),
+            },
+            Old::GuardBuiltin {
+                name,
+                fallback,
+                call,
+            } => Instruction::GuardBuiltin {
+                function: self.symbol(&name, fallback, crate::policies::NameKind::Function),
+                call: Target(call.0 as u32),
+            },
+            Old::BranchCompare {
+                operator,
+                left,
+                right,
+                target,
+                when,
+            } => {
+                let target = Target(target.0 as u32);
+                if when {
+                    Instruction::BinaryBranchIf {
+                        op: binary(operator),
+                        lhs: left,
+                        rhs: right,
+                        target,
+                    }
+                } else {
+                    Instruction::BinaryBranch {
+                        op: binary(operator),
+                        lhs: left,
+                        rhs: right,
+                        target,
+                    }
+                }
+            }
+            Old::BranchCompareInt {
+                operator,
+                left,
+                rhs,
+                target,
+                when,
+            } => {
+                let target = Target(target.0 as u32);
+                if when {
+                    Instruction::BinaryIntBranchIf {
+                        op: binary(operator),
+                        lhs: left,
+                        rhs,
+                        target,
+                    }
+                } else {
+                    Instruction::BinaryIntBranch {
+                        op: binary(operator),
+                        lhs: left,
+                        rhs,
+                        target,
+                    }
+                }
+            }
+            Old::BranchInstanceOf {
+                source,
+                class,
+                target,
+                when,
+            } => {
+                let target = Target(target.0 as u32);
+                let class = self.symbol(&class, None, crate::policies::NameKind::Class);
+                if when {
+                    Instruction::InstanceOfBranchIf {
+                        src: source,
+                        class,
+                        target,
+                    }
+                } else {
+                    Instruction::InstanceOfBranch {
+                        src: source,
+                        class,
+                        target,
+                    }
+                }
+            }
+            Old::BranchDynamicInstanceOf {
+                source,
+                class,
+                target,
+                when,
+            } => {
+                let target = Target(target.0 as u32);
+                if when {
+                    Instruction::DynamicInstanceOfBranchIf {
+                        src: source,
+                        class,
+                        target,
+                    }
+                } else {
+                    Instruction::DynamicInstanceOfBranch {
+                        src: source,
+                        class,
+                        target,
+                    }
+                }
+            }
             Old::Suppress(true) => Instruction::BeginSilence,
             Old::Suppress(false) => Instruction::EndSilence,
             Old::ReturnReference(src) => Instruction::ReturnReference { src },
@@ -302,15 +506,14 @@ impl Tables {
                 key,
                 value: src,
                 spread,
-            } => {
-                if spread {
-                    Instruction::ArraySpread { array, src }
-                } else if let Some(key) = key {
-                    Instruction::ArraySetReference { array, key, src }
-                } else {
-                    Instruction::ArrayPushReference { array, src }
-                }
-            }
+                by_reference,
+            } => match (spread, key, by_reference) {
+                (true, _, _) => Instruction::ArraySpread { array, src },
+                (false, Some(key), true) => Instruction::ArraySetReference { array, key, src },
+                (false, Some(key), false) => Instruction::ArraySet { array, key, src },
+                (false, None, true) => Instruction::ArrayPushReference { array, src },
+                (false, None, false) => Instruction::ArrayPush { array, src },
+            },
             Old::Constant {
                 destination: dst,
                 name,
@@ -330,6 +533,10 @@ impl Tables {
                 local,
                 name: self.name(&name),
             },
+            Old::Eval {
+                destination: dst,
+                source,
+            } => Instruction::Eval { dst, source },
             Old::Include {
                 destination: dst,
                 path,
@@ -366,6 +573,10 @@ impl Tables {
                     }
                 }
             }
+            Old::Nop => return,
+            Old::IterEnd(iterator) => Instruction::IterEnd {
+                iter: IterId(iterator.0),
+            },
             Old::IterNext {
                 iterator: id,
                 key,
@@ -389,12 +600,47 @@ impl Tables {
                 detail: subject,
             },
             Old::Call {
+                result,
                 destination: dst,
                 name,
                 fallback,
                 arguments,
-            } => self.dynamic_call(function, dst, name, fallback, arguments),
+            } => self.dynamic_call(function, dst, name, fallback, arguments, result),
         };
         function.instructions.push(instruction);
     }
+}
+
+/// How many pieces a register must have appended onto itself before the
+/// appending is done in place.
+const LONG_CONCATENATION: usize = 16;
+
+/// The registers onto which a function concatenates at least
+/// [`LONG_CONCATENATION`] pieces, as a long `.` chain or interpolated string
+/// does: `"<td>$a</td><td>$b</td>..."`.
+///
+/// Such a register appends in place (`AssignOp`), because copying the
+/// growing string at every step would make a template of n pieces take n²
+/// time. A short concatenation such as `$prefix . ':' . $name` stays a plain
+/// `Binary`, which is cheaper per step.
+pub(crate) fn appending_registers(instructions: &[ir::Instruction]) -> HashSet<Reg> {
+    let mut steps: HashMap<Reg, usize> = HashMap::new();
+    for instruction in instructions {
+        if let ir::Instruction::Binary {
+            destination,
+            operator: ir::Binary::Concat,
+            left,
+            right,
+        } = instruction
+            && destination == left
+            && left != right
+        {
+            *steps.entry(*destination).or_default() += 1;
+        }
+    }
+    steps
+        .into_iter()
+        .filter(|&(_, count)| count >= LONG_CONCATENATION)
+        .map(|(register, _)| register)
+        .collect()
 }

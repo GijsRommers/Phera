@@ -3,6 +3,7 @@ resolver = "3"
 
 members = [
     "crates/cli",
+    "crates/packages",
     "crates/dotenv",
     "crates/analyzer",
     "crates/lexer",
@@ -19,6 +20,7 @@ members = [
     "crates/extension-api",
     "crates/sqlite",
     "crates/io-pool",
+    "crates/db-drivers",
     "crates/extensions/*",
 ]
 
@@ -34,15 +36,35 @@ license = "MIT OR Apache-2.0"
 unsafe_code = "forbid"
 
 [workspace.dependencies]
-rustls-rustcrypto = "=0.1.0-pre.0"
-redis = { version = "=1.0.5", default-features = false, features = ["tokio-comp", "tokio-rustls-comp", "tls-rustls-webpki-roots"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+webpki = { package = "rustls-webpki", version = "0.103", default-features = false }
+rustls-native-certs = "0.8"
+tokio-rustls = { version = "0.26", default-features = false, features = ["tls12"] }
+webpki-roots = "1"
+futures-core = "0.3"
+fallible-iterator = "0.2"
+futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
+rcgen = { version = "0.14", default-features = false, features = ["ring", "pem"] }
+rsa = { version = "0.10", features = ["pkcs1v15"] }
+sha1_011 = { package = "sha1", version = "0.11" }
+redis = { version = "=1.0.5", default-features = false, features = ["tokio-comp"] }
+phera-ext-reflection = { path = "crates/extensions/reflection" }
 phera-ext-redis = { path = "crates/extensions/redis" }
+phera-db-drivers = { path = "crates/db-drivers" }
 phera-io-pool = { path = "crates/io-pool" }
 phera-dotenv = { path = "crates/dotenv" }
+ab_glyph_rasterizer = "0.1.10"
+skrifa = { version = "0.50.0", default-features = false, features = ["std"] }
+gif = "0.14.2"
+jpeg-encoder = "0.7.1"
+image = { version = "0.25.10", default-features = false, features = ["bmp", "jpeg", "webp"] }
+png = "0.18.1"
 indexmap = "2"
+itoa = "1"
 regex = "1"
 phera-analyzer = { path = "crates/analyzer" }
 phera-lexer = { path = "crates/lexer" }
+phera-packages = { path = "crates/packages" }
 phera-parser = { path = "crates/parser" }
 phera-ast = { path = "crates/ast" }
 phera-source = { path = "crates/source" }
@@ -55,21 +77,105 @@ phera-server = { path = "crates/server" }
 phera-phpt = { path = "crates/phpt" }
 phera-extension-api = { path = "crates/extension-api" }
 phera-ext-core = { path = "crates/extensions/core" }
+phera-ext-zlib = { path = "crates/extensions/zlib" }
+phera-ext-gd = { path = "crates/extensions/gd" }
+phera-ext-gmp = { path = "crates/extensions/gmp" }
+phera-ext-bcmath = { path = "crates/extensions/bcmath" }
 phera-ext-ctype = { path = "crates/extensions/ctype" }
+phera-ext-dom = { path = "crates/extensions/dom" }
+phera-ext-simplexml = { path = "crates/extensions/simplexml" }
+phera-ext-xml = { path = "crates/extensions/xml" }
+phera-ext-xmlreader = { path = "crates/extensions/xmlreader" }
+phera-ext-xmlwriter = { path = "crates/extensions/xmlwriter" }
+quick-xml = "0.42"
+html5ever = "0.40"
+phera-ext-curl = { path = "crates/extensions/curl" }
 phera-ext-date = { path = "crates/extensions/date" }
+phera-ext-fileinfo = { path = "crates/extensions/fileinfo" }
 phera-ext-filter = { path = "crates/extensions/filter" }
 phera-ext-hash = { path = "crates/extensions/hash" }
+icu_collator = { version = "=2.4.0", default-features = false, features = ["compiled_data"] }
+icu_experimental = { version = "=0.7.0", default-features = false, features = ["compiled_data"] }
+icu_calendar = { version = "=2.4.0", default-features = false, features = ["compiled_data"] }
+icu_casemap = { version = "=2.4.0", default-features = false, features = ["compiled_data"] }
+icu_datetime = { version = "=2.4.0", default-features = false, features = ["compiled_data"] }
+icu_time = { version = "=2.4.0", default-features = false, features = ["compiled_data"] }
+writeable = "=0.6.4"
+icu_decimal = { version = "=2.4.0", default-features = false, features = ["alloc", "compiled_data", "unstable"] }
+fixed_decimal = { version = "=0.7.3", features = ["ryu"] }
+icu_list = { version = "=2.4.0", default-features = false, features = ["alloc", "compiled_data"] }
+icu_locale = { version = "=2.4.0", default-features = false, features = ["compiled_data"] }
+icu_normalizer = { version = "=2.4.0", default-features = false, features = ["compiled_data"] }
+icu_properties = { version = "=2.4.0", default-features = false, features = ["compiled_data"] }
+icu_plurals = { version = "=2.4.0", default-features = false, features = ["compiled_data"] }
+idna = "=1.1.0"
+icu_segmenter = { version = "=2.4.0", default-features = false, features = ["compiled_data", "unstable"] }
+phera-ext-intl = { path = "crates/extensions/intl" }
 phera-ext-http = { path = "crates/extensions/http" }
+phera-ext-mbstring = { path = "crates/extensions/mbstring" }
+iconv-native = "0.1"
+encoding_rs = "0.8.35"
+base16ct = { version = "1", features = ["alloc"] }
+cssparser = "0.38"
+precomputed-hash = "0.1"
+selectors = "0.41"
+base64 = "0.22"
 phera-ext-json = { path = "crates/extensions/json" }
+phera-ext-sodium = { path = "crates/extensions/sodium" }
+phera-ext-openssl = { path = "crates/extensions/openssl" }
 phera-ext-pcre = { path = "crates/extensions/pcre" }
 phera-sqlite = { path = "crates/sqlite" }
 phera-ext-sqlite3 = { path = "crates/extensions/sqlite3" }
 rusqlite = { version = "=0.43.0", default-features = false, features = ["bundled", "column_metadata", "column_decltype", "backup"] }
+phera-ext-mysqli = { path = "crates/extensions/mysqli" }
+phera-ext-pgsql = { path = "crates/extensions/pgsql" }
 phera-ext-pdo = { path = "crates/extensions/pdo" }
 phera-ext-random = { path = "crates/extensions/random" }
+phera-ext-serialize = { path = "crates/extensions/serialize" }
+phera-ext-session = { path = "crates/extensions/session" }
+phera-ext-spl = { path = "crates/extensions/spl" }
 phera-ext-standard = { path = "crates/extensions/standard" }
-tempfile = "3"
+command-fds = "0.3.3"
+phera-ext-process = { path = "crates/extensions/process" }
+phera-ext-sockets = { path = "crates/extensions/sockets" }
+phera-ext-streams = { path = "crates/extensions/streams" }
 phera-ext-tokenizer = { path = "crates/extensions/tokenizer" }
+crypto_secretbox = { version = "0.1.1", default-features = false, features = ["alloc", "salsa20"] }
+blake2b_simd = "1"
+curve25519-dalek = "5"
+hmac = "0.12"
+siphasher = "1"
+poly1305 = { version = "0.9", features = ["zeroize"] }
+crypto-bigint = { version = "0.7", features = ["alloc", "zeroize"] }
+zeroize = "1.9"
+salsa20 = "0.11"
+chacha20 = { version = "0.10", features = ["legacy", "xchacha", "zeroize"] }
+scrypt = "0.12"
+block-padding = "0.4"
+aes = "0.9"
+aes-gcm = { version = "0.11", features = ["hazmat"] }
+cbc = "0.2"
+ccm = "0.6"
+cfb-mode = "0.9"
+chacha20poly1305 = "0.11"
+ctr = "0.10"
+ecb = "0.2"
+ofb = "0.7"
+p256 = { version = "0.14", features = ["ecdh"] }
+p384 = { version = "0.14", features = ["ecdh"] }
+p521 = { version = "0.14", features = ["ecdh"] }
+ed25519-dalek = { version = "3", features = ["pem"] }
+x25519-dalek = { version = "3", features = ["static_secrets"] }
+pkcs8 = { version = "0.11", features = ["pem", "encryption", "sha1-insecure", "3des"] }
+sec1 = "0.8"
+x509-cert = "0.3"
+
+
+sha1-rsa = { package = "sha1", version = "0.11", features = ["oid"] }
+md5-rsa = { package = "md-5", version = "0.11", features = ["oid"] }
+sha3-rsa = { package = "sha3", version = "0.11", features = ["oid"] }
+ripemd-rsa = { package = "ripemd", version = "0.2", features = ["oid"] }
+pbkdf2 = "0.12"
 digest = "0.10"
 md2 = "0.10"
 md4 = "0.10"
@@ -87,16 +193,36 @@ argon2 = "0.5"
 pwhash = "1"
 getrandom = "0.3"
 bytes = "1"
+percent-encoding = "2"
+nix = { version = "0.31", default-features = false, features = ["user", "resource", "feature", "net"] }
+rustix = { version = "1", features = ["fs", "param", "process", "system", "termios", "time"] }
+rustix-libc-wrappers = { version = "0.1.1", features = ["process"] }
+sysinfo = { version = "0.39.3", default-features = false, features = ["system"] }
+tempfile = "3"
+async-compression = { version = "0.4", features = ["tokio", "gzip", "zlib", "deflate", "brotli"] }
+cookie_store = { version = "0.22", default-features = false, features = ["preserve_order"] }
+psl = "2"
+tokio-util = { version = "0.7", features = ["io"] }
+tower-service = "0.3"
+memchr = "2"
 http-body-util = "0.1"
 hyper = { version = "1", default-features = false, features = ["http1", "server"] }
 hyper-util = { version = "0.1", default-features = false, features = ["tokio", "http1", "server-graceful"] }
 socket2 = { version = "0.6", features = ["all"] }
+hickory-resolver = "0.26.3"
 tokio = { version = "1", features = [
-    "rt", "rt-multi-thread", "net", "time", "sync", "signal", "macros",
+    "rt", "rt-multi-thread", "net", "time", "sync", "signal", "macros", "fs",
 ] }
-# The system's monotonic clock reading for `hrtime()`, which PHP takes from
-# `clock_gettime(CLOCK_MONOTONIC)`.
-rustix = { version = "1", features = ["time"] }
+# HTTP dates ("Sun, 06 Nov 1994 08:49:37 GMT"); hyper depends on it already.
+httpdate = "1"
+# Compressing responses in `phera serve`. Both are Rust all the way down:
+# flate2 with its default miniz_oxide backend, and Dropbox's brotli.
+flate2 = "1"
+adler2 = "2"
+num-bigint = "0.4"
+num-integer = "0.1"
+num-traits = "0.2"
+brotli = "9"
 fluent-uri = "0.4.1"
 url = "2.5"
 foldhash = "0.2"
@@ -107,8 +233,12 @@ mimalloc = { version = "0.1", default-features = false }
 pcre2 = "=0.2.11"
 pcre2-sys = "=0.2.10"
 
-tokio-postgres = "0.7.18"
-mysql_async = { version = "0.37.1", default-features = false, features = ["minimal-rust"] }
+postgres-protocol = "0.6"
+postgres-types = "0.2.14"
+mysql_async = { version = "0.37.1", default-features = false, features = [
+    "minimal-rust",
+    "rustls-tls",
+] }
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 tz-rs = { version = "=0.7.3", default-features = false, features = ["alloc"] }
 jiff-tzdb = "=0.1.9"

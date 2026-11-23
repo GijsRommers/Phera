@@ -10,8 +10,8 @@ echo $redis->get('greeting');
 ```
 
 It stands on the `redis` crate (1.0.5) with Tokio: RESP2 for commands, RESP3
-for subscriptions. `tls://` hosts use rustls with the RustCrypto provider (a
-pre-release crate) and WebPKI roots, verifying certificates and host names.
+for subscriptions. `tls://` hosts use rustls with ring's default TLS 1.2 and
+1.3 cipher suites and WebPKI roots, verifying certificates and host names.
 Unix sockets work as a path, `unix://` or `file://`.
 
 ## How it runs
@@ -92,11 +92,11 @@ process, a Unix socket, and 500 overlapping 300 ms BLPOP requests through
 What the comparison scripts call, as `tools/inventory.py` finds it.
 
 <!-- inventory: tools/inventory.py -->
-266 compared, 1 with only their argument errors compared, 3 not compared, 17 not implemented.
+261 compared, 1 with only their argument errors compared, 3 not compared, 17 not implemented.
 
 | Method | Status | Compared in, and notes |
 | --- | --- | --- |
-| `__construct` | compared | `171_watch`, `176_connection_options`, `182_auth` and 8 more The `ssl`, `backoff`, `retryInterval` and `maxRetries` options are checked, not used. |
+| `__construct` | compared | `171_watch`, `176_connection_options`, `182_auth` and 9 more The `ssl`, `backoff`, `retryInterval` and `maxRetries` options are checked, not used. |
 | `__destruct` | compared | `192_destructor` |
 | `_compress` | compared | `193_main_forms` Serializers NONE and JSON only; compression NONE only. |
 | `_uncompress` | compared | `193_main_forms` Serializers NONE and JSON only; compression NONE only. |
@@ -128,13 +128,13 @@ What the comparison scripts call, as `tools/inventory.py` finds it.
 | `close` | compared | `176_connection_options`, `182_auth`, `185_auth_forms` and 2 more |
 | `command` | compared | `174_server` |
 | `config` | compared | `174_server` |
-| `connect` | compared | `171_watch`, `176_connection_options`, `182_auth` and 7 more TCP, Unix sockets and `tls://` (rustls); no SSL context options. |
+| `connect` | compared | `171_watch`, `176_connection_options`, `182_auth` and 8 more TCP, Unix sockets and `tls://` (rustls); no SSL context options. |
 | `copy` | compared | `035_copy`, `181_prefix` |
 | `dbSize` | compared | `174_server`, `190_flushdb` |
 | `debug` | compared | `193_main_forms` |
 | `decr` | compared | `015_decr` |
 | `decrBy` | compared | `016_decrby` |
-| `del` | compared | `017_set`, `018_setex`, `019_psetex` and 33 more |
+| `del` | compared | `017_set`, `018_setex`, `019_psetex` and 34 more |
 | `delifeq` | compared | `193_main_forms` A Valkey command; Redis 8.4 answers with an error, compared as such. |
 | `delete` | compared | `191_functions`, `193_main_forms` |
 | `discard` | compared | `183_transaction_state`, `support` |
@@ -166,7 +166,7 @@ What the comparison scripts call, as `tools/inventory.py` finds it.
 | `georadiusbymember_ro` | compared | `193_main_forms` |
 | `geosearch` | compared | `160_geosearch` |
 | `geosearchstore` | compared | `161_geosearchstore` |
-| `get` | compared | `000_get`, `017_set`, `018_setex` and 32 more |
+| `get` | compared | `000_get`, `017_set`, `018_setex` and 31 more |
 | `getWithMeta` | compared | `184_metadata` |
 | `getAuth` | compared | `165_connection`, `182_auth`, `185_auth_forms` |
 | `getBit` | compared | `008_getbit` |
@@ -300,16 +300,11 @@ What the comparison scripts call, as `tools/inventory.py` finds it.
 | `setex` | compared | `018_setex` |
 | `setnx` | compared | `020_setnx` |
 | `sismember` | compared | `096_sismember`, `189_json_collections` |
-| `slaveof` | compared | `193_main_forms` |
 | `replicaof` | compared | `193_main_forms` |
 | `touch` | compared | `030_touch` |
 | `slowlog` | compared | `174_server` |
 | `sort` | compared | `178_sort` |
 | `sort_ro` | compared | `178_sort` |
-| `sortAsc` | compared | `178_sort`, `193_main_forms` |
-| `sortAscAlpha` | compared | `178_sort`, `193_main_forms` |
-| `sortDesc` | compared | `178_sort`, `193_main_forms` |
-| `sortDescAlpha` | compared | `178_sort`, `193_main_forms` |
 | `srem` | compared | `098_srem` |
 | `sscan` | compared | `173_scans`, `193_main_forms` |
 | `ssubscribe` | compared | `tests/pubsub.rs` |
@@ -352,9 +347,9 @@ What the comparison scripts call, as `tools/inventory.py` finds it.
 | `vgetattr` | not implemented | Throws "Redis::vgetattr is not implemented yet". |
 | `vlinks` | not implemented | Throws "Redis::vlinks is not implemented yet". |
 | `xtrim` | compared | `152_xtrim` |
-| `zAdd` | compared | `110_zadd`, `111_zcard`, `112_zcount` and 39 more |
+| `zAdd` | compared | `110_zadd`, `111_zcard`, `112_zcount` and 40 more |
 | `zCard` | compared | `111_zcard` |
-| `zCount` | compared | `112_zcount` |
+| `zCount` | compared | `112_zcount`, `197_zcount_float_bounds` |
 | `zIncrBy` | compared | `117_zincrby` |
 | `zLexCount` | compared | `124_zlexcount` |
 | `zMscore` | compared | `116_zmscore` |

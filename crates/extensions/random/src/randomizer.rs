@@ -21,14 +21,19 @@ use phera_extension_api::{
 use crate::collections::{list, pick_keys, shuffle, shuffled_list};
 use crate::engine_classes;
 use crate::engines::{ATTEMPTS, Engine, broken_engine};
+use crate::floats::{self, Boundary};
+use crate::given;
 use crate::procedural::zeroed;
-use crate::{floats, given};
 
 /// `nextFloat()` keeps 53 bits, a double's precision, and divides by 2^53.
 const TWO_TO_53: f64 = 9007199254740992.0;
 
 /// `final class Random\Randomizer`
 pub const RANDOMIZER: ClassEntry = ClassEntry {
+    hooks: Some(&phera_extension_api::ClassHooks {
+        clone: Some(phera_extension_api::NativeClone::Forbidden),
+        ..phera_extension_api::ClassHooks::EMPTY
+    }),
     kind: ClassKind::FinalClass,
     properties: &[PropertyEntry::new(
         "engine",
@@ -41,6 +46,13 @@ pub const RANDOMIZER: ClassEntry = ClassEntry {
             &[Param::new("engine", ParamType::Mixed).optional()],
             construct,
         ),
+        MethodEntry::public("__serialize", &[], serialize).returning("array"),
+        MethodEntry::public(
+            "__unserialize",
+            &[Param::new("data", ParamType::Array)],
+            unserialize,
+        )
+        .returning("void"),
         MethodEntry::public("nextInt", &[], next_int),
         MethodEntry::public("nextFloat", &[], next_float),
         MethodEntry::public(
@@ -56,7 +68,7 @@ pub const RANDOMIZER: ClassEntry = ClassEntry {
             &[
                 Param::new("min", ParamType::Float),
                 Param::new("max", ParamType::Float),
-                Param::new("boundary", ParamType::Mixed).optional(),
+                Param::new("boundary", ParamType::Class(floats::INTERVAL_BOUNDARY.name)).optional(),
             ],
             get_float,
         ),
@@ -148,6 +160,45 @@ fn construct(
     Ok(Value::Null)
 }
 
+fn serialize(_: &mut dyn Context, this: Option<&Rc<Object>>, _: &[Value]) -> NativeResult {
+    let object = this.ok_or_else(|| NativeError::error("Randomizer method needs a receiver"))?;
+    let members = Value::Array(Rc::new(object.to_array()));
+    Ok(Value::Array(Rc::new(
+        [(ArrayKey::Int(0), members)].into_iter().collect(),
+    )))
+}
+
+fn unserialize(
+    _: &mut dyn Context,
+    this: Option<&Rc<Object>>,
+    arguments: &[Value],
+) -> NativeResult {
+    fn invalid() -> NativeError {
+        NativeError::throw(
+            "Exception",
+            "Invalid serialization data for Random\\Randomizer object",
+        )
+    }
+    let object = this.ok_or_else(invalid)?;
+    let data = args::array(arguments, 0)
+        .filter(|data| data.len() == 1)
+        .ok_or_else(invalid)?;
+    let Some(Value::Array(members)) = data.get(&ArrayKey::Int(0)) else {
+        return Err(invalid());
+    };
+    let Some(Value::Object(engine)) = members.get(&ArrayKey::str("engine")) else {
+        return Err(invalid());
+    };
+    if !engine.class.is_instance_of("Random\\Engine") {
+        return Err(invalid());
+    }
+    *object.native.try_borrow_mut().map_err(|_| invalid())? = Some(Box::new(Randomizer {
+        engine: engine.clone(),
+    }));
+    object.update(|properties| properties.replace_all((**members).clone()));
+    Ok(Value::Null)
+}
+
 /// `nextInt(): int`, one draw shifted down to 63 bits.
 fn next_int(_: &mut dyn Context, this: Option<&Rc<Object>>, _: &[Value]) -> NativeResult {
     with_engine(this, |engine| {
@@ -174,12 +225,11 @@ fn get_int(_: &mut dyn Context, this: Option<&Rc<Object>>, arguments: &[Value]) 
              argument #1 ($min)",
         ));
     }
-    with_engine(this, |engine| Ok(Value::Int(engine.integer(min, max)?)))
+    with_engine(this, |engine| Ok(Value::Int(engine.range(min, max)?)))
 }
 
 /// `getFloat(float $min, float $max, Random\IntervalBoundary $boundary =
-/// IntervalBoundary::ClosedOpen): float`. Phera has no enums yet, so only
-/// the default boundary works and any `$boundary` is a `TypeError`.
+/// IntervalBoundary::ClosedOpen): float`.
 fn get_float(_: &mut dyn Context, this: Option<&Rc<Object>>, arguments: &[Value]) -> NativeResult {
     let min = args::float(arguments, 0).unwrap_or_default();
     let max = args::float(arguments, 1).unwrap_or_default();
@@ -190,21 +240,19 @@ fn get_float(_: &mut dyn Context, this: Option<&Rc<Object>>, arguments: &[Value]
             )));
         }
     }
-    if max <= min {
-        return Err(NativeError::value_error(
-            "Random\\Randomizer::getFloat(): Argument #2 ($max) must be greater than \
-             argument #1 ($min)",
-        ));
-    }
-    if let Some(boundary) = arguments.get(2) {
-        return Err(NativeError::type_error(format!(
-            "Random\\Randomizer::getFloat(): Argument #3 ($boundary) must be of type \
-             Random\\IntervalBoundary, {} given",
-            given(boundary)
+    let boundary = Boundary::argument(arguments.get(2))?;
+    if max < min || (max == min && boundary != Boundary::ClosedClosed) {
+        let requirement = if boundary == Boundary::ClosedClosed {
+            "greater than or equal to"
+        } else {
+            "greater than"
+        };
+        return Err(NativeError::value_error(format!(
+            "Random\\Randomizer::getFloat(): Argument #2 ($max) must be {requirement} argument #1 ($min)"
         )));
     }
     with_engine(this, |engine| {
-        Ok(Value::Float(floats::closed_open(engine, min, max)?))
+        floats::draw(engine, min, max, boundary).map(Value::Float)
     })
 }
 

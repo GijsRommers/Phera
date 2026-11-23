@@ -70,6 +70,7 @@ pub fn build(name: &str, a: &[Value], b: &mut Builder<'_>) -> Result<bool, Nativ
                     for (key, value) in values.iter() {
                         match key {
                             phera_extension_api::ArrayKey::Int(i) => b.token(i),
+                            phera_extension_api::ArrayKey::Interned(s) => b.token(s.as_bytes()),
                             phera_extension_api::ArrayKey::String(s) => b.token(s.as_bytes()),
                         }
                         b.arg(value);
@@ -108,7 +109,7 @@ pub fn build(name: &str, a: &[Value], b: &mut Builder<'_>) -> Result<bool, Nativ
         }
         "bgsave" | "bgrewriteaof" | "save" => (),
         "swapdb" => b.args(a),
-        "replicaof" | "slaveof" => {
+        "replicaof" => {
             if a.first().is_none_or(|v| matches!(v, Value::Null)) {
                 b.token("NO");
                 b.token("ONE");

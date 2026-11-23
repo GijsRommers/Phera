@@ -11,6 +11,7 @@ use crate::closures::{ClosureOrigin, ClosureState};
 /// VM-owned methods need access to lexical scope and the heap interpreter.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ClosureMethod {
+    Construct,
     Bind,
     BindTo,
     Call,
@@ -20,6 +21,7 @@ pub(crate) enum ClosureMethod {
 impl ClosureMethod {
     fn name(self) -> &'static str {
         match self {
+            Self::Construct => "__construct",
             Self::Bind => "bind",
             Self::BindTo => "bindTo",
             Self::Call => "call",
@@ -29,6 +31,7 @@ impl ClosureMethod {
 
     pub(crate) fn entries() -> &'static [(Self, &'static str)] {
         &[
+            (Self::Construct, "__construct"),
             (Self::Bind, "bind"),
             (Self::BindTo, "bindTo"),
             (Self::Call, "call"),
@@ -52,6 +55,7 @@ impl ClosureMethod {
         ];
         const FROM: &[Param] = &[Param::new("callback", ParamType::Mixed)];
         match self {
+            Self::Construct => &[],
             Self::Bind => BIND,
             Self::BindTo => BIND_TO,
             Self::Call => CALL,
@@ -71,6 +75,11 @@ impl Vm {
         named_keys: Vec<phera_value::PhpString>,
         origin: crate::calls::callback_binding::ArgumentOrigin,
     ) -> NativeResult {
+        if operation == ClosureMethod::Construct {
+            return Err(NativeError::error(
+                "Instantiation of class Closure is not allowed",
+            ));
+        }
         let name = operation.name();
         self.with_argument_origin(origin, |vm| {
             phera_extension_api::prepare_call(
@@ -81,6 +90,7 @@ impl Vm {
             )
         })?;
         if matches!(operation, ClosureMethod::FromCallable) {
+            self.autoload_callable(&arguments[0]).await?;
             return self.closure_from_value(&arguments[0]);
         }
         let object = self.closure_receiver(operation, receiver, &mut arguments)?;
@@ -98,6 +108,12 @@ impl Vm {
         };
         let scope =
             self.with_argument_origin(origin, |vm| vm.closure_scope_argument(operation, scope))?;
+        if let Some(name) = scope.str_ref()
+            && name.as_bytes() != b"static"
+            && self.classes.get(&name.to_string_lossy()).is_none()
+        {
+            self.lookup_class(&name.to_string_lossy()).await?;
+        }
         let Some(state) = self.rebind_closure(&object, new_this, &scope)? else {
             return Ok(Value::Null);
         };
@@ -144,7 +160,10 @@ impl Vm {
 
     /// Weak native union parameters accept scalar strings, while strict calls reject them.
     fn closure_scope_argument(&mut self, operation: ClosureMethod, scope: Value) -> NativeResult {
-        if matches!(scope, Value::Null | Value::Object(_) | Value::String(_)) {
+        if matches!(
+            scope,
+            Value::Null | Value::Object(_) | Value::InternedStr(_) | Value::String(_)
+        ) {
             return Ok(scope);
         }
         if !phera_extension_api::Context::strict_types(self)
@@ -197,6 +216,9 @@ impl Vm {
             return Ok(Value::Object(object));
         }
         let callee = self.resolve_callable(value).map_err(|error| {
+            if crate::unsupported_items::is_unsupported(&error) {
+                return error;
+            }
             let reason = self.callback_reason(value, error);
             NativeError::type_error(format!("Failed to create closure from callable: {reason}"))
         })?;
@@ -220,6 +242,14 @@ impl Vm {
                     phera_bytecode::ClosureBinding::Bound
                 },
             ),
+            crate::calls::call_state::CallTarget::Magic(magic) => (
+                Some(magic.context.clone()),
+                if magic.method.is_static {
+                    phera_bytecode::ClosureBinding::Static
+                } else {
+                    phera_bytecode::ClosureBinding::Bound
+                },
+            ),
             _ => (None, phera_bytecode::ClosureBinding::Bound),
         };
         self.allocate_closure(ClosureState {
@@ -228,7 +258,7 @@ impl Vm {
             binding,
             origin: ClosureOrigin::Callable,
             captures: Vec::new(),
-            statics: Rc::new(std::cell::RefCell::new(Default::default())),
+            statics: None,
         })
     }
 }
@@ -239,10 +269,12 @@ fn existing_closure(value: &Value) -> Option<Rc<Object>> {
     let object = match &*value {
         Value::Object(object) => object.clone(),
         Value::Array(array) if array.len() == 2 => {
-            let Value::String(method) = &*array.get(&phera_value::ArrayKey::Int(1))?.deref() else {
-                return None;
-            };
-            if !method.to_string_lossy().eq_ignore_ascii_case("__invoke") {
+            let method = array
+                .get(&phera_value::ArrayKey::Int(1))?
+                .deref()
+                .str_ref()?
+                .to_string_lossy();
+            if !method.eq_ignore_ascii_case("__invoke") {
                 return None;
             }
             let Value::Object(object) = &*array.get(&phera_value::ArrayKey::Int(0))?.deref() else {

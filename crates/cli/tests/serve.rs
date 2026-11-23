@@ -2,7 +2,23 @@
 //! over a socket, and check what comes back.
 
 mod scenarios {
+    mod code_cache;
+    mod compression;
+    mod diagnostics;
     mod environment;
+    mod execution_time;
+    mod limits;
+    mod new_project;
+    mod preload;
+    mod proxy;
+    mod request_headers;
+    mod request_parse_body;
+    mod service_warmup;
+    mod session;
+    mod spl_policy;
+    mod static_files;
+    mod uploads;
+    mod web_log;
 }
 
 use std::io::{BufRead, BufReader, Read, Write};
@@ -16,6 +32,7 @@ struct Served {
     process: Child,
     address: String,
     root: PathBuf,
+    banner: String,
 }
 
 impl Served {
@@ -27,6 +44,11 @@ impl Served {
         Self::start_in(name, workers, files, ".", &[])
     }
 
+    /// The directory `start_in` puts the site of the test called `name` in.
+    fn root_of(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("phera-serve-{name}-{}", std::process::id()))
+    }
+
     fn start_in(
         name: &str,
         workers: usize,
@@ -34,7 +56,18 @@ impl Served {
         directory: &str,
         flags: &[&str],
     ) -> Served {
-        let root = std::env::temp_dir().join(format!("phera-serve-{name}-{}", std::process::id()));
+        Self::start_with_stderr(name, workers, files, directory, flags, Stdio::inherit())
+    }
+
+    fn start_with_stderr(
+        name: &str,
+        workers: usize,
+        files: &[(&str, &str)],
+        directory: &str,
+        flags: &[&str],
+        stderr: Stdio,
+    ) -> Served {
+        let root = Served::root_of(name);
         for (path, contents) in files {
             let file = root.join(path);
             std::fs::create_dir_all(file.parent().expect("parent")).expect("create directory");
@@ -48,6 +81,7 @@ impl Served {
             .args(flags)
             .arg(root.join(directory))
             .stdout(Stdio::piped())
+            .stderr(stderr)
             .spawn()
             .expect("start phera serve");
 
@@ -67,6 +101,7 @@ impl Served {
             process,
             address,
             root,
+            banner,
         }
     }
 
@@ -78,30 +113,53 @@ impl Served {
         extra_headers: &str,
         body: &str,
     ) -> (u16, String) {
-        let mut stream = TcpStream::connect(&self.address).expect("connect");
-        write!(
-            stream,
-            "{method} {target} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\
-             Content-Length: {}\r\n{extra_headers}\r\n{body}",
-            self.address,
-            body.len()
-        )
-        .expect("send request");
-        let mut response = String::new();
-        stream.read_to_string(&mut response).expect("read response");
-
-        let (head, body) = response.split_once("\r\n\r\n").unwrap_or((&response, ""));
-        let status = head
-            .split_whitespace()
-            .nth(1)
-            .and_then(|code| code.parse().ok())
-            .unwrap_or_else(|| panic!("no status in {head:?}"));
-        (status, body.to_string())
+        send_request(&self.address, method, target, extra_headers, body)
     }
 
     fn get(&self, target: &str) -> (u16, String) {
         self.request("GET", target, "", "")
     }
+}
+
+/// Sends one request to the server at `address` (ours, or real PHP's) and
+/// returns the status code and the body.
+fn send_request(
+    address: &str,
+    method: &str,
+    target: &str,
+    extra_headers: &str,
+    body: &str,
+) -> (u16, String) {
+    let response = raw_response(address, method, target, extra_headers, body)
+        .unwrap_or_else(|| panic!("no answer from {address} to {method} {target}"));
+    let (head, body) = response.split_once("\r\n\r\n").unwrap_or((&response, ""));
+    let status = head
+        .split_whitespace()
+        .nth(1)
+        .and_then(|code| code.parse().ok())
+        .unwrap_or_else(|| panic!("no status in {head:?}"));
+    (status, body.to_string())
+}
+
+/// Everything the server at `address` sent back for one request, or `None`
+/// when it refused, reset or closed the connection without answering.
+fn raw_response(
+    address: &str,
+    method: &str,
+    target: &str,
+    extra_headers: &str,
+    body: &str,
+) -> Option<String> {
+    let request = format!(
+        "{method} {target} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\
+         Content-Length: {}\r\n{extra_headers}\r\n{body}",
+        body.len()
+    );
+    let mut stream = TcpStream::connect(address).ok()?;
+    stream.write_all(request.as_bytes()).ok()?;
+    let mut response = String::new();
+    stream.read_to_string(&mut response).ok()?;
+    (!response.is_empty()).then_some(response)
 }
 
 impl Drop for Served {
@@ -110,6 +168,28 @@ impl Drop for Served {
         let _ = self.process.wait();
         let _ = std::fs::remove_dir_all(&self.root);
     }
+}
+
+#[test]
+fn web_scripts_and_includes_keep_the_shebang_as_inline_text() {
+    use phera_extension_api::testing::{oracle, serve::Server};
+
+    let php = oracle::find_php().expect("PHP 8.5 required");
+    let ours = Served::start(
+        "shebang",
+        &[
+            (
+                "index.php",
+                "#!/usr/bin/env php\n<?php echo __LINE__, '\\n'; include __DIR__.'/include.php';",
+            ),
+            ("include.php", "#!include\n<?php echo __LINE__;"),
+        ],
+    );
+    let theirs = Server::start_php(&php, &ours.root, 1);
+    assert_eq!(
+        ours.get("/"),
+        send_request(&theirs.address, "GET", "/", "", "")
+    );
 }
 
 #[test]

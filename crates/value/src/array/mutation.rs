@@ -17,17 +17,59 @@ use crate::error::OpError;
 use crate::value::Value;
 
 impl PhpArray {
+    /// Builds an ordered array from entries whose keys are already distinct.
+    /// Callers must validate that property before using this constructor.
+    pub fn try_from_distinct<E>(
+        entries: impl IntoIterator<Item = Result<(ArrayKey, Value), E>>,
+    ) -> Result<Self, E> {
+        let entries = entries.into_iter();
+        let mut storage = Vec::with_capacity(entries.size_hint().0);
+        let mut array = Self::new();
+        for entry in entries {
+            let (key, value) = entry?;
+            if let ArrayKey::Int(index) = key {
+                array.note_int_key(index);
+            }
+            storage.push(Entry {
+                key,
+                value: Some(value),
+            });
+        }
+        array.storage = Storage::from_entries(storage);
+        Ok(array)
+    }
+
     /// Replaces the value of an existing key in place, or appends the entry
     /// at the end, even when the key was unset earlier. Returns the old value.
     pub fn insert(&mut self, key: ArrayKey, value: Value) -> Option<Value> {
         if let ArrayKey::Int(index) = key {
             self.note_int_key(index);
         }
-        if let Some(slot) = self.get_mut(&key) {
-            return Some(std::mem::replace(slot, value));
+        match &mut self.storage {
+            Storage::List(values) => {
+                if let Some(position) = list_position(&key) {
+                    if let Some(slot) = values.get_mut(position) {
+                        if let Some(existing) = slot.as_mut() {
+                            return Some(std::mem::replace(existing, value));
+                        }
+                    } else if position == values.len() {
+                        values.push(Some(value));
+                        self.maybe_compact();
+                        return None;
+                    }
+                }
+                self.storage.as_map().append(key, value);
+                self.maybe_compact();
+                None
+            }
+            Storage::Map(map) => {
+                let replaced = map.insert(key, value);
+                if replaced.is_none() {
+                    self.maybe_compact();
+                }
+                replaced
+            }
         }
-        self.push_entry(key, value);
-        None
     }
 
     /// Negative keys count too, as in PHP 8.3 and later: after `[-5 => 1]`,
@@ -37,6 +79,12 @@ impl PhpArray {
         if self.next_free.is_none_or(|next| key >= next) {
             self.next_free = Some(key.saturating_add(1));
         }
+    }
+
+    /// `array_multisort()` starts appending at the row count, even for arrays
+    /// that retained string keys.
+    pub fn set_next_append_index_to_len(&mut self) {
+        self.next_free = Some(self.len() as i64);
     }
 
     /// Appends an entry whose key is not in the array. A list stays a list
@@ -116,7 +164,19 @@ impl PhpArray {
             Storage::List(values) => (ArrayKey::Int(position as i64), values[position].take()),
             Storage::Map(map) => map.remove_at(position),
         };
-        self.dead += 1;
+        // The slot goes, with the holes after it, so that the next `$a[]`
+        // reuses it and a list stays a list. Not for a PHP reference: a
+        // by-reference `foreach` binds the element it stands on, and those
+        // it has visited, as references, and PHP's cursor on a removed slot
+        // goes past it, so that slot must stay a hole (an element `$a[]`
+        // adds then comes after it, where the loop still finds it).
+        if matches!(value, Some(Value::Reference(_))) {
+            self.dead += 1;
+        } else {
+            let holes_after = self.storage.len() - position - 1;
+            self.storage.truncate(position);
+            self.dead -= holes_after as u32;
+        }
         if let ArrayKey::Int(key) = key
             && self.next_free == Some(key.saturating_add(1))
         {

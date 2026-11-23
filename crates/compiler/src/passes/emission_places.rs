@@ -8,7 +8,7 @@ use crate::{
     passes::lowering_tables::{binary, path},
 };
 
-impl Tables {
+impl Tables<'_> {
     /// Send a place when the callee may require a reference.
     pub(crate) fn send_argument(
         &mut self,
@@ -24,7 +24,10 @@ impl Tables {
             ir::ArgumentSource::Value(source) if argument.spread => {
                 Instruction::SendSpread { src: source }
             }
-            ir::ArgumentSource::Value(source) => Instruction::SendValue { src: source },
+            ir::ArgumentSource::Value(source) => Instruction::SendValue {
+                src: source,
+                of_call: argument.of_call,
+            },
             ir::ArgumentSource::Place(place)
                 if place.scope == ir::PlaceScope::Local && place.path.is_empty() =>
             {
@@ -161,6 +164,7 @@ impl Tables {
         name: Reg,
         fallback: Option<String>,
         arguments: Vec<ir::Argument>,
+        result: phera_bytecode::CallResult,
     ) -> Instruction {
         function
             .instructions
@@ -170,6 +174,6 @@ impl Tables {
             let instruction = self.send_argument(function, argument);
             function.instructions.push(instruction);
         }
-        Instruction::Call { dst }
+        Instruction::Call { dst, result }
     }
 }

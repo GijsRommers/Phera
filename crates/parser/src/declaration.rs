@@ -19,26 +19,27 @@ impl Parser<'_> {
         let mut attributes = Vec::new();
 
         while self.at(TokenKind::AttributeStart) {
+            let preceding_doc_comment = self.doc_comment();
             self.bump()?; // `#[`
             loop {
                 let start = self.peek_span();
                 let name = self.parse_class_name()?;
-                let arguments = if self.at(TokenKind::LeftParen) {
+                let (arguments, first_class_callable) = if self.at(TokenKind::LeftParen) {
                     match self.parse_argument_list()? {
-                        phera_ast::Arguments::List(items) => items,
-                        // `#[A(...)]` parses in PHP (and fails at compile time);
-                        // the AST has no placeholder, so it becomes no arguments.
-                        phera_ast::Arguments::FirstClassCallable => Vec::new(),
+                        phera_ast::Arguments::List(items) => (items, false),
+                        phera_ast::Arguments::FirstClassCallable => (Vec::new(), true),
                     }
                 } else {
-                    Vec::new()
+                    (Vec::new(), false)
                 };
                 attributes.push(Attribute {
+                    preceding_doc_comment,
+                    first_class_callable,
                     name,
                     arguments,
                     span: self.span_since(start),
                 });
-                if !self.eat(TokenKind::Comma)? {
+                if !self.eat(TokenKind::Comma)? || self.at(TokenKind::RightBracket) {
                     break;
                 }
             }
@@ -46,6 +47,15 @@ impl Parser<'_> {
         }
 
         Ok(attributes)
+    }
+
+    pub(crate) fn declaration_doc_comment(&self, attributes: &[Attribute]) -> Option<Span> {
+        self.doc_comment().or_else(|| {
+            attributes
+                .iter()
+                .rev()
+                .find_map(|attribute| attribute.preceding_doc_comment)
+        })
     }
 
     /// A declaration that may carry attributes: function, class, trait,
@@ -99,6 +109,8 @@ impl Parser<'_> {
         &mut self,
         attributes: Vec<Attribute>,
     ) -> Result<FunctionDeclaration, ParseError> {
+        let start = self.peek_span();
+        let doc_comment = self.declaration_doc_comment(&attributes);
         self.expect(TokenKind::Function, "'function'")?;
         let by_reference = self.eat(TokenKind::Ampersand)?;
         let name = if self.at(TokenKind::Readonly) {
@@ -114,13 +126,16 @@ impl Parser<'_> {
         let parameters = self.parse_parameter_list()?;
         let return_type = self.parse_return_type()?;
         self.expect(TokenKind::LeftBrace, "'{'")?;
-        let body = self.parse_inner_statements()?;
+        let (body, is_generator) = self.generator_body(Self::parse_inner_statements)?;
         self.close_brace()?;
 
         Ok(FunctionDeclaration {
+            span: self.span_since(start),
+            doc_comment,
             attributes,
             name,
             by_reference,
+            is_generator,
             parameters,
             return_type,
             body,
@@ -134,6 +149,7 @@ impl Parser<'_> {
         attributes: Vec<Attribute>,
     ) -> Result<ClassDeclaration, ParseError> {
         let start = self.peek_span();
+        let doc_comment = self.declaration_doc_comment(&attributes);
 
         let mut modifiers = Modifiers::default();
         loop {
@@ -160,6 +176,19 @@ impl Parser<'_> {
                 )));
             }
         };
+        if kind != ClassKind::Class
+            && (modifiers.is_abstract || modifiers.is_final || modifiers.is_readonly)
+        {
+            let token = match kind {
+                ClassKind::Trait => "trait",
+                ClassKind::Enum => "enum",
+                ClassKind::Interface => "interface",
+                ClassKind::Class => "class",
+            };
+            return Err(self.error(format!(
+                "syntax error, unexpected token \"{token}\", expecting \"abstract\" or \"final\" or \"readonly\" or \"class\""
+            )));
+        }
         self.bump()?;
 
         let name = Some(self.parse_strict_identifier()?);
@@ -171,13 +200,14 @@ impl Parser<'_> {
         };
 
         // Only classes and interfaces can extend; traits and enums cannot.
-        let extends = if self.eat(TokenKind::Extends)? {
+        let extends = if self.at(TokenKind::Extends) {
             if !matches!(kind, ClassKind::Class | ClassKind::Interface) {
                 return Err(self.error_at(
                     self.peek_span(),
-                    "syntax error: unexpected token \"extends\"",
+                    "syntax error, unexpected token \"extends\", expecting \"{\"",
                 ));
             }
+            self.bump()?;
             let mut names = vec![self.parse_class_name()?];
             // Interfaces extend a list; classes take a single name.
             if kind == ClassKind::Interface {
@@ -190,6 +220,12 @@ impl Parser<'_> {
             Vec::new()
         };
 
+        if self.at(TokenKind::Implements) && matches!(kind, ClassKind::Trait | ClassKind::Interface)
+        {
+            return Err(
+                self.error("syntax error, unexpected token \"implements\", expecting \"{\"")
+            );
+        }
         let implements = if self.eat(TokenKind::Implements)? {
             let mut names = vec![self.parse_class_name()?];
             while self.eat(TokenKind::Comma)? {
@@ -205,6 +241,7 @@ impl Parser<'_> {
         self.close_brace()?;
 
         Ok(ClassDeclaration {
+            doc_comment,
             attributes,
             kind,
             modifiers,
@@ -222,12 +259,12 @@ impl Parser<'_> {
     /// attached by the caller's `new`.
     pub(crate) fn parse_anonymous_class(
         &mut self,
-        start: Span,
         attributes: Vec<Attribute>,
         modifiers: Modifiers,
         arguments: &mut phera_ast::Arguments,
     ) -> Result<ClassDeclaration, ParseError> {
-        self.expect(TokenKind::Class, "'class'")?;
+        let doc_comment = self.declaration_doc_comment(&attributes);
+        let start = self.expect(TokenKind::Class, "'class'")?.span;
         *arguments = if self.at(TokenKind::LeftParen) {
             self.parse_argument_list()?
         } else {
@@ -252,6 +289,7 @@ impl Parser<'_> {
         self.close_brace()?;
 
         Ok(ClassDeclaration {
+            doc_comment,
             attributes,
             kind: ClassKind::Class,
             modifiers,
@@ -281,9 +319,11 @@ impl Parser<'_> {
                 Vec::new()
             };
 
+            let doc_comment = self.declaration_doc_comment(&attributes);
             if self.at(TokenKind::Use) {
                 let member = self.parse_trait_use()?;
                 members.push(ClassMember {
+                    doc_comment,
                     kind: member,
                     span: self.span_since(start),
                 });
@@ -293,6 +333,7 @@ impl Parser<'_> {
             if self.at(TokenKind::Case) {
                 let (name, value) = self.parse_enum_case()?;
                 members.push(ClassMember {
+                    doc_comment,
                     kind: ClassMemberKind::EnumCase {
                         attributes,
                         name,
@@ -313,13 +354,19 @@ impl Parser<'_> {
             }
             loop {
                 if let Some((visibility, is_set_only)) = member_modifier(self.kind()) {
-                    self.bump()?;
                     has_modifiers = true;
-                    if is_set_only {
-                        modifiers.set_visibility = Some(visibility);
+                    let slot = if is_set_only {
+                        &mut modifiers.set_visibility
                     } else {
-                        modifiers.visibility = Some(visibility);
+                        &mut modifiers.visibility
+                    };
+                    if slot.replace(visibility).is_some() {
+                        return Err(ParseError::compile(
+                            crate::error::MULTIPLE_ACCESS_MODIFIERS,
+                            self.peek_span(),
+                        ));
                     }
+                    self.bump()?;
                 } else {
                     match self.kind() {
                         TokenKind::Static => {
@@ -361,6 +408,7 @@ impl Parser<'_> {
                 let items = self.parse_const_items(false)?;
                 self.expect(TokenKind::Semicolon, "';'")?;
                 members.push(ClassMember {
+                    doc_comment,
                     kind: ClassMemberKind::Constant {
                         attributes,
                         modifiers,
@@ -375,6 +423,7 @@ impl Parser<'_> {
             if self.at(TokenKind::Function) {
                 let method = self.parse_method(attributes, modifiers)?;
                 members.push(ClassMember {
+                    doc_comment,
                     kind: ClassMemberKind::Method(method),
                     span: self.span_since(start),
                 });
@@ -392,6 +441,7 @@ impl Parser<'_> {
                 };
                 let items = self.parse_property_list()?;
                 members.push(ClassMember {
+                    doc_comment,
                     kind: ClassMemberKind::Property {
                         attributes,
                         modifiers,
@@ -481,24 +531,40 @@ impl Parser<'_> {
             })
         } else {
             self.expect(TokenKind::As, "'as' or 'insteadof'")?;
-            // `as alias`, `as visibility`, `as visibility alias`
+            // An adaptation has at most one modifier. A second keyword is the alias.
             let mut visibility = None;
-            let mut alias = None;
-            if let Some((modifier, _)) = member_modifier(self.kind()) {
-                self.bump()?;
-                visibility = Some(modifier);
-                if is_word_token(self.kind()) && self.kind() != TokenKind::As {
-                    alias = Some(self.parse_identifier()?);
+            let mut is_final = false;
+            let mut invalid_modifier = None;
+            match self.kind() {
+                TokenKind::Public => visibility = Some(Visibility::Public),
+                TokenKind::Protected => visibility = Some(Visibility::Protected),
+                TokenKind::Private => visibility = Some(Visibility::Private),
+                TokenKind::Final => is_final = true,
+                TokenKind::Abstract | TokenKind::Static => {
+                    invalid_modifier = Some(self.parse_identifier()?);
                 }
-            } else if is_word_token(self.kind()) {
-                alias = Some(self.parse_identifier()?);
+                TokenKind::Readonly => {
+                    return Err(ParseError::compile(
+                        "Cannot use the readonly modifier on a method",
+                        self.peek_span(),
+                    ));
+                }
+                _ => {}
             }
+            if visibility.is_some() || is_final {
+                self.bump()?;
+            }
+            let alias = is_word_token(self.kind())
+                .then(|| self.parse_identifier())
+                .transpose()?;
             self.expect_end()?;
             Ok(TraitAdaptation::Alias {
                 trait_name,
                 method,
                 alias,
                 visibility,
+                is_final,
+                invalid_modifier,
             })
         }
     }
@@ -522,26 +588,29 @@ impl Parser<'_> {
         attributes: Vec<Attribute>,
         modifiers: Modifiers,
     ) -> Result<Method, ParseError> {
+        let start = self.peek_span();
         self.expect(TokenKind::Function, "'function'")?;
         let by_reference = self.eat(TokenKind::Ampersand)?;
         let name = self.parse_identifier()?;
         let parameters = self.parse_parameter_list()?;
         let return_type = self.parse_return_type()?;
 
-        let body = if self.eat(TokenKind::Semicolon)? {
-            None
+        let (body, is_generator) = if self.eat(TokenKind::Semicolon)? {
+            (None, false)
         } else {
             self.expect(TokenKind::LeftBrace, "'{' or ';'")?;
-            let statements = self.parse_inner_statements()?;
+            let (statements, is_generator) = self.generator_body(Self::parse_inner_statements)?;
             self.close_brace()?;
-            Some(statements)
+            (Some(statements), is_generator)
         };
 
         Ok(Method {
+            span: self.span_since(start),
             attributes,
             modifiers,
             name,
             by_reference,
+            is_generator,
             parameters,
             return_type,
             body,
@@ -562,7 +631,8 @@ impl Parser<'_> {
                 None
             };
 
-            let hooks = if self.at(TokenKind::LeftBrace) {
+            let has_hook_list = self.at(TokenKind::LeftBrace);
+            let hooks = if has_hook_list {
                 self.bump()?;
                 let hooks = self.parse_property_hooks()?;
                 self.expect(TokenKind::RightBrace, "'}'")?;
@@ -571,15 +641,15 @@ impl Parser<'_> {
                 Vec::new()
             };
 
-            let has_hooks = !hooks.is_empty();
             items.push(PropertyDeclaration {
                 name,
                 default,
                 hooks,
+                has_hook_list,
                 span: self.span_since(start),
             });
 
-            if !has_hooks && self.eat(TokenKind::Comma)? {
+            if !has_hook_list && self.eat(TokenKind::Comma)? {
                 continue;
             }
             break;
@@ -604,59 +674,68 @@ impl Parser<'_> {
                 Vec::new()
             };
 
-            // Modifiers on hooks: only `final` is meaningful; PHP rejects the
-            // others at compile time, so they are dropped here.
+            let doc_comment = self.declaration_doc_comment(&attributes);
             let mut is_final = false;
-            loop {
-                if self.eat(TokenKind::Final)? {
+            let mut invalid_modifier = None;
+            while matches!(
+                self.kind(),
+                TokenKind::Final
+                    | TokenKind::Public
+                    | TokenKind::Protected
+                    | TokenKind::Private
+                    | TokenKind::PublicSet
+                    | TokenKind::ProtectedSet
+                    | TokenKind::PrivateSet
+                    | TokenKind::Static
+                    | TokenKind::Abstract
+                    | TokenKind::Readonly
+            ) {
+                let token = self.bump()?;
+                if token.kind == TokenKind::Final && !is_final {
                     is_final = true;
-                } else if matches!(
-                    self.kind(),
-                    TokenKind::Public
-                        | TokenKind::Protected
-                        | TokenKind::Private
-                        | TokenKind::PublicSet
-                        | TokenKind::ProtectedSet
-                        | TokenKind::PrivateSet
-                        | TokenKind::Static
-                        | TokenKind::Abstract
-                        | TokenKind::Readonly
-                ) {
-                    self.bump()?;
-                } else {
-                    break;
+                } else if invalid_modifier.is_none() {
+                    invalid_modifier = Some(Identifier {
+                        name: self.text_of(&token).to_ascii_lowercase(),
+                        span: token.span,
+                    });
                 }
             }
 
             let by_reference = self.eat(TokenKind::Ampersand)?;
             let name = self.parse_strict_identifier()?;
-            let parameters = if self.at(TokenKind::LeftParen) {
+            let has_parameter_list = self.at(TokenKind::LeftParen);
+            let parameters = if has_parameter_list {
                 self.parse_parameter_list()?
             } else {
                 Vec::new()
             };
 
-            let body = if self.eat(TokenKind::Semicolon)? {
-                HookBody::None
-            } else if self.at(TokenKind::LeftBrace) {
-                self.bump()?;
-                let statements = self.parse_inner_statements()?;
-                self.close_brace()?;
-                HookBody::Block(statements)
-            } else {
-                self.expect(TokenKind::FatArrow, "'=>'")?;
-                let expression = self.parse_expr(0)?;
-                self.expect(TokenKind::Semicolon, "';'")?;
-                HookBody::Expression(expression)
-            };
+            let (body, is_generator) = self.generator_body(|parser| {
+                if parser.eat(TokenKind::Semicolon)? {
+                    Ok(HookBody::None)
+                } else if parser.eat(TokenKind::LeftBrace)? {
+                    let statements = parser.parse_inner_statements()?;
+                    parser.close_brace()?;
+                    Ok(HookBody::Block(statements))
+                } else {
+                    parser.expect(TokenKind::FatArrow, "'=>'")?;
+                    let expression = parser.parse_expr(0)?;
+                    parser.expect(TokenKind::Semicolon, "';'")?;
+                    Ok(HookBody::Expression(expression))
+                }
+            })?;
 
             hooks.push(PropertyHook {
+                doc_comment,
                 attributes,
                 is_final,
                 by_reference,
                 name,
+                invalid_modifier,
+                has_parameter_list,
                 parameters,
                 body,
+                is_generator,
                 span: self.span_since(start),
             });
         }
@@ -695,25 +774,25 @@ impl Parser<'_> {
             Vec::new()
         };
 
+        let doc_comment = self.declaration_doc_comment(&attributes);
         let mut modifiers = Modifiers::default();
         loop {
+            if let Some((visibility, is_set_only)) = member_modifier(self.kind()) {
+                let slot = if is_set_only {
+                    &mut modifiers.set_visibility
+                } else {
+                    &mut modifiers.visibility
+                };
+                if slot.replace(visibility).is_some() {
+                    return Err(ParseError::compile(
+                        crate::error::MULTIPLE_ACCESS_MODIFIERS,
+                        self.peek_span(),
+                    ));
+                }
+                self.bump()?;
+                continue;
+            }
             match self.kind() {
-                TokenKind::Public | TokenKind::Protected | TokenKind::Private => {
-                    modifiers.visibility = Some(match self.kind() {
-                        TokenKind::Public => Visibility::Public,
-                        TokenKind::Protected => Visibility::Protected,
-                        _ => Visibility::Private,
-                    });
-                    self.bump()?;
-                }
-                TokenKind::PublicSet | TokenKind::ProtectedSet | TokenKind::PrivateSet => {
-                    modifiers.set_visibility = Some(match self.kind() {
-                        TokenKind::PublicSet => Visibility::Public,
-                        TokenKind::ProtectedSet => Visibility::Protected,
-                        _ => Visibility::Private,
-                    });
-                    self.bump()?;
-                }
                 TokenKind::Static => {
                     self.bump()?;
                     modifiers.is_static = true;
@@ -749,7 +828,8 @@ impl Parser<'_> {
         } else {
             None
         };
-        let hooks = if self.at(TokenKind::LeftBrace) {
+        let has_hook_list = self.at(TokenKind::LeftBrace);
+        let hooks = if has_hook_list {
             self.bump()?;
             let hooks = self.parse_property_hooks()?;
             self.expect(TokenKind::RightBrace, "'}'")?;
@@ -759,6 +839,7 @@ impl Parser<'_> {
         };
 
         Ok(Parameter {
+            doc_comment,
             attributes,
             modifiers,
             ty,
@@ -767,6 +848,7 @@ impl Parser<'_> {
             name,
             default,
             hooks,
+            has_hook_list,
             span: self.span_since(start),
         })
     }
@@ -776,12 +858,17 @@ impl Parser<'_> {
         &mut self,
         attributes: Vec<Attribute>,
     ) -> Result<Statement, ParseError> {
+        let doc_comment = self.declaration_doc_comment(&attributes);
         let start = self.expect(TokenKind::Const, "'const'")?.span;
         let items = self.parse_const_items(true)?;
         self.expect_end()?;
 
         Ok(Statement {
-            kind: StatementKind::Const { attributes, items },
+            kind: StatementKind::Const {
+                doc_comment,
+                attributes,
+                items,
+            },
             span: self.span_since(start),
         })
     }

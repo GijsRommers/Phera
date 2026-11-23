@@ -3,6 +3,8 @@
 use crate::{CompileError, Compiler};
 use phera_ast as ast;
 
+use super::type_declarations::{TypeScope, TypeSite, builtin_type};
+
 impl Compiler<'_> {
     /// Reject structurally invalid classes before any top-level instruction runs.
     pub(crate) fn validate_class_declaration(
@@ -12,10 +14,29 @@ impl Compiler<'_> {
     ) -> Result<(), CompileError> {
         let is_interface = declaration.kind == ast::ClassKind::Interface;
         if let Some(identifier) = &declaration.name
+            && identifier.name == "_"
             && matches!(
-                identifier.name.to_ascii_lowercase().as_str(),
-                "self" | "parent" | "static"
+                declaration.kind,
+                ast::ClassKind::Trait | ast::ClassKind::Enum
             )
+        {
+            let kind = if declaration.kind == ast::ClassKind::Trait {
+                "a trait"
+            } else {
+                "an enum"
+            };
+            return Err(self.error(
+                format!(
+                    "Using \"_\" as {kind} name is not supported by Phera: deprecated since PHP 8.4"
+                ),
+                self.lines.line(identifier.span.start),
+            ));
+        }
+        if let Some(identifier) = &declaration.name
+            && {
+                let lower = identifier.name.to_ascii_lowercase();
+                builtin_type(&lower) || matches!(lower.as_str(), "self" | "parent" | "static")
+            }
         {
             let message = if is_interface {
                 format!(
@@ -49,28 +70,83 @@ impl Compiler<'_> {
                 ));
             }
         }
+        let parent = (!is_interface)
+            .then(|| declaration.extends.first())
+            .flatten();
+        let scope = if declaration.kind == ast::ClassKind::Trait {
+            TypeScope::Deferred
+        } else {
+            TypeScope::Class { name, parent }
+        };
         let mut properties = std::collections::HashSet::new();
         for member in &declaration.members {
             let line = self.lines.line(member.span.start);
             match &member.kind {
                 ast::ClassMemberKind::Method(method) => {
-                    self.validate_method_declaration(declaration, name, method)?
+                    self.validate_method_declaration(declaration, name, method)?;
+                    for parameter in &method.parameters {
+                        if let Some(ty) = &parameter.ty {
+                            self.validate_declared_type(ty, TypeSite::Parameter, scope)?;
+                            if parameter.is_promoted() {
+                                self.validate_declared_type(
+                                    ty,
+                                    TypeSite::Property {
+                                        class: name,
+                                        name: &parameter.name,
+                                    },
+                                    scope,
+                                )?;
+                            }
+                        }
+                    }
+                    if let Some(ty) = &method.return_type {
+                        self.validate_declared_type(ty, TypeSite::Return, scope)?;
+                    }
                 }
                 ast::ClassMemberKind::Property {
-                    modifiers, items, ..
+                    modifiers,
+                    ty,
+                    items,
+                    ..
                 } => {
                     for property in items {
+                        if let Some(ty) = ty {
+                            self.validate_declared_type(
+                                ty,
+                                TypeSite::Property {
+                                    class: name,
+                                    name: &property.name,
+                                },
+                                scope,
+                            )?;
+                        }
                         if !properties.insert(&property.name) {
                             return Err(self.error(
                                 format!("Cannot redeclare {name}::${}", property.name),
                                 self.lines.line(property.span.start),
                             ));
                         }
-                        if modifiers.is_abstract && property.hooks.is_empty() {
+                        if modifiers.is_abstract && !property.has_hook_list {
                             return Err(
                                 self.error("Only hooked properties may be declared abstract", line)
                             );
                         }
+                    }
+                }
+                ast::ClassMemberKind::Constant {
+                    ty: Some(ty),
+                    items,
+                    ..
+                } => {
+                    for constant in items {
+                        self.validate_declared_type(
+                            ty,
+                            TypeSite::Constant {
+                                class: name,
+                                name: &constant.name.name,
+                            },
+                            scope,
+                        )?;
                     }
                 }
                 _ => {}
@@ -89,11 +165,11 @@ impl Compiler<'_> {
         let line = self.lines.line(method.name.span.start);
         let name = &method.name.name;
         let is_interface = declaration.kind == ast::ClassKind::Interface;
-        let message = if matches!(
-            name.to_ascii_lowercase().as_str(),
-            "__construct" | "__invoke"
-        ) && method.modifiers.is_static
-        {
+        let message = if declaration.name.is_none() && method.modifiers.is_abstract {
+            Some(format!(
+                "Anonymous class method {name}() must not be abstract"
+            ))
+        } else if name.eq_ignore_ascii_case("__construct") && method.modifiers.is_static {
             Some(format!("Method {class}::{name}() cannot be static"))
         } else if !is_interface && method.body.is_none() && !method.modifiers.is_abstract {
             Some(format!(
@@ -101,12 +177,14 @@ impl Compiler<'_> {
             ))
         } else if method.modifiers.is_abstract
             && method.modifiers.visibility == Some(ast::Visibility::Private)
+            && declaration.kind != ast::ClassKind::Trait
         {
             Some(format!(
                 "Abstract function {class}::{name}() cannot be declared private"
             ))
         } else if method.modifiers.is_abstract
             && !is_interface
+            && declaration.kind != ast::ClassKind::Trait
             && !declaration.modifiers.is_abstract
         {
             Some(format!(

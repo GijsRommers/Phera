@@ -9,7 +9,9 @@ use std::collections::BTreeMap;
 pub fn class_info(
     class: &ClassDeclaration,
     names: &Names,
+    source: &str,
     location: &impl Fn(usize) -> Location,
+    read_docs: bool,
 ) -> ClassInfo {
     let resolve = |n: &Name| names.resolve(n, UseKind::Class)[0].clone();
     let mut info = ClassInfo {
@@ -25,9 +27,37 @@ pub fn class_info(
         constants: BTreeMap::new(),
         location: location(class.span.start),
         open_properties: false,
+        documented: crate::phpdoc::text(source, class.doc_comment)
+            .map_or_else(Default::default, |doc| crate::phpdoc::members(doc, names)),
     };
+    if read_docs && class.doc_comment.is_some() {
+        let doc = crate::phpdoc::read(source, class.doc_comment, names, &Default::default());
+        info.documented.templates = doc.templates;
+        info.documented.template_names = doc.template_names;
+        info.documented.method_types = doc
+            .methods
+            .into_iter()
+            .filter_map(|(name, annotation)| {
+                if let ValueType::Callable(signature) = annotation.ty {
+                    Some((name, signature))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        info.documented.property_types = doc
+            .properties
+            .into_iter()
+            .map(|(name, annotation)| (name, annotation.ty))
+            .collect();
+        info.documented.generic_bases = doc
+            .bases
+            .into_iter()
+            .map(|annotation| annotation.ty)
+            .collect();
+    }
     for member in &class.members {
-        add_member(&mut info, member, names, location);
+        add_member(&mut info, member, names, source, location, read_docs);
     }
     crate::enums::add_members(&mut info, class, names);
     info.open_properties = class
@@ -41,11 +71,28 @@ fn add_member(
     info: &mut ClassInfo,
     member: &ClassMember,
     names: &Names,
+    source: &str,
     location: &impl Fn(usize) -> Location,
+    read_docs: bool,
 ) {
     match &member.kind {
         ClassMemberKind::Method(method) => {
-            add_method(info, method, names, member.span.start, location)
+            let doc = crate::phpdoc::text(source, member.doc_comment);
+            let documentation = (read_docs && member.doc_comment.is_some()).then(|| {
+                crate::phpdoc::read(
+                    source,
+                    member.doc_comment,
+                    names,
+                    &info.documented.templates,
+                )
+            });
+            add_method(info, method, names, doc, member.span.start, location);
+            if let Some(documentation) = documentation
+                && let Some(signature) =
+                    info.methods.get_mut(&method.name.name.to_ascii_lowercase())
+            {
+                signature.documentation = Some(std::sync::Arc::new(documentation));
+            }
         }
         ClassMemberKind::Property {
             modifiers,
@@ -53,11 +100,31 @@ fn add_member(
             items,
             ..
         } => {
+            let documented = (read_docs && member.doc_comment.is_some()).then(|| {
+                crate::phpdoc::read(
+                    source,
+                    member.doc_comment,
+                    names,
+                    &info.documented.templates,
+                )
+            });
             for p in items {
                 info.properties.insert(
                     p.name.clone(),
                     PropertyInfo {
                         ty: ValueType::declared(ty.as_ref(), names),
+                        documented_type: documented.as_ref().and_then(|doc| {
+                            doc.variables
+                                .get(&Some(p.name.clone()))
+                                .or_else(|| doc.variables.get(&None))
+                                .map(|annotation| annotation.ty.clone())
+                        }),
+                        null_default: p
+                            .default
+                            .as_ref()
+                            .map_or(ty.is_none() && !p.has_hook_list, |value| {
+                                matches!(value.kind, ExpressionKind::Literal(Literal::Null))
+                            }),
                         modifiers: *modifiers,
                         location: location(p.span.start),
                     },
@@ -91,6 +158,7 @@ fn add_method(
     info: &mut ClassInfo,
     method: &Method,
     names: &Names,
+    doc: Option<&str>,
     offset: usize,
     location: &impl Fn(usize) -> Location,
 ) {
@@ -100,7 +168,9 @@ fn add_method(
         names,
         location(offset),
     );
+    signature.apply_phpdoc(doc, names);
     signature.modifiers = method.modifiers;
+    signature.returns_reference = method.by_reference;
     signature.global_effects = method
         .body
         .as_ref()
@@ -120,6 +190,8 @@ fn add_method(
                 p.name.clone(),
                 PropertyInfo {
                     ty: ValueType::declared(p.ty.as_ref(), names),
+                    documented_type: None,
+                    null_default: false,
                     modifiers: p.modifiers,
                     location: location(p.span.start),
                 },
@@ -166,6 +238,7 @@ fn add_traits(
                 method,
                 alias,
                 visibility,
+                ..
             } => MemberAdaptation::Alias {
                 source: trait_name
                     .as_ref()

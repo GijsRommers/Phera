@@ -39,6 +39,7 @@ impl Compiler<'_> {
         let dst = self.allocate_register()?;
         self.emit(
             Instruction::Call {
+                result: phera_bytecode::CallResult::Used,
                 destination: dst,
                 name,
                 fallback: None,
@@ -46,6 +47,7 @@ impl Compiler<'_> {
                     source: crate::ir::ArgumentSource::Value(value),
                     name: None,
                     spread: false,
+                    of_call: false,
                 }],
             },
             line,

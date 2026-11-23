@@ -14,7 +14,7 @@ use phera_extension_api::{
     Registry, Value, args,
 };
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct RequestEnvironment {
     base: Arc<Environment>,
     // A tombstone also hides the original position after an unset and re-add.
@@ -30,7 +30,11 @@ impl RequestEnvironment {
         }
     }
 
-    fn lookup(&self, name: &[u8]) -> Option<&[u8]> {
+    pub(crate) fn startup_value(&self, name: &[u8]) -> Option<&[u8]> {
+        self.base.get(name)
+    }
+
+    pub(crate) fn lookup(&self, name: &[u8]) -> Option<&[u8]> {
         if let Some(value) = self.appended.get(name) {
             return Some(value);
         }

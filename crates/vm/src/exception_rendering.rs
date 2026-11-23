@@ -49,8 +49,25 @@ fn describe(object: &Object, string_limit: usize) -> String {
 
 /// Trace formatting preserves named variadic arguments and PHP float spelling.
 pub(crate) fn render_trace(trace: &Value, string_limit: usize) -> String {
+    let mut lines = trace_lines(trace, string_limit);
+    lines.push(format!("#{} {{main}}", lines.len()));
+    lines.join("\n")
+}
+
+/// `debug_print_backtrace()` prints a newline per frame and has no main marker.
+pub(crate) fn render_backtrace(trace: &Value, string_limit: usize) -> String {
+    use std::fmt::Write;
+
+    let mut text = String::new();
+    for line in trace_lines(trace, string_limit) {
+        let _ = writeln!(text, "{line}");
+    }
+    text
+}
+
+fn trace_lines(trace: &Value, string_limit: usize) -> Vec<String> {
     let Value::Array(frames) = trace else {
-        return "#0 {main}".into();
+        return Vec::new();
     };
     let mut lines = Vec::new();
     for (index, frame) in frames.values().enumerate() {
@@ -66,12 +83,9 @@ pub(crate) fn render_trace(trace: &Value, string_limit: usize) -> String {
             Some(Value::Array(arguments)) => arguments
                 .iter()
                 .map(|(key, value)| {
-                    let value = match &*value.deref() {
-                        Value::Array(_) => "Array".into(),
-                        Value::Object(object) => format!("Object({})", object.class.name()),
-                        _ => crate::error_values::describe_with_limit(value, string_limit),
-                    };
+                    let value = crate::error_values::trace_argument(value, string_limit);
                     match key {
+                        ArrayKey::Interned(name) => format!("{}: {value}", name.to_string_lossy()),
                         ArrayKey::String(name) => format!("{}: {value}", name.to_string_lossy()),
                         _ => value,
                     }
@@ -87,8 +101,7 @@ pub(crate) fn render_trace(trace: &Value, string_limit: usize) -> String {
             field(frame, "function")
         ));
     }
-    lines.push(format!("#{} {{main}}", frames.len()));
-    lines.join("\n")
+    lines
 }
 
 /// PHP's diagnostic properties are scalar values and need no magic conversion.

@@ -33,25 +33,11 @@ impl Vm {
                 .property_key(object, &name)
                 .is_ok_and(|resolved| resolved == stored_key)
             {
-                self.check_iteration_reference(object, &stored_key)?;
-                let reference = if value.is_reference() {
-                    value.clone()
-                } else {
-                    Value::Reference(Rc::new(RefCell::new(value.clone())))
-                };
-                if let Value::Reference(cell) = &reference {
-                    crate::reference_holders::ReferenceHolders::track_object(
-                        &self.property_references,
-                        object,
-                        &stored_key,
-                        cell,
-                    )?;
-                }
-                object.set(stored_key.clone(), reference.clone());
+                let reference = self.object_iteration_cell(object, &stored_key, value.clone())?;
                 state.position = Some(index);
                 state.started = true;
                 if let Some(key) = key {
-                    self.set(key, Value::from(name));
+                    self.set_iteration_target(key, Value::from(name))?;
                 }
                 drop(properties);
                 let previous = self
@@ -59,7 +45,7 @@ impl Vm {
                     .and_then(|frame| frame.slots(&self.registers).get(destination.index()))
                     .cloned()
                     .flatten();
-                self.set(destination, reference);
+                self.set_iteration_target(destination, reference)?;
                 if let Some(Value::Reference(reference)) = previous {
                     self.release_property_reference(reference);
                 }
@@ -69,6 +55,28 @@ impl Vm {
         }
         self.release_iterator_subject(state)?;
         self.jump(end)
+    }
+
+    pub(crate) fn object_iteration_cell(
+        &mut self,
+        object: &Rc<Object>,
+        key: &phera_value::ArrayKey,
+        value: Value,
+    ) -> Result<Value, NativeError> {
+        self.check_iteration_reference(object, key)?;
+        let reference = match value {
+            Value::Reference(cell) => cell,
+            value => Rc::new(RefCell::new(value)),
+        };
+        crate::reference_holders::ReferenceHolders::track_object(
+            &self.property_references,
+            object,
+            key,
+            &reference,
+        )?;
+        let reference = Value::Reference(reference);
+        object.set(key.clone(), reference.clone());
+        Ok(reference)
     }
 
     /// Foreach must reject readonly aliases just like an explicit property reference.

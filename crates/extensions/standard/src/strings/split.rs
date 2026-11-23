@@ -1,79 +1,14 @@
-//! Splitting and joining: `explode(",", "a,b")` is `["a", "b"]`,
-//! `implode("-", ["a", "b"])` is `"a-b"`.
+//! Splitting strings: `explode(",", "a,b")` is `["a", "b"]`.
 
-use phera_extension_api::value::to_php_string;
 use phera_extension_api::{
     Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Value, args,
 };
 
-use super::{buffer, find, reserve};
+use super::{buffer, find, join};
 use crate::arrays::list;
 
-pub(super) const FUNCTIONS: &[FunctionEntry] = &[IMPLODE, JOIN, EXPLODE, STR_REPEAT, STR_SPLIT];
-
-/// `implode(string $separator, array $array): string`, the values of the
-/// array as strings, with the separator between them.
-///
-/// The one-argument form `implode($array)` joins without a separator. The
-/// separator-last form of PHP 7 is a TypeError since PHP 8.
-///
-/// ```php
-/// implode(", ", ["a", 1, null]); // "a, 1, "
-/// implode(["a", "b"]);           // "ab"
-/// ```
-const IMPLODE: FunctionEntry = FunctionEntry::sync(
-    "implode",
-    &[
-        Param::new("separator", ParamType::ArrayOrString),
-        Param::new("array", ParamType::Array).nullable().optional(),
-    ],
-    implode,
-);
-
-fn implode(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    join_values(context, arguments, "implode")
-}
-
-/// `join()`, another name for `implode()`; its errors name `join()`.
-const JOIN: FunctionEntry = FunctionEntry::sync(
-    "join",
-    &[
-        Param::new("separator", ParamType::ArrayOrString),
-        Param::new("array", ParamType::Array).nullable().optional(),
-    ],
-    join,
-);
-
-fn join(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    join_values(context, arguments, "join")
-}
-
-fn join_values(context: &mut dyn Context, arguments: &[Value], function: &str) -> NativeResult {
-    let (separator, array) = match (args::array(arguments, 0), args::array(arguments, 1)) {
-        (None, Some(array)) => (args::bytes(arguments, 0), array),
-        (Some(array), None) => (&b""[..], array),
-        (Some(_), Some(_)) => {
-            return Err(NativeError::type_error(format!(
-                "{function}(): Argument #1 ($separator) must be of type string, array given"
-            )));
-        }
-        (None, None) => {
-            return Err(NativeError::type_error(format!(
-                "{function}(): If argument #1 ($separator) is of type string, \
-                 argument #2 ($array) must be of type array, null given"
-            )));
-        }
-    };
-    let mut result = Vec::new();
-    for (index, value) in array.values().enumerate() {
-        let string = to_php_string(value, context.diagnostics())?;
-        let separator = if index > 0 { separator } else { &[] };
-        reserve(&mut result, separator.len() + string.len())?;
-        result.extend_from_slice(separator);
-        result.extend_from_slice(string.as_bytes());
-    }
-    Ok(Value::from(result))
-}
+pub(super) const FUNCTIONS: &[FunctionEntry] =
+    &[join::IMPLODE, join::JOIN, EXPLODE, STR_REPEAT, STR_SPLIT];
 
 /// `explode(string $separator, string $string, int $limit = PHP_INT_MAX):
 /// array`, the parts between the separators.
@@ -102,7 +37,7 @@ fn explode(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let limit = args::int(arguments, 2).unwrap_or(i64::MAX);
     if separator.is_empty() {
         return Err(NativeError::value_error(
-            "explode(): Argument #1 ($separator) cannot be empty",
+            "explode(): Argument #1 ($separator) must not be empty",
         ));
     }
     let most_parts = if limit < 0 {
@@ -110,19 +45,26 @@ fn explode(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     } else {
         limit.max(1) as usize
     };
-    let mut parts = Vec::new();
-    let mut rest = string;
-    while parts.len() + 1 < most_parts
-        && let Some(position) = find(rest, separator)
-    {
-        parts.push(&rest[..position]);
-        rest = &rest[position + separator.len()..];
-    }
-    parts.push(rest);
+    let mut remaining = most_parts;
+    let mut rest = Some(string);
+    let parts = std::iter::from_fn(|| {
+        let part = rest.take()?;
+        if remaining > 1
+            && let Some(position) = find(part, separator)
+        {
+            remaining -= 1;
+            rest = Some(&part[position + separator.len()..]);
+            return Some(&part[..position]);
+        }
+        Some(part)
+    });
     if limit < 0 {
-        parts.truncate(parts.len().saturating_sub(limit.unsigned_abs() as usize));
+        // The discarded suffix must not allocate PHP strings.
+        let mut retained: Vec<_> = parts.collect();
+        retained.truncate(retained.len().saturating_sub(limit.unsigned_abs() as usize));
+        return Ok(Value::from(list(retained.into_iter().map(Value::from))));
     }
-    Ok(Value::from(list(parts.into_iter().map(Value::from))))
+    Ok(Value::from(list(parts.map(Value::from))))
 }
 
 /// `str_repeat(string $string, int $times): string`
@@ -151,10 +93,14 @@ fn str_repeat(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         .checked_mul(times)
         .ok_or_else(|| NativeError::error("String size exceeds the maximum allowed size"))?;
     let mut result = buffer(length)?;
-    // An empty string repeated PHP_INT_MAX times is empty at once.
-    if !string.is_empty() {
-        for _ in 0..times {
-            result.extend_from_slice(string);
+    match string {
+        // An empty string repeated PHP_INT_MAX times is empty at once.
+        [] => {}
+        [byte] => result.resize(length, *byte),
+        _ => {
+            for _ in 0..times {
+                result.extend_from_slice(string);
+            }
         }
     }
     Ok(Value::from(result))

@@ -1,0 +1,228 @@
+//! Move just the generator's own register window and the state that points into it.
+//!
+//! ```php
+//! function sample($items) { foreach ($items as $item) printf('%s', yield $item); }
+//! ```
+//!
+//! Here the active foreach and the unfinished printf call both survive a yield.
+
+use phera_extension_api::NativeError;
+use phera_value::Value;
+
+use crate::{
+    Vm,
+    calls::{
+        frame::Frame,
+        frame_extras::FrameExtras,
+        prepared_call::{CallDetails, PreparedCall},
+    },
+    closures::PendingCapture,
+    finally::SavedFinally,
+};
+
+pub(super) struct Activation {
+    pub(super) frame: Frame,
+    pub(super) silence: Vec<i64>,
+    storage: Storage,
+}
+
+#[derive(Default)]
+pub(super) struct Storage {
+    registers: Vec<Option<Value>>,
+    extras: Option<Box<FrameExtras>>,
+    calls: Vec<(PreparedCall, Option<CallDetails>)>,
+    finally: Vec<SavedFinally>,
+    captures: Vec<PendingCapture>,
+}
+
+impl Activation {
+    /// The copy for a fork of a snapshot: the generator's own register
+    /// window and the calls it was preparing, with every value copied.
+    pub(super) fn forked(&self, fork: &mut phera_value::Fork<'_>) -> Result<Self, String> {
+        use crate::snapshot::ForkCopy;
+        if !self.storage.finally.is_empty() {
+            return Err("it is suspended inside a finally block".into());
+        }
+        let storage = &self.storage;
+        Ok(Activation {
+            frame: self.frame,
+            silence: self.silence.clone(),
+            storage: Storage {
+                registers: storage.registers.fork_copy(fork),
+                extras: storage
+                    .extras
+                    .as_ref()
+                    .map(|extras| Box::new(extras.fork_copy(fork))),
+                calls: storage
+                    .calls
+                    .iter()
+                    .map(|(call, details)| (*call, details.fork_copy(fork)))
+                    .collect(),
+                finally: Vec::new(),
+                captures: storage
+                    .captures
+                    .iter()
+                    .map(|capture| PendingCapture {
+                        base: capture.base,
+                        value: capture.value.fork_copy(fork),
+                    })
+                    .collect(),
+            },
+        })
+    }
+
+    /// The scalar interpreter has no access to the VM side tables.
+    pub(super) fn local_registers(&mut self) -> Option<&mut [Option<Value>]> {
+        if !self.silence.is_empty()
+            || self.frame.has_extras()
+            || !self.storage.calls.is_empty()
+            || !self.storage.finally.is_empty()
+            || !self.storage.captures.is_empty()
+        {
+            return None;
+        }
+        self.storage.registers.get_mut(self.frame.kind().prefix()..)
+    }
+
+    pub(super) fn receiver(&self) -> Option<&std::rc::Rc<phera_value::Object>> {
+        let slot = self.frame.kind().prefix().checked_sub(1)?;
+        match self.storage.registers.get(slot)?.as_ref()? {
+            Value::Object(object) => Some(object),
+            _ => None,
+        }
+    }
+
+    pub(super) fn trace_arguments(
+        &self,
+        code: &crate::code_table::CodeTable,
+    ) -> crate::exception_traces::TraceArguments {
+        let function = code.function(self.frame.function);
+        let slots = self
+            .storage
+            .registers
+            .get(self.frame.kind().prefix()..)
+            .unwrap_or_default();
+        let arguments = self
+            .storage
+            .extras
+            .as_ref()
+            .map(|extras| extras.arguments)
+            .unwrap_or_default();
+        let passed = if function.argument_layout == phera_bytecode::ArgumentLayout::Variadic {
+            arguments.count
+        } else {
+            arguments.supplied
+        };
+        let supplied = passed
+            .or(self.frame.passed())
+            .unwrap_or(function.parameters.len());
+        let count = self
+            .storage
+            .extras
+            .as_ref()
+            .and_then(|extras| extras.dynamic_count)
+            .unwrap_or(function.registers as usize);
+        let extra = slots
+            .get(count..count + arguments.extra)
+            .unwrap_or_default();
+        crate::exception_traces::snapshot_arguments(
+            code,
+            self.frame.function,
+            supplied,
+            slots,
+            extra,
+            self.storage
+                .extras
+                .as_ref()
+                .and_then(|extras| extras.variadic.as_deref()),
+        )
+    }
+
+    pub(super) fn set_result(
+        &mut self,
+        destination: phera_bytecode::Reg,
+        value: Value,
+    ) -> Result<(), NativeError> {
+        let slot = self
+            .storage
+            .registers
+            .get_mut(self.frame.kind().prefix() + destination.index())
+            .ok_or_else(|| internal_error!("generator result register"))?;
+        *slot = Some(value);
+        Ok(())
+    }
+}
+
+impl Vm {
+    pub(super) fn suspend_generator_frame(
+        &mut self,
+        mut storage: Storage,
+    ) -> Result<Activation, NativeError> {
+        let (frame, extras) = self
+            .call_stack
+            .detach_frame()
+            .ok_or_else(|| internal_error!("generator frame"))?;
+        let start = frame.start();
+        let base = frame.base();
+        while self.call_stack.has_calls_from(start) {
+            storage.calls.push(self.call_stack.pop_call()?);
+        }
+        if let Some(extras) = extras {
+            if let Some(recycled) = &mut storage.extras {
+                **recycled = extras;
+            } else {
+                storage.extras = Some(Box::new(extras));
+            }
+        }
+        let finally_start = self
+            .finally_stack
+            .partition_point(|entry| entry.frame_base < base);
+        let capture_start = self
+            .closure_captures
+            .partition_point(|entry| entry.base < base);
+        storage
+            .finally
+            .extend(self.finally_stack.drain(finally_start..));
+        storage
+            .captures
+            .extend(self.closure_captures.drain(capture_start..));
+        self.registers.detach(start, &mut storage.registers)?;
+        Ok(Activation {
+            frame,
+            silence: Vec::new(),
+            storage,
+        })
+    }
+
+    pub(super) fn restore_generator_frame(&mut self, activation: Activation) -> Storage {
+        self.diagnostic_reporter.resume_silence(activation.silence);
+        let old_start = activation.frame.start();
+        let start = self.registers.len();
+        let base = start + activation.frame.kind().prefix();
+        let mut storage = activation.storage;
+        self.registers.attach(&mut storage.registers);
+        self.call_stack
+            .push(activation.frame.moved_to(base).as_callback());
+        if let Some(extras) = &mut storage.extras {
+            let mut restored = std::mem::replace(extras.as_mut(), FrameExtras::new());
+            if let Some(saved) = &mut restored.arguments.saved {
+                *saved = start + (*saved - old_start);
+            }
+            *self.call_stack.current_extras_mut() = restored;
+        }
+        while let Some((call, details)) = storage.calls.pop() {
+            let destination = start + (call.base() - old_start);
+            self.call_stack
+                .push_call(call.moved_to(destination), details);
+        }
+        for mut entry in storage.finally.drain(..) {
+            entry.frame_base = base;
+            self.finally_stack.push(entry);
+        }
+        for mut capture in storage.captures.drain(..) {
+            capture.base = base;
+            self.closure_captures.push(capture);
+        }
+        storage
+    }
+}

@@ -1,12 +1,10 @@
 //! Asking what a value is, and converting it: `gettype`, the `is_*` family,
 //! `intval` and friends, `settype`.
 
-use phera_extension_api::value::{
-    cast_to_bool, is_numeric, to_array, to_float, to_int, to_php_string,
-};
+use phera_extension_api::value::{cast_to_bool, is_numeric, to_array, to_float, to_int};
 use phera_extension_api::{
-    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Registry, SyncFn, Value,
-    args,
+    Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType, Registry,
+    SyncFn, Value, args,
 };
 
 pub(crate) fn register(registry: &mut Registry) {
@@ -40,14 +38,14 @@ pub(crate) fn register(registry: &mut Registry) {
         ("is_countable", is_countable),
         ("floatval", floatval),
         ("doubleval", floatval),
-        ("strval", strval),
         ("boolval", boolval),
     ];
     for &(name, function) in one_value {
         registry.function(FunctionEntry::sync(name, VALUE, function));
     }
     registry.function(FunctionEntry::sync("intval", INTVAL, intval));
-    registry.function(FunctionEntry::sync("settype", SETTYPE, settype));
+    registry.function(FunctionEntry::asynchronous("strval", VALUE, strval));
+    registry.function(FunctionEntry::asynchronous("settype", SETTYPE, settype));
 }
 
 fn gettype(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
@@ -75,17 +73,24 @@ type_test!(is_null, Value::Null);
 type_test!(is_bool, Value::Bool(_));
 type_test!(is_int, Value::Int(_));
 type_test!(is_float, Value::Float(_));
-type_test!(is_string, Value::String(_));
+type_test!(is_string, Value::InternedStr(_) | Value::String(_));
 type_test!(is_array, Value::Array(_));
 type_test!(is_object, Value::Object(_));
 type_test!(
     is_scalar,
-    Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::String(_)
+    Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::InternedStr(_) | Value::String(_)
 );
-// Objects that implement Traversable or Countable will count too, once
-// classes exist.
-type_test!(is_iterable, Value::Array(_));
-type_test!(is_countable, Value::Array(_));
+fn is_iterable(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    Ok(Value::Bool(args::value(arguments, 0).is_iterable()))
+}
+
+fn is_countable(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    Ok(Value::Bool(match args::value(arguments, 0) {
+        Value::Array(_) => true,
+        Value::Object(object) => object.class.is_countable(),
+        _ => false,
+    }))
+}
 
 /// A closed resource is no longer a resource to `is_resource`.
 fn is_resource(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
@@ -98,6 +103,7 @@ fn is_resource(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult 
 fn is_numeric_value(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     Ok(Value::Bool(match args::value(arguments, 0) {
         Value::Int(_) | Value::Float(_) => true,
+        Value::InternedStr(string) => is_numeric(string.as_bytes()),
         Value::String(string) => is_numeric(string.as_bytes()),
         _ => false,
     }))
@@ -109,6 +115,9 @@ fn intval(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     match value {
         // The base only applies to strings, and base 10 follows the ordinary
         // cast, which also understands "1e3".
+        Value::InternedStr(string) if base != 10 => {
+            Ok(Value::Int(parse_in_base(string.as_bytes(), base)))
+        }
         Value::String(string) if base != 10 => {
             Ok(Value::Int(parse_in_base(string.as_bytes(), base)))
         }
@@ -199,9 +208,11 @@ fn floatval(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     Ok(Value::Float(float))
 }
 
-fn strval(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let string = to_php_string(args::value(arguments, 0), context.diagnostics())?;
-    Ok(Value::String(string))
+fn strval(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move {
+        let string = context.stringify(args::value(&arguments, 0)).await?;
+        Ok(Value::String(string))
+    })
 }
 
 fn boolval(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
@@ -209,7 +220,12 @@ fn boolval(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     Ok(Value::Bool(flag))
 }
 
-fn settype(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+fn settype(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Box::pin(convert_type(context, arguments))
+}
+
+async fn convert_type(context: &mut dyn Context, arguments: Vec<Value>) -> NativeResult {
+    let arguments = &arguments;
     let Some(variable) = args::reference(arguments, 0) else {
         return Err(NativeError::error(
             "settype(): Argument #1 ($var) could not be passed by reference",
@@ -220,7 +236,7 @@ fn settype(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let converted = match name.as_slice() {
         b"int" | b"integer" => Value::Int(to_int(&current, context.diagnostics())?),
         b"float" | b"double" => Value::Float(to_float(&current, context.diagnostics())?),
-        b"string" => Value::String(to_php_string(&current, context.diagnostics())?),
+        b"string" => Value::String(context.stringify(&current).await?),
         b"array" => Value::from(to_array(&current, context.diagnostics())),
         b"bool" | b"boolean" => Value::Bool(cast_to_bool(&current, context.diagnostics())),
         b"null" => {

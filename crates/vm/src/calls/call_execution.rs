@@ -6,32 +6,87 @@
 //! a frame of the call's kind; `$this` and a closure are in the window
 //! already. User code never recurses through the Rust stack.
 
+use std::rc::Rc;
+
 use phera_bytecode::{FunctionId, Reg};
 use phera_extension_api::NativeError;
+use phera_value::{Object, Value};
 
 use crate::Vm;
 use crate::calls::call_view::CallView;
 use crate::calls::callback_binding::ArgumentOrigin;
 use crate::calls::execution_loop::BatchExit;
 use crate::calls::frame::Frame;
-use crate::calls::prepared_call::{CallDetails, CallFlags, PreparedCall, PreparedCallee};
+use crate::calls::prepared_call::{CallDetails, CallFlags, CallKind, PreparedCall, PreparedCallee};
 use crate::calls::window_context::WindowContext;
 use crate::code_table::FunctionIndex;
 
+pub(crate) enum CallEntry {
+    Php,
+    Native,
+    ConvertStrings,
+}
+
 impl Vm {
-    /// Enters the prepared call if its target is PHP code. Returns `false`
-    /// for a native target, which the async shell runs instead.
+    /// A resolved method with an exact positional argument list can create the
+    /// running window directly. Other arguments need the ordinary binder.
+    pub(crate) fn enter_exact_method(
+        &mut self,
+        function: FunctionIndex,
+        receiver: &Rc<Object>,
+        argument: Option<&Value>,
+        destination: Option<Reg>,
+    ) -> Result<bool, NativeError> {
+        let facts = self.code.facts(function);
+        let count = usize::from(argument.is_some());
+        if facts.parameters as usize != count
+            || facts.shape != crate::function_facts::FunctionShape::Plain
+            || argument.is_some_and(|value| {
+                !facts.takes_value(0)
+                    || (facts.is_typed(0)
+                        && !facts.parameter_masks[0].intersects(crate::types::own_type(value)))
+            })
+        {
+            return Ok(false);
+        }
+        self.check_frame_limit()?;
+        let base = self.registers.len() + 1;
+        self.registers.grow_to(base + facts.registers as usize);
+        self.registers
+            .put(base - 1, Value::Object(receiver.clone()));
+        if let Some(argument) = argument {
+            self.registers.put(base, argument.clone());
+        }
+        self.call_stack.push(Frame::of_kind(
+            function,
+            CallKind::Method,
+            base,
+            destination,
+        ));
+        Ok(true)
+    }
+
+    /// Enter ordinary PHP frames directly. Native calls and string conversions
+    /// that must run PHP code are left for the asynchronous interpreter.
     pub(crate) fn enter_prepared_call(
         &mut self,
         destination: Option<Reg>,
-    ) -> Result<bool, NativeError> {
-        if self.call_stack.top_call()?.callee == PreparedCallee::General {
-            return Ok(false);
+    ) -> Result<CallEntry, NativeError> {
+        let call = self.call_stack.top_call()?;
+        if call.callee == PreparedCallee::General {
+            if !call.flags.contains(CallFlags::MAGIC) {
+                return Ok(CallEntry::Native);
+            }
+            self.expand_magic_call()?;
+        } else if call.flags.contains(CallFlags::STRING_ARGUMENT)
+            && self.deferred_string_coercion(self.argument_origin)
+        {
+            return Ok(CallEntry::ConvertStrings);
         }
         self.check_frame_limit()?;
         let (call, details) = self.call_stack.pop_call()?;
         self.enter_call(call, details, destination)?;
-        Ok(true)
+        Ok(CallEntry::Php)
     }
 
     /// `CallDirect` when the interpreter loop's quick entry does not apply
@@ -56,14 +111,23 @@ impl Vm {
             .ok_or_else(|| internal_error!("direct call target"))?;
         self.prepare_php_call(function);
         for index in 0..count as usize {
-            let value = self.registers.take(from + index);
+            // Every parameter of a direct call takes a value (the compiler
+            // makes no direct call to a function with a by-reference
+            // parameter), so a reference that a call returned straight into
+            // the argument area is read here: `grow(refret())` must not
+            // change the variable `refret` returned.
+            let value = match self.registers.take(from + index) {
+                reference @ Value::Reference(_) => reference.deref().clone(),
+                value => value,
+            };
             self.store_sent_value(index, value)?;
         }
         *work += 1;
-        self.check_frame_limit()?;
-        let (call, details) = self.call_stack.pop_call()?;
-        self.enter_call(call, details, Some(destination))?;
-        Ok(None)
+        match self.enter_prepared_call(Some(destination))? {
+            CallEntry::Php => Ok(None),
+            CallEntry::ConvertStrings => Ok(Some(BatchExit::BindCall(destination))),
+            CallEntry::Native => Err(internal_error!("native direct PHP call")),
+        }
     }
 
     /// Bind the arguments, then push the frame. The frame is pushed even when
@@ -96,6 +160,14 @@ impl Vm {
         }
         if let Some(arguments) = arguments {
             self.call_stack.current_extras_mut().arguments = arguments;
+        }
+        let body = self.code.function(function);
+        if body.argument_layout == phera_bytecode::ArgumentLayout::Variadic
+            && let Some(index) = body.parameters.len().checked_sub(1)
+            && let Some(Some(Value::Array(variadic))) =
+                self.registers.window(slots.base + index, 1).first()
+        {
+            self.call_stack.current_extras_mut().variadic = Some(variadic.clone());
         }
         result
     }

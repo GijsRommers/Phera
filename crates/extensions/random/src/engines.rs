@@ -12,7 +12,7 @@
 
 use phera_extension_api::NativeError;
 
-use crate::mt19937::{Mode, Mt19937};
+use crate::mt19937::Mt19937;
 
 /// PCG's 128-bit multiplier and increment.
 const PCG_MULTIPLIER: u128 = (2549297995355413924u128 << 64) | 4865540595714422341;
@@ -153,20 +153,6 @@ impl Engine {
             Err(_) => self.range64(width)?,
         };
         Ok(offset.wrapping_add(min as u64) as i64)
-    }
-
-    /// What `mt_rand($min, $max)` and `getInt()` draw: a range, except
-    /// that Mt19937 in its legacy mode scales one draw as PHP 5 did, which
-    /// is biased.
-    pub fn integer(&mut self, min: i64, max: i64) -> Result<i64, NativeError> {
-        if let Self::Mt(mt) = self
-            && mt.mode == Mode::Legacy
-        {
-            let draw = f64::from(mt.next() >> 1);
-            let scale = (max as f64 - min as f64 + 1.0) * (draw / 2147483648.0);
-            return Ok((scale as u64).wrapping_add(min as u64) as i64);
-        }
-        self.range(min, max)
     }
 }
 

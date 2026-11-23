@@ -10,6 +10,10 @@ use phera_value::{ArrayKey, ClassHandle, Object, Value};
 /// A linked class is immutable; its parent keeps inherited metadata alive.
 pub(crate) struct Class {
     /// The class's number in the request's class table.
+    pub(crate) hooks: Option<std::rc::Rc<phera_extension_api::ClassHooks>>,
+    /// Direct property opcodes can check their own hook in one load.
+    pub(crate) property_access: Option<&'static phera_extension_api::NativePropertyAccess>,
+    pub(crate) operations: super::operations::ClassOperations,
     pub(crate) index: super::ClassIndex,
     /// Only user class scopes may be assigned freely by Closure::bind.
     pub(crate) origin: ClassOrigin,
@@ -26,33 +30,55 @@ pub(crate) struct Class {
     pub(crate) ancestors: std::collections::HashSet<String>,
     pub(crate) parent: Option<Rc<Class>>,
     pub(crate) interfaces: Vec<Rc<Class>>,
+    pub(crate) traits: Vec<String>,
+    pub(crate) enum_info: Option<super::enums::EnumInfo>,
     pub(crate) kind: ClassKind,
     pub(crate) is_abstract: bool,
     /// Immutable Throwable membership avoids ancestry allocation on every ordinary new.
     pub(crate) is_throwable: bool,
+    pub(crate) has_native_layout: bool,
     pub(crate) is_final: bool,
     pub(crate) is_readonly: bool,
     pub(crate) allows_dynamic_properties: bool,
-    pub(crate) property_access: Option<&'static phera_extension_api::NativePropertyAccess>,
+    /// What its property accesses may involve (see `property_facts`), made
+    /// once the rest of the class is linked.
+    pub(crate) property_facts: std::cell::OnceCell<super::property_facts::PropertyFacts>,
+    pub(crate) magic: Option<Box<super::magic::MagicMethods>>,
     pub(crate) methods: HashMap<String, Rc<Method>>,
     /// The same methods by name key, built on first use by a fast call.
+    /// Name keys are numbers of the request's code table; a class shared by
+    /// the forks of a snapshot has its table built when the snapshot is
+    /// taken, from the numbers every fork shares, and never again (see
+    /// `ClassTable::build_method_tables`).
     pub(crate) method_table: std::cell::OnceCell<super::method_table::MethodTable>,
+    pub(crate) serialized_fields:
+        std::cell::OnceCell<Option<Rc<[phera_extension_api::serialization::SerializedProperty]>>>,
     /// Constructor presence is immutable after linking, including inheritance.
     pub(crate) constructor: Option<Rc<Method>>,
     /// Root-first property keys reproduce the layout used by native testing helpers.
     pub(crate) defaults: Vec<PropertyDefault>,
-    /// Literal defaults are materialized once at linking; objects clone this COW table.
-    pub(crate) property_template: Option<phera_value::PhpArray>,
+    pub(crate) property_names: super::property_names::PropertyNames,
+    /// Literal defaults are materialized once at linking; objects clone this
+    /// (one box of slots).
+    pub(crate) property_template: Option<phera_value::Properties>,
+    /// The declared instance properties in PHP's order, which every object
+    /// of the class keeps in slots; `None` for a class without any.
+    pub(crate) layout: Option<Rc<phera_value::PropertyLayout>>,
     pub(crate) static_properties: Vec<PropertyDefault>,
     pub(crate) constants: HashMap<String, Rc<LinkedConstant>>,
+    pub(crate) declaration: Option<(crate::code_table::FunctionIndex, phera_bytecode::ClassId)>,
 }
 
 /// Defaults retain their mangled keys so private ancestors do not collide.
 #[derive(Clone)]
 pub(crate) struct PropertyDefault {
+    pub(crate) set_visibility: Option<Visibility>,
+    pub(crate) is_final: bool,
     pub(crate) key: ArrayKey,
     pub(crate) value: Value,
-    pub(crate) static_storage: Option<Rc<crate::reference_holders::StaticProperty>>,
+    /// Where this request keeps a static property's value (see
+    /// [`super::class_state`]); `None` for an instance property.
+    pub(crate) static_storage: Option<super::class_state::StaticSlot>,
     pub(crate) name: String,
     pub(crate) declaring: String,
     pub(crate) visibility: Visibility,
@@ -60,8 +86,7 @@ pub(crate) struct PropertyDefault {
     pub(crate) initializer: Option<crate::code_table::FunctionIndex>,
     pub(crate) ty: Option<phera_bytecode::Type>,
     pub(crate) is_readonly: bool,
-    pub(crate) static_initialized: Rc<std::cell::Cell<bool>>,
-    pub(crate) value_initialized: Rc<std::cell::Cell<bool>>,
+    pub(crate) hooks: Option<Rc<super::property_hooks::LinkedPropertyHooks>>,
 }
 
 /// A method remembers its declaring scope independently of the receiver's class.
@@ -87,10 +112,12 @@ pub(crate) enum ClassOrigin {
 }
 
 /// Native and user methods share argument sends but execute through different handlers.
+#[derive(Clone)]
 pub(crate) enum MethodBody {
     Closure(crate::closure_methods::ClosureMethod),
     User(crate::code_table::FunctionIndex),
     Native(MethodEntry),
+    Enum(super::enums::EnumMethod),
 }
 
 /// Receiver, lexical scope and called class differ under inheritance and static dispatch.
@@ -104,6 +131,27 @@ pub(crate) struct MethodContext {
 }
 
 impl ClassHandle for Class {
+    fn trace_native_values(
+        &self,
+        payload: &dyn std::any::Any,
+        visit: &mut dyn FnMut(&Value),
+    ) -> bool {
+        self.hooks
+            .as_ref()
+            .and_then(|hooks| hooks.trace_native)
+            .is_some_and(|trace| trace(payload, visit))
+    }
+
+    fn is_traversable(&self) -> bool {
+        self.operations
+            .has(super::operations::ClassOperations::TRAVERSABLE)
+    }
+
+    fn is_countable(&self) -> bool {
+        self.operations
+            .has(super::operations::ClassOperations::COUNTABLE)
+    }
+
     fn is_instance_of(&self, name: &str) -> bool {
         self.is_a(name)
     }
@@ -111,8 +159,51 @@ impl ClassHandle for Class {
     fn name(&self) -> &str {
         &self.name
     }
+    fn has_property(&self, name: &str) -> bool {
+        self.defaults.iter().any(|property| property.name == name)
+    }
+
+    fn has_native_properties(&self) -> bool {
+        self.hooks
+            .as_ref()
+            .is_some_and(|hooks| hooks.properties.is_some())
+    }
+
+    #[cold]
+    fn cast(&self, object: &phera_value::Object, target: phera_value::ObjectCast) -> Option<Value> {
+        self.hooks.as_ref()?.cast?(object, target)
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
+    }
+    fn order_lazy_properties(&self, properties: phera_value::PhpArray) -> phera_value::PhpArray {
+        let mut ordered = phera_value::PhpArray::with_capacity(properties.len());
+        for property in &self.defaults {
+            if let Some(value) = properties.get(&property.key) {
+                ordered.insert(property.key.clone(), value.clone());
+            }
+        }
+        for (key, value) in properties.iter() {
+            if !ordered.contains_key(&key) {
+                ordered.insert(key, value.clone());
+            }
+        }
+        ordered
+    }
+
+    fn is_enum(&self) -> bool {
+        self.kind == ClassKind::Enum
+    }
+
+    fn property_layout(&self) -> Option<Rc<phera_value::PropertyLayout>> {
+        self.layout.clone()
+    }
+
+    fn has_property_magic(&self) -> bool {
+        self.magic
+            .as_ref()
+            .is_some_and(|magic| magic.has_properties())
     }
 }
 
@@ -139,7 +230,7 @@ pub(crate) enum Invocation {
 
 /// Lazy constants retain declaring scope and detect recursive initializers before borrowing values.
 pub(crate) struct LinkedConstant {
-    pub(crate) deprecated: Option<&'static str>,
+    pub(crate) deprecated: Option<String>,
     pub(crate) declaring: String,
     pub(crate) visibility: Visibility,
     pub(crate) is_final: bool,
@@ -151,9 +242,18 @@ pub(crate) struct LinkedConstant {
 pub(crate) enum ConstantInitializer {
     Compiled {
         function: crate::code_table::FunctionIndex,
-        state: std::cell::RefCell<ConstantState>,
+        /// Where the request keeps the evaluated value.
+        slot: super::class_state::ConstantSlot,
     },
     Value(Value),
+    EnumCase {
+        name: String,
+        backing: Option<crate::code_table::FunctionIndex>,
+        /// Where the request keeps the case object once it may be read
+        /// directly (see `EnumCases`). A native enum's cases have none and
+        /// are always fetched through the case lookup.
+        slot: Option<super::class_state::ConstantSlot>,
+    },
 }
 
 /// A failed evaluation restores Uninitialized so later accesses can retry.
@@ -176,7 +276,7 @@ pub(crate) fn literal_initializer(
 ) -> Option<Value> {
     use phera_bytecode::Instruction;
     let instructions = &code.function(*reference).instructions;
-    let [load, Instruction::Return { src }] = instructions.as_slice() else {
+    let [load, Instruction::Return { src }] = &instructions[..] else {
         return None;
     };
     let LiteralLoad { destination, value } = match *load {
@@ -203,18 +303,46 @@ pub(crate) fn literal_initializer(
     (destination == *src).then_some(value)
 }
 
-/// Templates are valid for the immutable linked class and contain no evaluated expressions.
-pub(crate) fn property_template(defaults: &[PropertyDefault]) -> Option<phera_value::PhpArray> {
-    let mut template = phera_value::PhpArray::new();
+/// The layout of a class's instance properties: each declared key once, at
+/// its first place (a redeclaration keeps the parent's place), parents first.
+pub(crate) fn property_layout(
+    defaults: &[PropertyDefault],
+) -> Option<Rc<phera_value::PropertyLayout>> {
+    let mut keys: Vec<ArrayKey> = Vec::with_capacity(defaults.len());
     for property in defaults {
-        if property.initializer.is_some() {
-            return None;
-        }
-        if property.initialized {
-            template.insert(property.key.clone(), property.value.clone());
+        if !keys.contains(&property.key) {
+            keys.push(property.key.clone());
         }
     }
-    Some(template)
+    (!keys.is_empty()).then(|| Rc::new(phera_value::PropertyLayout::new(keys)))
+}
+
+/// Templates are valid for the immutable linked class and contain no
+/// evaluated expressions: the literal default of each initialized
+/// property in its slot (the last one, for a redeclared property).
+pub(crate) fn property_template(
+    defaults: &[PropertyDefault],
+    layout: Option<&Rc<phera_value::PropertyLayout>>,
+) -> Option<phera_value::Properties> {
+    if defaults
+        .iter()
+        .any(|property| property.initializer.is_some())
+    {
+        return None;
+    }
+    let Some(layout) = layout else {
+        return Some(phera_value::Properties::default());
+    };
+    let mut slots = vec![None; layout.len()].into_boxed_slice();
+    for property in defaults.iter().filter(|property| property.initialized) {
+        if let Some(slot) = layout
+            .slot(&property.key)
+            .and_then(|slot| slots.get_mut(slot))
+        {
+            *slot = Some(property.value.clone());
+        }
+    }
+    Some(phera_value::Properties::with_layout(layout.clone(), slots))
 }
 
 /// Argument routing metadata is independent of the receiver and shared by calls.
@@ -248,9 +376,11 @@ impl Class {
             return *result;
         }
         let result = self.is_a(name);
-        self.declaration_matches
-            .borrow_mut()
-            .insert(name.to_owned(), result);
+        let mut declarations = self.declaration_matches.borrow_mut();
+        // Native definitions outlive requests. Cache only bounded, canonical ancestry matches.
+        if self.declaration.is_some() || (result && declarations.len() < 64) {
+            declarations.insert(name.to_owned(), result);
+        }
         result
     }
 }
@@ -275,6 +405,11 @@ impl Method {
                 MethodBody::Native(entry) => {
                     entry.params.iter().map(ParameterSpec::native).collect()
                 }
+                MethodBody::Enum(operation) => operation
+                    .parameters()
+                    .iter()
+                    .map(ParameterSpec::native)
+                    .collect(),
             };
             MethodSignature {
                 name: format!("{}::{}", method.declaring, method.name).into(),
@@ -293,5 +428,78 @@ impl Class {
             return Some(true);
         }
         self.declaration_matches.borrow().get(name).copied()
+    }
+}
+
+/// A default int can widen to float without scalar coercion from strings.
+pub(crate) fn widen_property_value(value: Value, ty: Option<&phera_bytecode::Type>) -> Value {
+    ty.and_then(|ty| crate::types::widen_int_to_float(&value, ty.mask))
+        .unwrap_or(value)
+}
+
+/// How many classes the ancestry walk keeps waiting at once, and how many
+/// it visits in all (an interface reached along two paths is visited
+/// twice). Real hierarchies stay far below both; a larger one answers
+/// `None`, for the caller's general path.
+const WALK_DEPTH: usize = 32;
+const WALK_VISITS: usize = 256;
+
+impl Class {
+    /// What this class's property accesses may involve.
+    #[inline]
+    pub(crate) fn property_facts(&self) -> super::property_facts::PropertyFacts {
+        *self
+            .property_facts
+            .get_or_init(|| super::property_facts::PropertyFacts::of(self))
+    }
+
+    /// Whether this class is `target`, extends it or implements it: the same
+    /// ancestry as `Class::ancestors`, its parent and interfaces and theirs.
+    /// `None` when the walk outgrows its stack or its visits.
+    pub(crate) fn derives_from(&self, target: &Class) -> Option<bool> {
+        if std::ptr::eq(self, target) {
+            return Some(true);
+        }
+        if self.parent.is_none() && self.interfaces.is_empty() {
+            return Some(false);
+        }
+        if let Some(parent) = &self.parent
+            && std::ptr::eq(&**parent, target)
+        {
+            return Some(true);
+        }
+        if self
+            .interfaces
+            .iter()
+            .any(|interface| std::ptr::eq(&**interface, target))
+        {
+            return Some(true);
+        }
+        let mut waiting: [Option<&Class>; WALK_DEPTH] = [None; WALK_DEPTH];
+        let mut count: usize = 0;
+        for ancestor in self.parent.iter().chain(&self.interfaces) {
+            for grand in ancestor.parent.iter().chain(&ancestor.interfaces) {
+                *waiting.get_mut(count)? = Some(&**grand);
+                count += 1;
+            }
+        }
+        if count == 0 {
+            return Some(false);
+        }
+        for _ in 0..WALK_VISITS {
+            let Some(last) = count.checked_sub(1) else {
+                return Some(false);
+            };
+            count = last;
+            let class = waiting.get(last).copied().flatten()?;
+            if std::ptr::eq(class, target) {
+                return Some(true);
+            }
+            for ancestor in class.parent.iter().chain(&class.interfaces) {
+                *waiting.get_mut(count)? = Some(&**ancestor);
+                count += 1;
+            }
+        }
+        None
     }
 }

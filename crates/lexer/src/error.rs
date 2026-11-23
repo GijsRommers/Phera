@@ -12,6 +12,6 @@ pub enum LexErrorKind {
     UnterminatedString,
     UnterminatedHeredoc,
     UnterminatedComment,
-    /// PHP syntax Phera rejects on purpose, such as backtick shell execution.
+    /// PHP syntax Phera rejects on purpose, such as the removed (real) cast.
     Unsupported(&'static str),
 }

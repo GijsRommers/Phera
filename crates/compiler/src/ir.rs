@@ -16,8 +16,13 @@ use phera_bytecode::Reg;
 /// Compiler IR with owned names and paths before table interning.
 #[derive(Debug, Clone)]
 pub enum Instruction {
+    AttributeDiagnostics,
+    /// Omitted during bytecode lowering; preserves positions while resolving forward gotos.
+    Nop,
     /// Quiet receiver read for isset($this).
-    ThisOrNull { destination: Reg },
+    ThisOrNull {
+        destination: Reg,
+    },
     /// Copy a lexical binding before allocating a closure object.
     Capture {
         source: Reg,
@@ -30,9 +35,13 @@ pub enum Instruction {
         binding: phera_bytecode::ClosureBinding,
     },
     /// Validate the saved return before finally may intercept its outcome.
-    CheckReturn { source: Reg },
+    CheckReturn {
+        source: Reg,
+    },
     /// Return a saved, already validated value or reference after finally.
-    ReturnChecked { source: Reg },
+    ReturnChecked {
+        source: Reg,
+    },
     /// Enter a shared finally subroutine and resume at the following instruction.
     FinallyCall {
         state: Reg,
@@ -40,11 +49,17 @@ pub enum Instruction {
         reason: phera_bytecode::FinallyEntry,
     },
     /// Return from a finally subroutine or resume its pending exception.
-    FinallyReturn { state: Reg },
+    FinallyReturn {
+        state: Reg,
+    },
     /// Replace a pending continuation when control exits a finally body.
-    FinallyDiscard { state: Reg },
+    FinallyDiscard {
+        state: Reg,
+    },
     /// Raise a Throwable expression; it has no normal successor.
-    Throw { source: Reg },
+    Throw {
+        source: Reg,
+    },
     /// Literal class/method operands need no intermediate PHP string registers.
     KnownStaticCall {
         class: String,
@@ -52,9 +67,14 @@ pub enum Instruction {
         binding: phera_bytecode::ClassBinding,
     },
     /// Allocate an evaluated class target before sending constructor arguments.
-    NewDynamic { class: Reg },
+    NewDynamic {
+        class: Reg,
+    },
     /// Resolve a method name evaluated at runtime on an object.
-    DynamicMethodCall { receiver: Reg, method: Reg },
+    DynamicMethodCall {
+        receiver: Reg,
+        method: Reg,
+    },
     /// Resolve a static-style call; forwarding retains the caller's late-bound class.
     StaticCall {
         class: Reg,
@@ -69,23 +89,48 @@ pub enum Instruction {
     },
 
     /// Fetch a constant using an evaluated class target.
+    DynamicClassConstant {
+        destination: Reg,
+        class: Reg,
+        name: Reg,
+    },
     ClassConstant {
         destination: Reg,
         class: Reg,
         name: String,
     },
+    /// A constant of a class the source names (`Post::LIMIT`).
+    NamedClassConstant {
+        destination: Reg,
+        class: String,
+        name: String,
+    },
     /// Publish a request-local class declaration.
     DeclareClass(usize),
     /// Prepare a constructor using the same sends as a function call.
-    New { class: String },
+    New {
+        class: String,
+    },
     /// Resolve a literal method name on an evaluated receiver.
-    MethodCall { receiver: Reg, method: String },
+    MethodCall {
+        receiver: Reg,
+        method: String,
+    },
     /// Resolve the class-name pseudo constant.
-    ClassName { destination: Reg, class: String },
+    ClassName {
+        destination: Reg,
+        class: String,
+    },
     /// Fetch the receiver from the current method frame.
-    This { destination: Reg },
+    This {
+        destination: Reg,
+    },
     /// Shallow-copy an object's property table.
-    Clone { destination: Reg, source: Reg },
+    Clone {
+        destination: Reg,
+        source: Reg,
+        with: Option<Reg>,
+    },
     /// Test membership in a resolved class or interface.
     InstanceOf {
         destination: Reg,
@@ -98,11 +143,18 @@ pub enum Instruction {
         declaration_type: String,
     },
     /// Bind an evaluated global name into this scope; emits BindDynamicGlobal.
-    DynamicGlobal { name: Reg },
+    DynamicGlobal {
+        name: Reg,
+    },
     /// Release a temporary owner to preserve copy-on-write behavior; emits Clear.
-    Clear { register: Reg },
+    Clear {
+        register: Reg,
+    },
     /// Skip a default expression when an argument was passed; emits ReceiveDefault.
-    DefaultCheck { parameter: Reg, passed: Target },
+    DefaultCheck {
+        parameter: Reg,
+        passed: Target,
+    },
     /// Bind persistent function storage and skip initialization when present; emits BindStatic.
     StaticCheck {
         local: Reg,
@@ -121,13 +173,22 @@ pub enum Instruction {
         fallback: Option<String>,
     },
     /// Resolve an evaluated callable; emits InitDynamicCall.
-    StartDynamicCall { callee: Reg },
+    StartDynamicCall {
+        callee: Reg,
+    },
     /// Send a value or writable argument in evaluation order; emits NameArgument and SendValue, SendLocal, SendPath, or SendSpread.
-    Send { argument: Argument },
+    Send {
+        argument: Argument,
+    },
     /// Invoke the prepared callee and save its result; emits Call.
-    FinishCall { destination: Reg },
+    FinishCall {
+        destination: Reg,
+        result: phera_bytecode::CallResult,
+    },
     /// Capture the prepared first-class callable; emits MakeCallable.
-    FinishCallable { destination: Reg },
+    FinishCallable {
+        destination: Reg,
+    },
     /// Increment or decrement a writable place; emits IncDecLocal or IncDecPath.
     IncPlace {
         destination: Reg,
@@ -143,9 +204,20 @@ pub enum Instruction {
     },
 
     /// Retain a writable reference cell; emits MakeReference.
-    Reference { destination: Reg, place: Place },
+    Reference {
+        destination: Reg,
+        place: Place,
+    },
     /// Replace a binding with an existing cell; emits BindReference.
-    Rebind { place: Place, source: Reg },
+    Rebind {
+        place: Place,
+        source: Reg,
+    },
+    /// Execute PHP source in the current symbol table.
+    Eval {
+        destination: Reg,
+        source: Reg,
+    },
     /// Execute another file in this scope; emits Include.
     Include {
         destination: Reg,
@@ -154,9 +226,15 @@ pub enum Instruction {
         required: bool,
     },
     /// Materialize a literal; emits LoadInt, LoadConst, or LoadNull.
-    Load { destination: Reg, constant: usize },
+    Load {
+        destination: Reg,
+        constant: usize,
+    },
     /// Copy a dereferenced register value; emits Move.
-    Move { destination: Reg, source: Reg },
+    Move {
+        destination: Reg,
+        source: Reg,
+    },
     /// Read a place with the selected warning policy; emits Move or Fetch.
     Read {
         destination: Reg,
@@ -164,9 +242,21 @@ pub enum Instruction {
         mode: phera_bytecode::FetchMode,
     },
     /// Assign through an existing reference when present; emits Assign or AssignPath.
-    Write { place: Place, source: Reg },
+    Write {
+        place: Place,
+        source: Reg,
+    },
+    /// Prepare an indirect property destination before reading its local source.
+    WriteFromLocal {
+        place: Place,
+        source: Reg,
+        destination: Reg,
+    },
     /// Alias two writable places; emits MakeReference, BindReference, and Clear.
-    Bind { place: Place, source: Place },
+    Bind {
+        place: Place,
+        source: Place,
+    },
     /// Remove a binding or array element; emits UnsetPath.
     Unset(Place),
     /// Apply an already evaluated binary operation; emits Binary.
@@ -182,10 +272,52 @@ pub enum Instruction {
         operator: Unary,
         source: Reg,
     },
+    BuiltinUnary {
+        destination: Reg,
+        operator: phera_bytecode::BuiltinUnary,
+        source: Reg,
+    },
+    /// The built-in behind a `GuardBuiltin`; emits NamespacedBuiltin.
+    NamespacedBuiltin {
+        destination: Reg,
+        operator: phera_bytecode::BuiltinUnary,
+        source: Reg,
+    },
+    BuiltinFrame {
+        destination: Reg,
+        operator: phera_bytecode::BuiltinFrame,
+    },
+    ArrayKeyExists {
+        destination: Reg,
+        key: Reg,
+        array: Reg,
+    },
+    InLiteralArray {
+        destination: Reg,
+        needle: Reg,
+        haystack: Vec<phera_bytecode::Constant>,
+        strict: bool,
+    },
+    InitUserCallback {
+        callback: Reg,
+        arguments: phera_bytecode::CallbackArguments,
+    },
+    SendUserCallback {
+        source: Reg,
+        arguments: phera_bytecode::CallbackArguments,
+    },
     /// Write a PHP string conversion to output; emits Echo.
     Echo(Reg),
     /// Transfer control to an IR target; emits Jump with a relocated target.
     Jump(Target),
+    /// Before an unqualified built-in call in a namespace: fall through to
+    /// the built-in when the call means the global function, else jump to
+    /// `call`, the general call; emits GuardBuiltin.
+    GuardBuiltin {
+        name: String,
+        fallback: Option<String>,
+        call: Target,
+    },
     /// Branch on PHP truthiness; emits JumpIf or JumpIfNot.
     Branch {
         value: Reg,
@@ -193,9 +325,51 @@ pub enum Instruction {
         when: bool,
     },
     /// Branch when the value is null; emits JumpIfNull.
-    BranchNull { value: Reg, target: Target },
+    BranchNull {
+        value: Reg,
+        target: Target,
+    },
+    /// Branch when the value is not null; emits JumpIfNotNull. A condition
+    /// `$x === null` / `$x !== null` lowers to `BranchNull`/`BranchNotNull`.
+    BranchNotNull {
+        value: Reg,
+        target: Target,
+    },
+    /// Compare two registers and branch on the result; emits BinaryBranch.
+    /// Used where the comparison's value is only a condition's decision.
+    BranchCompare {
+        operator: Binary,
+        left: Reg,
+        right: Reg,
+        target: Target,
+        when: bool,
+    },
+    /// Compare a register with an integer literal and branch; emits BinaryIntBranch.
+    BranchCompareInt {
+        operator: Binary,
+        left: Reg,
+        rhs: i32,
+        target: Target,
+        when: bool,
+    },
+    /// `source instanceof class`, branching on the answer; emits
+    /// InstanceOfBranch / InstanceOfBranchIf.
+    BranchInstanceOf {
+        source: Reg,
+        class: String,
+        target: Target,
+        when: bool,
+    },
+    /// The evaluated-class form; emits DynamicInstanceOfBranch(If).
+    BranchDynamicInstanceOf {
+        source: Reg,
+        class: Reg,
+        target: Target,
+        when: bool,
+    },
     /// Prepare and invoke an evaluated callee; emits InitDynamicCall, argument sends, and Call.
     Call {
+        result: phera_bytecode::CallResult,
         destination: Reg,
         name: Reg,
         fallback: Option<String>,
@@ -205,18 +379,20 @@ pub enum Instruction {
     Return(Reg),
     /// Return an alias cell from this frame; emits ReturnReference.
     ReturnReference(Reg),
+    ReturnMissing,
     /// Stop the request with a value or status; emits Exit.
     Exit(Reg),
     /// Enter or leave PHP error suppression; emits BeginSilence or EndSilence.
     Suppress(bool),
     /// Construct an empty array; emits NewArray.
     Array(Reg),
-    /// Insert, append, reference-bind, or unpack an array entry; emits ArraySetReference, ArrayPushReference, or ArraySpread.
+    /// Insert, append, reference-bind, or unpack an array entry.
     ArrayPush {
         array: Reg,
         key: Option<Reg>,
         value: Reg,
         spread: bool,
+        by_reference: bool,
     },
     /// Fetch a named PHP constant; emits FetchConstant.
     Constant {
@@ -225,17 +401,25 @@ pub enum Instruction {
         fallback: Option<String>,
     },
     /// Define a request constant; emits DeclareConstant.
-    Define { name: String, source: Reg },
+    Define {
+        name: String,
+        source: Reg,
+    },
     /// Publish a conditional function declaration; emits DeclareFunction.
     Declare(usize),
     /// Bind a named global cell into a local; emits BindGlobal.
-    Global { local: Reg, name: String },
+    Global {
+        local: Reg,
+        name: String,
+    },
     /// Start snapshot or live reference traversal; emits IterStart or IterStartReference.
     IterInit {
         iterator: Reg,
         source: Reg,
         place: Option<Place>,
     },
+    /// Release an iterator when a jump bypasses normal traversal.
+    IterEnd(Reg),
     /// Advance traversal and branch on exhaustion; emits IterNext or IterNextKeyed.
     IterNext {
         iterator: Reg,
@@ -244,5 +428,17 @@ pub enum Instruction {
         end: Target,
     },
     /// Raise the unmatched-subject exception; emits Raise(UnhandledMatch).
-    MatchError { subject: Reg },
+    MatchError {
+        subject: Reg,
+    },
+    GeneratorStart,
+    Yield {
+        destination: Reg,
+        key: Option<Reg>,
+        value: Option<Reg>,
+    },
+    YieldFrom {
+        destination: Reg,
+        source: Reg,
+    },
 }

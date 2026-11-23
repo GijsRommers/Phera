@@ -16,12 +16,28 @@ impl PhpString {
         Rc::make_mut(&mut self.0).extend_from_slice(bytes);
     }
 
+    /// Borrows mutable bytes only when this PHP string owns its buffer.
+    /// A secure erase can preserve the bytes visible to other PHP values.
+    pub fn as_unique_bytes_mut(&mut self) -> Option<&mut [u8]> {
+        Rc::get_mut(&mut self.0).map(Vec::as_mut_slice)
+    }
+
+    /// Mutate the bytes, preserving other PHP values that share this buffer.
+    pub fn make_mut_bytes(&mut self) -> &mut [u8] {
+        Rc::make_mut(&mut self.0).as_mut_slice()
+    }
+
     pub fn as_bytes(&self) -> &[u8] {
         &self.0
     }
 
     pub fn len(&self) -> usize {
         self.0.len()
+    }
+
+    /// Number of values sharing the backing storage, for `debug_zval_dump()`.
+    pub fn storage_owners(&self) -> usize {
+        Rc::strong_count(&self.0)
     }
 
     pub fn is_empty(&self) -> bool {

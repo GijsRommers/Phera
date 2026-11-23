@@ -8,9 +8,14 @@ pub fn statement_expressions(statement: &Statement) -> Vec<&Expression> {
         StatementKind::Expression(e) => vec![e],
         StatementKind::Echo(items) | StatementKind::Unset(items) => items.iter().collect(),
         StatementKind::Return(e) => e.iter().collect(),
-        StatementKind::If { condition, .. }
-        | StatementKind::While { condition, .. }
-        | StatementKind::DoWhile { condition, .. } => vec![condition],
+        StatementKind::If {
+            condition, elseifs, ..
+        } => std::iter::once(condition)
+            .chain(elseifs.iter().map(|elseif| &elseif.condition))
+            .collect(),
+        StatementKind::While { condition, .. } | StatementKind::DoWhile { condition, .. } => {
+            vec![condition]
+        }
         StatementKind::For {
             init,
             condition,
@@ -59,7 +64,7 @@ fn aggregate_children(expression: &Expression) -> Vec<&Expression> {
         }
         ExpressionKind::InterpolatedString(parts) => {
             for part in parts {
-                if let StringPart::Expression(e) = part {
+                if let StringPart::Expression(e) | StringPart::DollarCurly(e, _) = part {
                     result.push(e);
                 }
             }
@@ -72,7 +77,9 @@ fn aggregate_children(expression: &Expression) -> Vec<&Expression> {
 fn call_children(expression: &Expression) -> Vec<&Expression> {
     let mut result: Vec<&Expression> = Vec::new();
     match &expression.kind {
-        ExpressionKind::Call { callee, arguments } => {
+        ExpressionKind::Call {
+            callee, arguments, ..
+        } => {
             result.push(callee);
             arguments_children(arguments, &mut result);
         }
@@ -154,7 +161,7 @@ fn simple_children(expression: &Expression) -> Vec<&Expression> {
             result.push(target);
             member(name, &mut result);
         }
-        ExpressionKind::StaticProperty { class, name } => {
+        ExpressionKind::StaticProperty { class, name, .. } => {
             result.push(class);
             if let Variable::Dynamic(e) = name {
                 result.push(e);

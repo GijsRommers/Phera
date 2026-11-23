@@ -19,7 +19,7 @@
 //! guarantees.
 
 use phera_value::{
-    NumVal, PhpString, Value, cast_to_bool, float_repr, parse_numeric, to_php_string,
+    NumVal, ObjectCast, Value, cast_to_bool, float_repr, parse_numeric, to_php_string,
 };
 
 use crate::{Context, FunctionEntry, NativeError, Param, ParamType};
@@ -43,7 +43,11 @@ pub fn prepare_call(
     arguments: &mut [Value],
     context: &mut dyn Context,
 ) -> Result<(), NativeError> {
-    check_count(name, params, arguments.len())?;
+    if let Err(error) = check_count(name, params, arguments.len())
+        && params.first().is_none_or(Param::uses_parameter_arity)
+    {
+        return Err(error);
+    }
     let strict = context.strict_types();
     for (index, argument) in arguments.iter_mut().enumerate() {
         // Arguments past the declared list belong to the variadic parameter.
@@ -51,31 +55,68 @@ pub fn prepare_call(
         let Some(param) = params.get(index).or(params.last()) else {
             break;
         };
-        let site = Site {
-            function: name,
-            number: index + 1,
-            param,
-        };
-        if param.by_ref {
-            // The function sees the caller's variable, so the conversion has
-            // to happen inside the reference.
-            if let Value::Reference(cell) = argument {
-                let mut target = cell.try_borrow_mut().map_err(|_| {
-                    NativeError::error(format!(
-                        "{}(): Argument #{} is already being modified",
-                        site.function, site.number
-                    ))
-                })?;
-                convert(&mut target, &site, strict, context)?;
-            }
-            continue;
-        }
-        if argument.is_reference() {
-            let plain = argument.deref().clone();
-            *argument = plain;
-        }
-        convert(argument, &site, strict, context)?;
+        prepare_argument(name, index, param, argument, strict, context)?;
     }
+    Ok(())
+}
+
+/// Prepare one supplied argument when the VM parses a list that may call PHP.
+pub fn prepare_single_argument(
+    name: &str,
+    index: usize,
+    param: &Param,
+    argument: &mut Value,
+    context: &mut dyn Context,
+) -> Result<(), NativeError> {
+    prepare_argument(
+        name,
+        index,
+        param,
+        argument,
+        context.strict_types(),
+        context,
+    )
+}
+
+#[inline]
+fn prepare_argument(
+    name: &str,
+    index: usize,
+    param: &Param,
+    argument: &mut Value,
+    strict: bool,
+    context: &mut dyn Context,
+) -> Result<(), NativeError> {
+    let site = Site {
+        function: name,
+        number: index + 1,
+        param,
+    };
+    if param.by_ref {
+        if param.raw_reference {
+            return Ok(());
+        }
+        // The function sees the caller's variable, so the conversion has
+        // to happen inside the reference.
+        if let Value::Reference(cell) = argument {
+            let mut target = cell.try_borrow_mut().map_err(|_| {
+                NativeError::error(format!(
+                    "{}(): Argument #{} is already being modified",
+                    site.function, site.number
+                ))
+            })?;
+            convert(&mut target, &site, strict, context)?;
+            return Ok(());
+        }
+        if param.requires_ref() {
+            return Ok(());
+        }
+    }
+    if argument.is_reference() {
+        let plain = argument.deref().clone();
+        *argument = plain;
+    }
+    convert(argument, &site, strict, context)?;
     Ok(())
 }
 
@@ -113,41 +154,64 @@ impl Site<'_> {
     /// deprecation, but only for native functions and only without
     /// `strict_types`.
     fn null_deprecated(&self, context: &mut dyn Context) {
+        // PHP names the declared type here, also where the class's own type
+        // error words it differently ("int, string, or BcMath\Number").
+        let expected = match self.param.ty {
+            ParamType::NativeNumeric(numeric) => format!("of type {}", numeric.declaration),
+            _ => expected(self.param),
+        };
         context.deprecated(format!(
-            "{}(): Passing null to parameter #{}{} of type {} is deprecated",
+            "{}(): Passing null to parameter #{}{} {expected} is deprecated",
             self.function,
             self.number,
             self.name(),
-            type_text(self.param.ty)
         ));
     }
 }
 
 /// The type as PHP writes it in messages.
-fn type_text(ty: ParamType) -> &'static str {
+pub(crate) fn type_text(ty: ParamType) -> &'static str {
     match ty {
-        ParamType::Mixed => "mixed",
+        ParamType::Untyped | ParamType::Mixed => "mixed",
         ParamType::Bool => "bool",
         ParamType::Int => "int",
         ParamType::Float => "float",
         ParamType::String => "string",
         ParamType::Array => "array",
-        ParamType::Object => "object",
+        ParamType::Object | ParamType::ReflectedObject => "object",
+        // PHP reports array for invalid values passed to Z_PARAM_ARRAY_OR_OBJECT.
+        ParamType::ObjectOrArray => "array",
+        ParamType::ArrayOrInt => "array|int",
         ParamType::Class(name) => name,
+        ParamType::RoundingModeOrInt => "RoundingMode|int",
         ParamType::Callable => "callable",
         ParamType::Iterable => "Traversable|array",
         ParamType::Number => "int|float",
         ParamType::IntOrString => "string|int",
+        ParamType::NativeNumeric(numeric) => numeric.declaration,
         ParamType::ArrayOrString => "array|string",
+        ParamType::ObjectOrString => "object|string",
+        ParamType::CertificateOrString => "OpenSSLCertificate|string",
+        ParamType::ClosureOrString => "Closure|string",
         ParamType::StringOrNumber => "string|int|float",
         ParamType::ArrayOrNumber => "array|int|float",
         ParamType::ArrayOrFloat => "array|float",
         ParamType::ArrayOrBool => "array|bool",
+        ParamType::ArrayOrObject => "array|object",
+        ParamType::ClassUnion(declaration) => declaration,
     }
 }
 
 fn expected(param: &Param) -> String {
-    let text = type_text(param.ty);
+    if let ParamType::NativeNumeric(numeric) = param.ty {
+        return format!("of type {}", numeric.type_error);
+    }
+    // Zend's array-or-object parser reports "array" for other argument types.
+    let text = if param.ty == ParamType::ArrayOrObject {
+        "array"
+    } else {
+        type_text(param.ty)
+    };
     match (param.nullable, text.contains('|')) {
         (false, _) => format!("of type {text}"),
         (true, false) => format!("of type ?{text}"),
@@ -171,19 +235,38 @@ fn convert(
     strict: bool,
     context: &mut dyn Context,
 ) -> Result<(), NativeError> {
-    if value.is_null() && site.param.nullable {
+    if value.is_null() && site.param.accepts_null() {
         return Ok(());
     }
     let converted = match site.param.ty {
         // Whether a value is callable depends on which functions and classes
         // exist, which only the VM knows; `Context::call` reports it.
-        ParamType::Mixed | ParamType::Callable => return Ok(()),
+        ParamType::Untyped
+        | ParamType::Mixed
+        | ParamType::Callable
+        | ParamType::ReflectedObject => {
+            return Ok(());
+        }
         ParamType::Array => matches!(value, Value::Array(_)).then_some(None),
         ParamType::Class(name) => {
             matches!(value, Value::Object(obj) if obj.class.is_instance_of(name)).then_some(None)
         }
         ParamType::Object => matches!(value, Value::Object(_)).then_some(None),
-        ParamType::Iterable => matches!(value, Value::Array(_) | Value::Object(_)).then_some(None),
+        ParamType::ObjectOrArray => {
+            matches!(value, Value::Array(_) | Value::Object(_)).then_some(None)
+        }
+        ParamType::RoundingModeOrInt => match value {
+            Value::Object(object) if object.class.is_instance_of("RoundingMode") => Some(None),
+            Value::Int(_) => Some(None),
+            _ if strict => None,
+            _ => to_int(value, site, context).map(Some),
+        },
+        ParamType::ArrayOrInt => match value {
+            Value::Array(_) | Value::Int(_) => Some(None),
+            _ if strict => None,
+            _ => to_int(value, site, context).map(Some),
+        },
+        ParamType::Iterable => value.is_iterable().then_some(None),
         ParamType::Bool => match value {
             Value::Bool(_) => Some(None),
             _ if strict => None,
@@ -202,7 +285,7 @@ fn convert(
             _ => to_float(value, site, context).map(Some),
         },
         ParamType::String => match value {
-            Value::String(_) => Some(None),
+            Value::InternedStr(_) | Value::String(_) => Some(None),
             _ if strict => None,
             _ => to_string(value, site, context).map(Some),
         },
@@ -211,8 +294,26 @@ fn convert(
             _ if strict => None,
             _ => to_number(value, site, context).map(Some),
         },
+        ParamType::NativeNumeric(numeric) => match value {
+            Value::Object(object) if object.class.is_instance_of(numeric.class) => Some(None),
+            Value::InternedStr(_) | Value::String(_) => {
+                let bytes = value.as_str_bytes().expect("checked string");
+                if let Some(message) = numeric.string_error.and_then(|check| check(bytes)) {
+                    return Err(NativeError::value_error(format!(
+                        "{}(): Argument #{}{} {message}",
+                        site.function,
+                        site.number,
+                        site.name(),
+                    )));
+                }
+                Some(None)
+            }
+            Value::Int(_) => Some(None),
+            _ if strict => None,
+            _ => to_int(value, site, context).map(Some),
+        },
         ParamType::IntOrString => match value {
-            Value::Int(_) | Value::String(_) => Some(None),
+            Value::Int(_) | Value::InternedStr(_) | Value::String(_) => Some(None),
             _ if strict => None,
             // A float that cannot be an int is kept as its string form.
             Value::Float(float) if float.is_nan() || !fits_int(*float) => {
@@ -221,8 +322,11 @@ fn convert(
             _ => to_int(value, site, context).map(Some),
         },
         ParamType::StringOrNumber => match value {
-            Value::String(_) | Value::Int(_) | Value::Float(_) => Some(None),
+            Value::InternedStr(_) | Value::String(_) | Value::Int(_) | Value::Float(_) => {
+                Some(None)
+            }
             _ if strict => None,
+            Value::Object(object) => object.class.cast(object, ObjectCast::String).map(Some),
             _ => to_number(value, site, context).map(Some),
         },
         ParamType::ArrayOrNumber => match value {
@@ -236,13 +340,41 @@ fn convert(
             _ if strict => None,
             _ => to_float(value, site, context).map(Some),
         },
+        ty @ ParamType::ClassUnion(_) => match value {
+            Value::Object(object) if ty.union_accepts_class(object.class.as_ref()) => Some(None),
+            Value::InternedStr(_) | Value::String(_) if ty.union_accepts_string() => Some(None),
+            _ if !strict && ty.union_accepts_string() => to_string(value, site, context).map(Some),
+            _ => None,
+        },
+        ParamType::ArrayOrObject => {
+            matches!(value, Value::Array(_) | Value::Object(_)).then_some(None)
+        }
         ParamType::ArrayOrBool => match value {
             Value::Array(_) | Value::Bool(_) => Some(None),
             _ if strict => None,
             _ => to_bool(value, site, context).map(Some),
         },
+        ParamType::ObjectOrString => match value {
+            Value::Object(_) | Value::InternedStr(_) | Value::String(_) => Some(None),
+            _ if strict => None,
+            _ => to_string(value, site, context).map(Some),
+        },
+        ParamType::CertificateOrString => match value {
+            Value::Object(object) if object.class.is_instance_of("OpenSSLCertificate") => {
+                Some(None)
+            }
+            Value::InternedStr(_) | Value::String(_) => Some(None),
+            _ if strict => None,
+            _ => to_string(value, site, context).map(Some),
+        },
+        ParamType::ClosureOrString => match value {
+            Value::Object(object) if object.class.is_instance_of("Closure") => Some(None),
+            Value::InternedStr(_) | Value::String(_) => Some(None),
+            _ if strict => None,
+            _ => to_string(value, site, context).map(Some),
+        },
         ParamType::ArrayOrString => match value {
-            Value::Array(_) | Value::String(_) => Some(None),
+            Value::Array(_) | Value::InternedStr(_) | Value::String(_) => Some(None),
             _ if strict => None,
             _ => to_string(value, site, context).map(Some),
         },
@@ -251,6 +383,14 @@ fn convert(
         Some(Some(new)) => *value = new,
         Some(None) => {}
         None => return Err(site.type_error(value)),
+    }
+    if site.param.rejects_nul && value.as_str_bytes().is_some_and(|bytes| bytes.contains(&0)) {
+        return Err(NativeError::value_error(format!(
+            "{}(): Argument #{}{} must not contain any null bytes",
+            site.function,
+            site.number,
+            site.name(),
+        )));
     }
     Ok(())
 }
@@ -261,7 +401,7 @@ fn to_bool(value: &Value, site: &Site<'_>, context: &mut dyn Context) -> Option<
             site.null_deprecated(context);
             Some(Value::Bool(false))
         }
-        Value::Int(_) | Value::Float(_) | Value::String(_) => {
+        Value::Int(_) | Value::Float(_) | Value::InternedStr(_) | Value::String(_) => {
             Some(Value::Bool(cast_to_bool(value, context.diagnostics())))
         }
         _ => None,
@@ -308,19 +448,22 @@ fn to_int(value: &Value, site: &Site<'_>, context: &mut dyn Context) -> Option<V
             },
             context,
         )?,
-        Value::String(string) => match numeric(string)? {
-            NumVal::Int(int) => int,
-            NumVal::Float(float) => float_to_int(
-                float,
-                || {
-                    format!(
-                        "Implicit conversion from float-string \"{}\" to int loses precision",
-                        string.to_string_lossy()
-                    )
-                },
-                context,
-            )?,
-        },
+        Value::InternedStr(_) | Value::String(_) => {
+            let bytes = value.as_str_bytes().expect("checked string");
+            match numeric(bytes)? {
+                NumVal::Int(int) => int,
+                NumVal::Float(float) => float_to_int(
+                    float,
+                    || {
+                        format!(
+                            "Implicit conversion from float-string \"{}\" to int loses precision",
+                            String::from_utf8_lossy(bytes)
+                        )
+                    },
+                    context,
+                )?,
+            }
+        }
         _ => return None,
     };
     Some(Value::Int(int))
@@ -333,10 +476,12 @@ fn to_float(value: &Value, site: &Site<'_>, context: &mut dyn Context) -> Option
             0.0
         }
         Value::Bool(flag) => f64::from(u8::from(*flag)),
-        Value::String(string) => match numeric(string)? {
-            NumVal::Int(int) => int as f64,
-            NumVal::Float(float) => float,
-        },
+        Value::InternedStr(_) | Value::String(_) => {
+            match numeric(value.as_str_bytes().expect("checked string"))? {
+                NumVal::Int(int) => int as f64,
+                NumVal::Float(float) => float,
+            }
+        }
         _ => return None,
     };
     Some(Value::Float(float))
@@ -349,21 +494,22 @@ fn to_number(value: &Value, site: &Site<'_>, context: &mut dyn Context) -> Optio
             Value::Int(0)
         }
         Value::Bool(flag) => Value::Int(i64::from(*flag)),
-        Value::String(string) => match numeric(string)? {
-            NumVal::Int(int) => Value::Int(int),
-            NumVal::Float(float) => Value::Float(float),
-        },
+        Value::InternedStr(_) | Value::String(_) => {
+            match numeric(value.as_str_bytes().expect("checked string"))? {
+                NumVal::Int(int) => Value::Int(int),
+                NumVal::Float(float) => Value::Float(float),
+            }
+        }
         _ => return None,
     })
 }
 
-/// Objects with `__toString` are not converted yet: calling the method needs
-/// the VM.
+/// Stringable objects are converted by the VM before entering the native parser.
 fn to_string(value: &Value, site: &Site<'_>, context: &mut dyn Context) -> Option<Value> {
     match value {
         Value::Null => {
             site.null_deprecated(context);
-            Some(Value::String(PhpString::new()))
+            Some(Value::InternedStr(phera_value::InternedStr::empty()))
         }
         Value::Bool(_) | Value::Int(_) | Value::Float(_) => {
             to_php_string(value, context.diagnostics())
@@ -376,8 +522,8 @@ fn to_string(value: &Value, site: &Site<'_>, context: &mut dyn Context) -> Optio
 
 /// The number a string stands for, if the whole string is numeric. Unlike in
 /// arithmetic, `"12abc"` is not accepted for a parameter.
-fn numeric(string: &PhpString) -> Option<NumVal> {
-    let parsed = parse_numeric(string.as_bytes());
+fn numeric(bytes: &[u8]) -> Option<NumVal> {
+    let parsed = parse_numeric(bytes);
     if parsed.exact { parsed.value } else { None }
 }
 
@@ -409,7 +555,7 @@ pub mod args {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    use phera_value::{Object, PhpArray, PhpString, Value};
+    use phera_value::{Object, PhpArray, StrRef, Value};
 
     pub fn bool(arguments: &[Value], index: usize) -> Option<bool> {
         match arguments.get(index)? {
@@ -434,16 +580,16 @@ pub mod args {
         }
     }
 
-    pub fn string(arguments: &[Value], index: usize) -> Option<&PhpString> {
-        match arguments.get(index)? {
-            Value::String(value) => Some(value),
-            _ => None,
-        }
+    pub fn string(arguments: &[Value], index: usize) -> Option<StrRef<'_>> {
+        arguments.get(index)?.str_ref()
     }
 
     /// The bytes of a string argument; empty when it was left out or is null.
     pub fn bytes(arguments: &[Value], index: usize) -> &[u8] {
-        string(arguments, index).map_or(&[], PhpString::as_bytes)
+        arguments
+            .get(index)
+            .and_then(Value::as_str_bytes)
+            .unwrap_or(&[])
     }
 
     pub fn array(arguments: &[Value], index: usize) -> Option<&Rc<PhpArray>> {

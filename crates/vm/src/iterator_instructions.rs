@@ -2,6 +2,7 @@
 
 use phera_bytecode::{IterId, PathId, Reg};
 use phera_extension_api::NativeError;
+use phera_value::Value;
 
 use crate::Vm;
 
@@ -12,14 +13,64 @@ impl Vm {
         iterator: IterId,
         path: PathId,
         subject: Reg,
-    ) -> Result<(), NativeError> {
+    ) -> Result<bool, NativeError> {
         let place = self.path(path)?;
         let value = self.read_place(&place, crate::access_mode::Missing::Warn)?;
+        if let phera_value::Value::Object(ref object) = value {
+            if object.class.is_traversable() || object.lazy().is_some() {
+                self.set(subject, value);
+                return Ok(false);
+            }
+            if let Some(class) = self.hooked_property_class(object) {
+                self.start_hooked_property_iteration(
+                    iterator,
+                    object.clone(),
+                    class,
+                    crate::access_mode::Binding::ByReference,
+                );
+                return Ok(true);
+            }
+        }
         drop(value);
         let reference = self.reference(&place)?;
         self.set(subject, reference);
         self.iter_start_reference(iterator, crate::AccessPath::local(subject))?;
-        Ok(())
+        Ok(true)
+    }
+
+    /// A property getter may suspend before foreach receives its subject.
+    pub(crate) async fn finish_reference_foreach(
+        &mut self,
+        iterator: IterId,
+        subject: Reg,
+        value: Value,
+    ) -> Result<(), NativeError> {
+        let receiver = match &*value.deref() {
+            Value::Object(object) => Some(object.clone()),
+            _ => None,
+        };
+        if let Some(object) = receiver {
+            if object.lazy().is_some() {
+                return self.lazy_iterator(iterator, Some(subject), object).await;
+            }
+            if object.class.is_traversable() {
+                self.set(subject, Value::Null);
+                return self
+                    .start_traversable(iterator, Value::Object(object), true)
+                    .await;
+            }
+            if let Some(class) = self.hooked_property_class(&object) {
+                self.start_hooked_property_iteration(
+                    iterator,
+                    object,
+                    class,
+                    crate::access_mode::Binding::ByReference,
+                );
+                return Ok(());
+            }
+        }
+        self.set(subject, value);
+        self.iter_start_reference(iterator, crate::AccessPath::local(subject))
     }
 
     /// Implements PHP IterEnd semantics outside the dispatch loop.

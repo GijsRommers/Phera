@@ -36,6 +36,8 @@ pub fn decode(data: &str) -> Index {
                         property.into(),
                         PropertyInfo {
                             ty: decode_type(f[2]),
+                            documented_type: None,
+                            null_default: false,
                             modifiers: modifiers(f[3]),
                             location: location(f[4]),
                         },
@@ -77,6 +79,7 @@ fn class(f: &[&str]) -> ClassInfo {
         constants: BTreeMap::new(),
         location: location(f[9]),
         open_properties: f[8] == "true",
+        documented: Default::default(),
     }
 }
 
@@ -90,19 +93,26 @@ fn signature(f: &[&str]) -> Signature {
                 name: p[0].into(),
                 ty: decode_type(p[1]),
                 optional: p[2] == "true",
+                default_is_null: false,
                 variadic: p[3] == "true",
                 by_reference: p[4] == "true",
+                closure_receiver: None,
             })
         })
         .collect();
     Signature {
+        pure: false,
+        closure_object: true,
+        returns_reference: false,
         parameters,
         returns: decode_type(f[3]),
+        documentation: None,
         modifiers: modifiers(f[4]),
         abstract_body: f[5] == "true",
         accepts_extra: f[6] == "true",
         unbound_this: Vec::new(),
         global_effects: crate::global_effects::GlobalEffects::None,
+        captured_writes: Vec::new(),
         location: location(f[7]),
     }
 }

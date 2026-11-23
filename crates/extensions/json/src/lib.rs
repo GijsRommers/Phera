@@ -7,17 +7,24 @@
 //! json_last_error_msg();                  // "No error"
 //! ```
 //!
-//! Not done yet: `JsonSerializable`, which needs method calls from native
-//! code, and enums, which Phera does not have.
+//! Calls JsonSerializable before falling back to a backed enum case’s value.
 
 mod decode;
 mod encode;
 mod error;
 mod flags;
+mod recursion;
 mod string;
 
 use error::Error;
-use phera_extension_api::{Extension, FunctionEntry, Param, ParamType, Registry};
+use phera_extension_api::{
+    ClassEntry, Extension, FunctionEntry, MethodEntry, Param, ParamType, Registry,
+};
+
+/// Check JSON syntax without changing the request's `json_last_error()`.
+pub fn valid_json(bytes: &[u8], depth: usize) -> bool {
+    decode::validate(bytes, depth, 0).is_ok()
+}
 
 pub struct Json;
 
@@ -27,16 +34,22 @@ impl Extension for Json {
     }
 
     fn register(&self, registry: &mut Registry) {
+        // How a fork of a snapshot gets this extension's request state.
+        registry.fork_state::<crate::recursion::Active>(phera_extension_api::fresh_state);
+        registry.fork_state::<crate::error::Error>(phera_extension_api::fresh_state);
+        registry.class(ClassEntry {
+            methods: const { &[MethodEntry::required("jsonSerialize", &[]).tentative_return("mixed")] },
+            ..ClassEntry::interface("JsonSerializable")
+        });
         const ENCODE: &[Param] = &[
             Param::new("value", ParamType::Mixed),
             Param::new("flags", ParamType::Int).optional(),
             Param::new("depth", ParamType::Int).optional(),
         ];
-        registry.function(FunctionEntry::sync(
-            "json_encode",
-            ENCODE,
-            encode::json_encode,
-        ));
+        registry.function_with_callback_frame("json_encode", ENCODE, encode::json_encode);
+        registry.register_sync_selector("json_encode", |slots| {
+            encode::can_encode_sync(slots).then_some(encode::encode_sync)
+        });
 
         const DECODE: &[Param] = &[
             Param::new("json", ParamType::String),
@@ -68,6 +81,15 @@ impl Extension for Json {
             &[],
             error::message,
         ));
+        for (name, return_type) in [
+            ("json_encode", "string|false"),
+            ("json_decode", "mixed"),
+            ("json_validate", "bool"),
+            ("json_last_error", "int"),
+            ("json_last_error_msg", "string"),
+        ] {
+            registry.describe_function(name, return_type, None);
+        }
         for &(name, value) in CONSTANTS {
             registry.constant(name, value);
         }
@@ -112,7 +134,5 @@ const CONSTANTS: &[(&str, i64)] = &[
     ("JSON_ERROR_UNSUPPORTED_TYPE", Error::Unsupported as i64),
     ("JSON_ERROR_INVALID_PROPERTY_NAME", Error::Property as i64),
     ("JSON_ERROR_UTF16", Error::Utf16 as i64),
-    // Encoding an enum case that has no backing value. Phera has no enums
-    // yet, so no Error variant produces this one.
-    ("JSON_ERROR_NON_BACKED_ENUM", 11),
+    ("JSON_ERROR_NON_BACKED_ENUM", Error::NonBackedEnum as i64),
 ];

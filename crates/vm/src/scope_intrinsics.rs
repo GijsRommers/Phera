@@ -2,7 +2,6 @@
 
 use std::rc::Rc;
 
-use phera_bytecode::Reg;
 use phera_extension_api::NativeResult;
 use phera_value::{ArrayKey, PhpArray, Value};
 
@@ -12,26 +11,15 @@ impl Vm {
     /// Copy defined locals and dynamic variables without exporting their reference cells.
     pub(crate) fn defined_variables(&mut self) -> NativeResult {
         let mut array = PhpArray::new();
-        if let Some(frame) = self.current() {
-            for (i, name) in frame.function().locals.iter().enumerate() {
-                if let Some(Some(value)) = frame.slots(&self.registers).get(i) {
-                    array.insert(
-                        ArrayKey::String(
-                            frame
-                                .unit()
-                                .names
-                                .get(name.index())
-                                .cloned()
-                                .unwrap_or_default()
-                                .into(),
-                        ),
-                        value.deref().clone(),
-                    );
-                }
+        if self.in_global_scope() {
+            for (name, value) in self.globals.iter() {
+                array.insert(ArrayKey::str(name.as_str()), value.deref().clone());
             }
-            for (name, register) in frame.extras.dynamic.iter() {
-                if let Some(Some(value)) = frame.slots(&self.registers).get(register.0 as usize) {
-                    array.insert(ArrayKey::String(name.clone().into()), value.deref().clone());
+        }
+        if let Some(frame) = self.current() {
+            for (name, register) in frame.named_registers() {
+                if let Some(Some(value)) = frame.slots(&self.registers).get(register.index()) {
+                    array.insert(ArrayKey::str(name.as_str()), value.deref().clone());
                 }
             }
         }
@@ -52,25 +40,24 @@ impl Vm {
                         .into_iter()
                         .rev(),
                 ),
-                Value::String(string) => {
-                    let name = string.to_string_lossy();
-                    let register = self.current().and_then(|frame| {
-                        frame
-                            .function()
-                            .locals
-                            .iter()
-                            .position(|name_id| {
-                                frame
-                                    .unit()
-                                    .names
-                                    .get(name_id.index())
-                                    .is_some_and(|candidate| candidate == &name)
-                            })
-                            .map(|i| Reg(i as u16))
-                            .or_else(|| frame.extras.dynamic.get(&name).copied())
-                    });
-                    if let Some(register) = register {
-                        array.insert(ArrayKey::String(string), self.get(register));
+                Value::InternedStr(_) | Value::String(_) => {
+                    let s = value.str_ref().expect("checked string");
+                    let name = s.to_string_lossy();
+                    let found = if self.in_global_scope() {
+                        self.request_global_value(&name)
+                            .map(|value| value.deref().clone())
+                    } else {
+                        self.current()
+                            .and_then(|frame| frame.named_register(&name))
+                            .and_then(|register| self.read_defined_local(register))
+                    };
+                    if let Some(found) = found {
+                        let key = match value {
+                            Value::InternedStr(s) => ArrayKey::Interned(s),
+                            Value::String(s) => ArrayKey::String(s),
+                            _ => unreachable!(),
+                        };
+                        array.insert(key, found);
                     } else {
                         self.warn(format!("compact(): Undefined variable ${name}"));
                     }

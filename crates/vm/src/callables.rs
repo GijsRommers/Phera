@@ -6,11 +6,18 @@ use phera_value::{ArrayKey, Value};
 use std::rc::Rc;
 
 /// Direct invocation rejects legacy relative method names that callback APIs still accept.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CallableUse {
+#[derive(Clone, Copy)]
+pub(crate) enum CallableUse<'a> {
     Direct,
     FirstClass,
     Callback,
+    Type(Option<&'a crate::classes::MethodContext>),
+}
+
+impl CallableUse<'_> {
+    pub(crate) fn allows_callback_syntax(self) -> bool {
+        matches!(self, Self::Callback | Self::Type(_))
+    }
 }
 
 impl Vm {
@@ -23,12 +30,13 @@ impl Vm {
     pub(crate) fn resolve_callable_for(
         &mut self,
         value: &Value,
-        usage: CallableUse,
+        usage: CallableUse<'_>,
     ) -> Result<Callee, NativeError> {
         match &*value.deref() {
             Value::Object(object) => self.resolve_callable_object(object, usage),
-            Value::String(name) => {
-                if let Some(callee) = self.function_table.resolved(name) {
+            Value::InternedStr(_) | Value::String(_) => {
+                let name = value.deref().to_php_string().expect("checked string");
+                if let Some(callee) = self.function_table.resolved(&name) {
                     return Ok(callee);
                 }
                 let written = String::from_utf8_lossy(name.as_bytes());
@@ -37,7 +45,7 @@ impl Vm {
                     self.take_resolved_callable()
                 } else {
                     let callee = self.resolve_callee(&written)?;
-                    self.function_table.cache_resolution(name, &callee);
+                    self.function_table.cache_resolution(&name, &callee);
                     Ok(callee)
                 }
             }
@@ -53,7 +61,7 @@ impl Vm {
     fn resolve_callable_object(
         &mut self,
         object: &Rc<phera_value::Object>,
-        usage: CallableUse,
+        usage: CallableUse<'_>,
     ) -> Result<Callee, NativeError> {
         if object.class.name() == "Closure" {
             let native = object.native.borrow();
@@ -67,7 +75,7 @@ impl Vm {
                     crate::calls::call_state::CallTarget::User { .. }
                 );
             if state.origin == crate::closures::ClosureOrigin::Callable
-                && usage != CallableUse::FirstClass
+                && !matches!(usage, CallableUse::FirstClass)
                 && !bound_function
             {
                 return Ok(state.callee.clone());
@@ -83,9 +91,13 @@ impl Vm {
                 .classes
                 .for_object(object)
                 .ok_or_else(|| internal_error!("invokable class"))?;
-            let method = class.methods.get("__invoke").cloned().ok_or_else(|| {
-                NativeError::error(format!("Object of type {} is not callable", class.name))
-            })?;
+            let method = class
+                .magic
+                .as_ref()
+                .and_then(|magic| magic.invoke.clone())
+                .ok_or_else(|| {
+                    NativeError::error(format!("Object of type {} is not callable", class.name))
+                })?;
             let scope = self
                 .classes
                 .get(&method.declaring)
@@ -105,7 +117,7 @@ impl Vm {
     fn resolve_callable_array(
         &mut self,
         array: &phera_value::PhpArray,
-        usage: CallableUse,
+        usage: CallableUse<'_>,
     ) -> Result<Callee, NativeError> {
         if array.len() != 2 {
             return Err(NativeError::error(
@@ -118,19 +130,18 @@ impl Vm {
         let method = array
             .get(&ArrayKey::Int(1))
             .ok_or_else(|| NativeError::error("Array callback has to contain indices 0 and 1"))?;
-        let Value::String(method) = &*method.deref() else {
+        let method_deref = method.deref();
+        let Some(method) = method_deref.str_ref() else {
             return Err(NativeError::error(
                 "Second array member is not a valid method",
             ));
         };
         let method = String::from_utf8_lossy(method.as_bytes());
         match &*target.deref() {
-            Value::String(class) => {
-                self.prepare_callable_class(
-                    &String::from_utf8_lossy(class.as_bytes()),
-                    &method,
-                    usage,
-                )?;
+            Value::InternedStr(_) | Value::String(_) => {
+                let class = target.deref();
+                let class = class.as_str_bytes().expect("checked string");
+                self.prepare_callable_class(&String::from_utf8_lossy(class), &method, usage)?;
             }
             Value::Object(object) => {
                 let class = self
@@ -176,24 +187,14 @@ impl Vm {
         class: Rc<crate::classes::Class>,
         receiver: Option<Rc<phera_value::Object>>,
         name: &str,
-        usage: CallableUse,
+        usage: CallableUse<'_>,
     ) -> Result<(), NativeError> {
-        if receiver.is_none()
-            && usage == CallableUse::Callback
-            && let Some(method) = class.methods.get(&name.to_ascii_lowercase())
-            && !method.is_static
-        {
-            return Err(NativeError::error(format!(
-                "Non-static method {}::{}() cannot be called statically",
-                method.declaring, method.name
-            )));
-        }
-        let Some((qualifier, method)) = name.split_once("::") else {
-            return self.prepare_method(class, receiver, name, Invocation::Method);
+        let Some((qualifier, method)) = name
+            .split_once("::")
+            .filter(|_| usage.allows_callback_syntax())
+        else {
+            return self.prepare_array_callback(class, receiver, name, usage);
         };
-        if usage != CallableUse::Callback {
-            return self.prepare_method(class, receiver, name, Invocation::Method);
-        }
         let target = match qualifier {
             "parent" => class.parent.clone(),
             "self" => Some(class.clone()),
@@ -203,7 +204,7 @@ impl Vm {
                 .filter(|parent| class.is_a(&parent.name)),
         };
         let Some(target) = target else {
-            return self.prepare_method(class, receiver, name, Invocation::Method);
+            return self.prepare_array_callback(class, receiver, name, usage);
         };
         self.diagnostic(
             "Deprecated",
@@ -212,7 +213,32 @@ impl Vm {
                 class.name
             ),
         );
-        self.prepare_method(target, receiver, method, Invocation::Method)?;
+        self.prepare_array_callback(target, receiver, method, usage)?;
         self.forward_callback_class(class)
+    }
+
+    fn prepare_array_callback(
+        &mut self,
+        class: Rc<crate::classes::Class>,
+        receiver: Option<Rc<phera_value::Object>>,
+        name: &str,
+        usage: CallableUse<'_>,
+    ) -> Result<(), NativeError> {
+        if let CallableUse::Type(context) = usage {
+            use crate::classes::magic_calls::MethodSyntax;
+            let syntax = if receiver.is_some() {
+                MethodSyntax::Instance
+            } else {
+                MethodSyntax::Static
+            };
+            return self.prepare_typed_callback(
+                class,
+                receiver,
+                name,
+                syntax,
+                context.map(|context| &context.scope),
+            );
+        }
+        self.prepare_method(class, receiver, name, Invocation::Method)
     }
 }

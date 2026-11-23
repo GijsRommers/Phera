@@ -37,7 +37,15 @@ impl<T> InlineStack<T> {
         }
     }
 
-    pub(crate) fn iter(&self) -> impl Iterator<Item = &T> {
+    pub(crate) fn len(&self) -> usize {
+        self.length
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.length == 0
+    }
+
+    pub(crate) fn iter(&self) -> impl DoubleEndedIterator<Item = &T> {
         self.entries
             .iter()
             .filter_map(Option::as_ref)

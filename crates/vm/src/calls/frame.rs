@@ -27,10 +27,23 @@ use crate::code_table::FunctionIndex;
 
 pub(crate) use crate::calls::frame_view::FrameView;
 
+/// Object cursors use different entry paths for values, references, and generators.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TraversalMode {
+    Value,
+    Reference,
+    Generator,
+}
+
 /// Foreach either owns a value snapshot or follows a live reference path.
 pub(crate) struct IteratorState {
     /// By-value foreach keeps this owner to separate subsequent array writes.
     pub(crate) snapshot: Option<Rc<PhpArray>>,
+    /// Objects keep an independent cursor for each active traversal.
+    pub(crate) traversal: Option<Box<dyn phera_extension_api::traversal::Traversal>>,
+    pub(crate) traversal_mode: TraversalMode,
+    pub(crate) property_hooks:
+        Option<Box<crate::hooked_property_iteration::HookedPropertyIterator>>,
     /// By-reference foreach resolves this place again as the array changes.
     pub(crate) source: Option<AccessPath>,
     /// The array storage position, distinct from a PHP integer key.
@@ -65,6 +78,11 @@ impl FrameFlags {
     /// window keeps below the first register.
     const KIND_SHIFT: u16 = 2;
     const KIND_MASK: u16 = 0b11 << Self::KIND_SHIFT;
+    /// A setter entered for its effects has no result destination or continuation.
+    const DISCARD_RESULT: u16 = 1 << 4;
+    /// A callback of a built-in that runs on the frame stack (`array_map`):
+    /// its result goes to that built-in's next step (`calls::native_loops`).
+    const NATIVE_LOOP: u16 = 1 << 5;
     /// The top eight bits hold how many arguments the call passed, when it
     /// passed fewer than the function's parameters (at most 64, see
     /// `FunctionShape::Plain`), so that a call with defaults needs no
@@ -169,6 +187,23 @@ impl Frame {
         }
     }
 
+    /// Marks a callback frame as returning to a built-in's next step.
+    pub(crate) fn mark_native_loop(&mut self) {
+        self.flags.0 |= FrameFlags::CALLBACK | FrameFlags::NATIVE_LOOP;
+    }
+
+    /// Whether this frame returns to a built-in's next step.
+    #[inline]
+    pub(crate) fn returns_to_native_loop(&self) -> bool {
+        self.flags.0 & FrameFlags::NATIVE_LOOP != 0
+    }
+
+    /// A resumed frame returns to the generator driver.
+    pub(crate) fn as_callback(mut self) -> Self {
+        self.flags.0 |= FrameFlags::CALLBACK;
+        self
+    }
+
     /// The caller's register for the result; `None` when native code called.
     #[inline]
     pub(crate) fn destination(&self) -> Option<Reg> {
@@ -183,5 +218,13 @@ impl Frame {
 
     pub(crate) fn mark_extras(&mut self) {
         self.flags.0 |= FrameFlags::EXTRAS;
+    }
+
+    pub(crate) fn discard_result(&mut self) {
+        self.flags.0 |= FrameFlags::DISCARD_RESULT;
+    }
+
+    pub(super) fn discards_result(&self) -> bool {
+        self.flags.0 & FrameFlags::DISCARD_RESULT != 0
     }
 }

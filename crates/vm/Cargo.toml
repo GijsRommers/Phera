@@ -6,16 +6,21 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+phera-source.workspace = true
+chrono.workspace = true
 phera-value.workspace = true
 phera-extension-api.workspace = true
 tokio.workspace = true
+rustix.workspace = true
+indexmap.workspace = true
 
 phera-bytecode.workspace = true
+phera-compiler.workspace = true
 
 [lints]
 workspace = true
 
 [dev-dependencies]
-phera-compiler.workspace = true
 # The VM's tests use the real exception classes.
 phera-ext-core.workspace = true
+phera-ext-json.workspace = true

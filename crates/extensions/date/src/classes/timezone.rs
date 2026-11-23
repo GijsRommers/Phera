@@ -7,7 +7,7 @@ use super::{transition_list, zone_kind::ZoneKind};
 
 const CLASS: &str = "DateTimeZone";
 
-fn parse(input: &[u8]) -> Result<ZoneKind, String> {
+pub(super) fn parse(input: &[u8]) -> Result<ZoneKind, String> {
     let mut end = 0;
     let (parsed, found) = crate::parse_format::zone::parse(input, &mut end);
     if let Some(zone) = ZoneKind::parsed(&parsed) {
@@ -116,12 +116,13 @@ pub fn set_state(context: &mut dyn Context, _: This<'_>, arguments: &[Value]) ->
 fn restore_zone(arguments: &[Value]) -> Result<ZoneKind, NativeError> {
     let invalid = || NativeError::error("Invalid serialization data for DateTimeZone object");
     let data = args::array(arguments, 0).expect("serialization array");
-    if let (Some(Value::Int(1..=3)), Some(Value::String(zone))) = (
+    if let (Some(Value::Int(1..=3)), Some(zone)) = (
         data.get(&ArrayKey::str("timezone_type")),
-        data.get(&ArrayKey::str("timezone")),
-    ) && !zone.as_bytes().contains(&0)
+        data.get(&ArrayKey::str("timezone"))
+            .and_then(Value::as_str_bytes),
+    ) && !zone.contains(&0)
     {
-        return parse(zone.as_bytes()).map_err(|_| invalid());
+        return parse(zone).map_err(|_| invalid());
     }
     Err(invalid())
 }
@@ -129,8 +130,8 @@ fn restore_zone(arguments: &[Value]) -> Result<ZoneKind, NativeError> {
 fn restore_custom_properties(object: &Object, arguments: &[Value]) {
     let data = args::array(arguments, 0).expect("serialization array");
     for (key, value) in data.iter() {
-        if let ArrayKey::String(ref name) = key
-            && !matches!(name.as_bytes(), b"timezone_type" | b"timezone")
+        if let Some(name) = key.as_str_bytes()
+            && !matches!(name, b"timezone_type" | b"timezone")
             && !value.is_reference()
         {
             object.set(key.clone(), value.clone());

@@ -56,13 +56,20 @@ pub enum Unary {
     Object,
 }
 /// Selects PHP's local, variable-variable, or request-global namespace.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlaceScope {
     /// The base register is a scratch slot for the current receiver.
     This,
     /// The base register holds a class name or object.
     StaticProperty {
         name: Reg,
+        scratch: Reg,
+    },
+    /// A static property of a class the source names, with its name written
+    /// in the source (`Post::$count`). The base register is the scratch slot.
+    NamedStaticProperty {
+        class: String,
+        name: String,
         scratch: Reg,
     },
     Local,
@@ -90,6 +97,10 @@ pub struct Argument {
     pub source: ArgumentSource,
     pub name: Option<String>,
     pub spread: bool,
+    /// The argument was written as a call or as `new` (`f(g())`, `f(new A)`):
+    /// a by-reference parameter takes such a value with a notice, and
+    /// rejects any other computed value.
+    pub of_call: bool,
 }
 /// A function parameter and the metadata needed by the runtime call protocol.
 #[derive(Debug, Clone)]
@@ -105,6 +116,7 @@ pub struct Parameter {
 /// One function of IR plus its constants, locals, source lines and scope requirements.
 #[derive(Debug, Clone, Default)]
 pub struct Function {
+    pub metadata: phera_bytecode::reflection::FunctionMetadata,
     pub name: String,
     pub definition_line: usize,
     pub instructions: Vec<Instruction>,
@@ -120,10 +132,16 @@ pub struct Function {
     pub strict_types: bool,
     pub return_type: Option<String>,
     pub returns_reference: bool,
+    pub is_generator: bool,
 }
 /// The top-level function and declarations awaiting final bytecode emission.
 #[derive(Debug, Clone)]
 pub struct CompiledUnit {
+    pub reflection_initializers: Vec<phera_bytecode::reflection::InitializerSource>,
+    pub reflection_source: Option<Box<[u8]>>,
+    pub has_link_attributes: bool,
+    pub constant_metadata:
+        std::collections::HashMap<String, phera_bytecode::reflection::DeclarationMetadata>,
     pub declaration_warnings: Vec<phera_bytecode::DeclarationWarning>,
     pub main: Function,
     pub functions: Vec<Function>,
@@ -136,6 +154,8 @@ pub struct CompiledUnit {
 /// Owned class names are interned only after method functions have their final indices.
 #[derive(Debug, Clone)]
 pub struct ClassDeclaration {
+    pub metadata: phera_bytecode::reflection::DeclarationMetadata,
+    pub line: u32,
     pub name: String,
     pub parent: Option<String>,
     pub interfaces: Vec<String>,
@@ -147,6 +167,13 @@ pub struct ClassDeclaration {
     pub constants: Vec<ClassConstant>,
     pub properties: Vec<ClassProperty>,
     pub methods: Vec<ClassMethod>,
+    pub traits: Vec<phera_bytecode::TraitUse>,
+    pub enum_backing: Option<phera_bytecode::EnumBacking>,
+    pub enum_cases: Vec<(
+        String,
+        Option<usize>,
+        phera_bytecode::reflection::DeclarationMetadata,
+    )>,
 }
 /// Method metadata travels beside ordinary function IR rather than entering global scope.
 #[derive(Debug, Clone)]
@@ -162,17 +189,24 @@ pub struct ClassMethod {
 /// Property metadata keeps source names until bytecode interning.
 #[derive(Debug, Clone)]
 pub struct ClassProperty {
+    pub set_visibility: Option<phera_bytecode::Visibility>,
+    pub is_final: bool,
+    pub promoted: bool,
+    pub metadata: phera_bytecode::reflection::DeclarationMetadata,
     pub name: String,
     pub visibility: phera_bytecode::Visibility,
     pub is_static: bool,
     pub is_readonly: bool,
+
     pub ty: Option<String>,
     pub default: Option<usize>,
+    pub hooks: Option<Box<phera_bytecode::PropertyHooks<usize>>>,
 }
 
 /// Constant initializers execute only when the linked class first needs their value.
 #[derive(Debug, Clone)]
 pub struct ClassConstant {
+    pub metadata: phera_bytecode::reflection::DeclarationMetadata,
     pub name: String,
     pub visibility: phera_bytecode::Visibility,
     pub is_final: bool,

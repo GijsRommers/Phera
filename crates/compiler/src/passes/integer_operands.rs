@@ -2,8 +2,8 @@
 //!
 //! Input is lowered register bytecode. Output retains instruction offsets until
 //! the normal compaction pass removes Nops and remaps branch targets. Only a
-//! neighbouring local read and literal load may disappear: `$a + ($a = 5)` and
-//! `$i + $i++` therefore retain their snapshots and evaluation order.
+//! neighbouring copy and literal load may disappear. Lowering chooses which
+//! operations consume compiled variables directly.
 //!
 //! For example, LoadInt(r2, 1); Binary(Add, r1, r0, r2) can become
 //! Nop; BinaryInt(Add, r1, r0, 1) when r2 is dead after the operation.
@@ -66,14 +66,46 @@ pub(crate) fn fuse_integer_operands(function: &mut Function) {
     }
 }
 
+/// How many instructions [`dead_after`] looks at before it gives up. Each
+/// query walks forward until the register is overwritten, so without a bound
+/// a generated function with thousands of `case` arms takes quadratic time;
+/// giving up only means an operand is not fused.
+const DEAD_AFTER_SCAN: usize = 256;
+
 /// A deliberately conservative proof: only straight-line overwrites are accepted.
 pub(crate) fn dead_after(function: &Function, index: usize, register: phera_bytecode::Reg) -> bool {
-    let mut pending = vec![index + 1];
-    let mut visited = HashSet::new();
+    dead_after_from(function, vec![index + 1], register)
+}
+
+/// Same proof, but the instruction at `index` is a jump being removed with its
+/// producer: its target edge is reachable without the register being written,
+/// so it must be explored too. Value-context `($a === $b) || x` compiles to
+/// `Binary`, `JumpIf`, and the jump's landing reads the temporary.
+pub(crate) fn dead_after_jump(
+    function: &Function,
+    index: usize,
+    register: phera_bytecode::Reg,
+    target: phera_bytecode::Target,
+) -> bool {
+    dead_after_from(function, vec![index + 1, target.index()], register)
+}
+
+fn dead_after_from(
+    function: &Function,
+    mut pending: Vec<usize>,
+    register: phera_bytecode::Reg,
+) -> bool {
+    // Sorted; at most DEAD_AFTER_SCAN entries, so searching it is cheaper
+    // than hashing every position.
+    let mut visited: Vec<usize> = Vec::new();
     while let Some(mut cursor) = pending.pop() {
         while let Some(instruction) = function.instructions.get(cursor) {
-            if !visited.insert(cursor) {
-                break;
+            match visited.binary_search(&cursor) {
+                Ok(_) => break,
+                Err(slot) => visited.insert(slot, cursor),
+            }
+            if visited.len() > DEAD_AFTER_SCAN {
+                return false;
             }
             cursor += 1;
             match *instruction {
@@ -130,11 +162,57 @@ pub(crate) fn dead_after(function: &Function, index: usize, register: phera_byte
                         break;
                     }
                 }
-                Instruction::Echo { src } | Instruction::SendValue { src } => {
+                Instruction::Echo { src }
+                | Instruction::SendValue { src, .. }
+                | Instruction::SendLocal { local: src } => {
                     if src == register {
                         return false;
                     }
                 }
+                Instruction::JumpIfNull { value, target }
+                | Instruction::JumpIfNotNull { value, target } => {
+                    if value == register {
+                        return false;
+                    }
+                    pending.push(target.index());
+                }
+                Instruction::BinaryIntBranch { lhs, target, .. }
+                | Instruction::BinaryIntBranchIf { lhs, target, .. } => {
+                    if lhs == register {
+                        return false;
+                    }
+                    pending.push(target.index());
+                }
+                Instruction::BinaryBranch {
+                    lhs, rhs, target, ..
+                }
+                | Instruction::BinaryBranchIf {
+                    lhs, rhs, target, ..
+                } => {
+                    if lhs == register || rhs == register {
+                        return false;
+                    }
+                    pending.push(target.index());
+                }
+                Instruction::InstanceOfBranch { src, target, .. }
+                | Instruction::InstanceOfBranchIf { src, target, .. } => {
+                    if src == register {
+                        return false;
+                    }
+                    pending.push(target.index());
+                }
+                Instruction::DynamicInstanceOfBranch {
+                    src, class, target, ..
+                }
+                | Instruction::DynamicInstanceOfBranchIf {
+                    src, class, target, ..
+                } => {
+                    if src == register || class == register {
+                        return false;
+                    }
+                    pending.push(target.index());
+                }
+                Instruction::ReturnNull => break,
                 Instruction::AssignOp { src, local, .. } => {
                     if src == register || local == register {
                         return false;
@@ -155,12 +233,16 @@ pub(crate) fn dead_after(function: &Function, index: usize, register: phera_byte
                     break;
                 }
                 Instruction::InitCall { .. } | Instruction::Nop => {}
-                Instruction::Call { dst } => {
+                Instruction::GuardBuiltin { call, .. } => pending.push(call.index()),
+                Instruction::Call { dst, .. } => {
                     if dst == register {
                         break;
                     }
                 }
                 Instruction::CallDirect {
+                    args, count, dst, ..
+                }
+                | Instruction::CallNativeDirect {
                     args, count, dst, ..
                 } => {
                     if (args.0..args.0 + count).contains(&register.0) {
@@ -214,15 +296,23 @@ pub(crate) fn fuse_integer_branches(function: &mut Function) {
         if boundaries.contains(&index) {
             continue;
         }
-        let Instruction::BinaryInt { op, dst, lhs, rhs } = function.instructions[index - 1] else {
-            continue;
+        let (condition, target, when) = match function.instructions[index] {
+            Instruction::JumpIfNot { condition, target } => (condition, target, false),
+            Instruction::JumpIf { condition, target } => (condition, target, true),
+            _ => continue,
         };
-        let Instruction::JumpIfNot { condition, target } = function.instructions[index] else {
-            continue;
+        let (op, dst, branch) = match function.instructions[index - 1] {
+            Instruction::BinaryInt { op, dst, lhs, rhs } => {
+                (op, dst, BranchShape::Int { lhs, rhs })
+            }
+            Instruction::Binary { op, dst, lhs, rhs } => {
+                (op, dst, BranchShape::General { lhs, rhs })
+            }
+            _ => continue,
         };
         if condition != dst
             || dst.index() < function.locals.len()
-            || !dead_after(function, index, dst)
+            || !dead_after_jump(function, index, dst, target)
         {
             continue;
         }
@@ -239,12 +329,44 @@ pub(crate) fn fuse_integer_branches(function: &mut Function) {
         ) {
             continue;
         }
-        function.instructions[index - 1] = Instruction::BinaryIntBranch {
-            op,
-            lhs,
-            rhs,
-            target,
+        function.instructions[index - 1] = match (branch, when) {
+            (BranchShape::Int { lhs, rhs }, false) => Instruction::BinaryIntBranch {
+                op,
+                lhs,
+                rhs,
+                target,
+            },
+            (BranchShape::Int { lhs, rhs }, true) => Instruction::BinaryIntBranchIf {
+                op,
+                lhs,
+                rhs,
+                target,
+            },
+            (BranchShape::General { lhs, rhs }, false) => Instruction::BinaryBranch {
+                op,
+                lhs,
+                rhs,
+                target,
+            },
+            (BranchShape::General { lhs, rhs }, true) => Instruction::BinaryBranchIf {
+                op,
+                lhs,
+                rhs,
+                target,
+            },
         };
         function.instructions[index] = Instruction::Nop;
     }
+}
+
+/// Which compare-and-jump instruction a fused comparison lowers to.
+enum BranchShape {
+    Int {
+        lhs: phera_bytecode::Reg,
+        rhs: i32,
+    },
+    General {
+        lhs: phera_bytecode::Reg,
+        rhs: phera_bytecode::Reg,
+    },
 }

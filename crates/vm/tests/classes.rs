@@ -19,17 +19,8 @@ fn later_milestones_remain_compile_errors() {
     for source in [
         "<?php $callback = function () {};",
         "<?php $callback = fn () => 1;",
-        "<?php trait Example {}",
-        "<?php enum Example {}",
-        "<?php new class {};",
-        "<?php function generator() { yield 1; }",
-        "<?php goto target; target:",
-        "<?php eval('echo 1;');",
         "<?php class Example {static function method(){}} Example::method(...);",
         "<?php class Example {function method(){}} (new Example)->method(...);",
-        "<?php class Example {public int $value {get => 1;}}",
-        "<?php class Example {public private(set) int $value;}",
-        "<?php #[Other] class Example {}",
     ] {
         if matches!(
             source,
@@ -54,13 +45,105 @@ fn later_milestones_remain_compile_errors() {
     }
 }
 
+#[test]
+fn property_hooks_and_set_visibility_emit_access_metadata() {
+    let unit = phera_compiler::compile(
+        "<?php class Example {public int $value {get => 1;} public private(set) int $stored;}",
+        "supported-properties.php",
+    )
+    .unwrap();
+    let properties = &unit.classes[0].properties;
+    let hooked = properties[0].hooks.as_ref().unwrap();
+    assert!(hooked.is_virtual);
+    let getter = hooked.get.as_ref().unwrap();
+    assert_eq!(
+        unit.functions[getter.function.index()].name,
+        "Example::$value::get"
+    );
+    assert!(hooked.set.is_none());
+
+    assert!(properties[1].hooks.is_none());
+    assert_eq!(
+        properties[1].set_visibility,
+        Some(phera_bytecode::Visibility::Private)
+    );
+    assert!(properties[1].is_final);
+}
+
+#[test]
+fn generator_body_starts_with_a_suspension_boundary() {
+    let unit = phera_compiler::compile("<?php function generator() { yield 1; }", "generator.php")
+        .unwrap();
+    assert!(matches!(
+        unit.functions.as_slice(),
+        [function] if function.is_generator
+            && matches!(function.instructions.first(), Some(phera_bytecode::Instruction::GeneratorStart))
+    ));
+}
+
+#[test]
+fn class_declaration_retains_attributes_and_set_visibility() {
+    let unit = phera_compiler::compile(
+        "<?php #[Other] class Example {public private(set) int $value;}",
+        "supported.php",
+    )
+    .unwrap();
+    let class = &unit.classes[0];
+    assert_eq!(class.metadata.attributes[0].name, "Other");
+    assert_eq!(
+        class.properties[0].set_visibility,
+        Some(phera_bytecode::Visibility::Private)
+    );
+}
+
+#[test]
+fn goto_uses_an_existing_jump_instruction() {
+    let unit = phera_compiler::compile("<?php goto target; target:", "goto.php").unwrap();
+    assert!(matches!(
+        unit.main.instructions.first(),
+        Some(phera_bytecode::Instruction::Jump { target }) if target.index() == 1
+    ));
+}
+
+#[test]
+fn class_forms_emit_their_declaration_kind() {
+    use phera_bytecode::{ClassKind, Instruction};
+
+    for (source, kind) in [
+        ("<?php trait Example {}", ClassKind::Trait),
+        ("<?php enum Example {}", ClassKind::Enum),
+        ("<?php new class {};", ClassKind::Anonymous),
+    ] {
+        let unit = phera_compiler::compile(source, "supported.php").unwrap();
+        assert_eq!(unit.classes.len(), 1);
+        assert_eq!(unit.classes[0].kind, kind);
+        assert!(
+            unit.main
+                .instructions
+                .iter()
+                .any(|instruction| matches!(instruction, Instruction::DeclareClass { .. }))
+        );
+    }
+}
+
+#[test]
+fn eval_emits_a_scoped_unit_instruction() {
+    let unit = phera_compiler::compile("<?php eval('echo 1;');", "supported.php").unwrap();
+    assert!(
+        unit.main
+            .instructions
+            .iter()
+            .any(|instruction| matches!(instruction, phera_bytecode::Instruction::Eval { .. }))
+    );
+}
+
 #[tokio::test]
-async fn clone_magic_is_not_implicitly_invoked_in_this_milestone() {
-    let source = "<?php class Example { function __clone() { echo 'later'; } } $original = new Example; $copy = clone $original; echo 7;";
+async fn clone_invokes_magic_on_the_copy() {
+    let source = "<?php class Example { public $value = 7; function __clone() { ++$this->value; } } $original = new Example; $copy = clone $original; echo $original->value, ':', $copy->value;";
     let unit = phera_compiler::compile(source, "clone.php").unwrap();
     let mut interpreter = Vm::new(Arc::new(Registry::new()));
     assert_eq!(interpreter.run(Arc::new(unit)).await, 0);
-    assert_eq!(interpreter.output, b"7");
+    assert_eq!(interpreter.output, b"7:8");
 }
 
 /// Repeated property appends must move the inner array rather than clone its owners.

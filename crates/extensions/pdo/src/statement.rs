@@ -1,19 +1,20 @@
 //! Prepared statements retain their PDO connection: `$stmt = $pdo->prepare('SELECT :id')`.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use phera_extension_api::{
     ArrayKey, Context, LocalFuture, NativeError, NativeResult, Object, PhpArray, Value, args,
 };
 
+use crate::column_keys::ColumnKeys;
 use crate::connection::{Session, session};
 use crate::constants::PARAM_STR;
 use crate::drivers::{Prepared, Rows};
 use crate::errors::{DbError, ErrorState, unsupported};
 use crate::fetch::FetchMode;
-use crate::parameters::{self, Binding, ParameterType};
+use crate::parameters::{self, Binding, Bindings, ParameterType};
 use crate::placeholders::Sql;
 use crate::statement_execute::{execute_named, fail};
 
@@ -21,18 +22,31 @@ pub struct Statement {
     // Rust drops fields in declaration order. Queue statement cleanup before
     // releasing the session, whose final drop may immediately start pool reset.
     pub prepared: Prepared,
+    pub stream_owner: Option<Arc<()>>,
+    pub postgres_lazy: bool,
     pub connection: Rc<Session>,
-    pub sql: Sql,
-    pub bindings: HashMap<String, Binding>,
+    pub sql: Rc<Sql>,
+    pub bindings: Bindings,
     pub rows: Rows,
+    pub keys: ColumnKeys,
     pub cursor: usize,
     pub fetch: FetchMode,
     pub column: usize,
     pub fetch_flags: i64,
+    pub row_class: Option<crate::fetch_class::RowClass>,
     pub error: ErrorState,
     /// SQLite: whether the statement ran since it was prepared or its
     /// cursor closed, which `getColumnMeta()` needs.
     pub sqlite_executed: bool,
+}
+
+impl Statement {
+    pub fn set_rows(&mut self, rows: Rows) {
+        self.keys
+            .describe(&rows.columns, &self.connection.attributes.borrow());
+        self.rows = rows;
+        self.cursor = 0;
+    }
 }
 
 pub fn state(this: Option<&Rc<Object>>) -> Result<Rc<RefCell<Statement>>, NativeError> {
@@ -51,7 +65,13 @@ pub fn prepare<'a>(
     this: Option<Rc<Object>>,
     arguments: Vec<Value>,
 ) -> LocalFuture<'a, NativeResult> {
-    Box::pin(async move { create(context, this.as_ref(), &arguments, false).await })
+    Box::pin(async move {
+        let result = create(context, this.as_ref(), &arguments, false).await?;
+        if let Value::Object(object) = &result {
+            initialize(context, object).await?;
+        }
+        Ok(result)
+    })
 }
 
 pub fn query<'a>(
@@ -71,8 +91,15 @@ pub fn query<'a>(
             *statement.connection.error.borrow_mut() = statement.error.clone();
             return executed;
         }
+        initialize(context, object).await?;
         Ok(result)
     })
+}
+
+async fn initialize(context: &mut dyn Context, object: &Rc<Object>) -> Result<(), NativeError> {
+    let connection = state(Some(object))?.borrow().connection.clone();
+    let class = connection.attributes.borrow().statement_class.clone();
+    class.initialize(context, object.clone()).await
 }
 
 async fn create(
@@ -95,38 +122,44 @@ async fn create(
         return Err(unsupported("Statement driver options"));
     }
     let attributes = connection.attributes.borrow().clone();
+    let row_class = if query {
+        crate::fetch_class::RowClass::configured(context, arguments, 1, "PDO::query").await?
+    } else {
+        None
+    };
     let configuration = if query {
         crate::fetch_options::validate(
             crate::fetch_options::Method::Query,
             arguments,
             attributes.fetch,
             0,
-            0,
+            attributes.fetch_flags,
         )?
     } else {
         crate::fetch_options::Configuration {
             mode: attributes.fetch,
             column: 0,
-            flags: 0,
+            flags: attributes.fetch_flags,
         }
     };
-    // SQLite numbers its own `?`, `?2`, `:name` and `@name` placeholders.
-    let parsed = match connection.name {
-        crate::dsn::DriverName::Sqlite => Ok(Sql::sqlite(source.clone())),
-        _ => Sql::parse(source.clone()),
-    };
+    let parsed = connection
+        .driver
+        .parse_sql(source.clone(), connection.name)
+        .await;
     let sql = match parsed {
         Ok(sql) => sql,
         Err(error) => return connection.fail(context, error, method),
     };
     let prepared = if attributes.emulate {
         Prepared::Emulated
+    } else if attributes.pgsql_disable_prepares {
+        Prepared::PostgresUnnamed
     } else if connection.name == crate::dsn::DriverName::Postgres {
         let number = connection.statement_sequence.get() + 1;
         connection.statement_sequence.set(number);
         Prepared::PostgresDeferred { number }
     } else {
-        let result = connection.driver.lock().await.prepare(&sql, 0).await;
+        let result = connection.driver.prepare(&sql, 0).await;
         match result {
             Ok(prepared) => prepared,
             Err(error) => return connection.fail(context, error, method),
@@ -134,7 +167,7 @@ async fn create(
     };
     let mut properties = PhpArray::new();
     properties.insert(ArrayKey::str("queryString"), Value::from(source));
-    let result = context.create_object("PDOStatement", properties)?;
+    let result = context.create_object(&attributes.statement_class.name, properties)?;
     let Value::Object(object) = &result else {
         return Err(NativeError::error(
             "PDOStatement allocation did not create an object",
@@ -151,15 +184,20 @@ async fn create(
     };
     connection.success();
     *object.native.borrow_mut() = Some(Box::new(Rc::new(RefCell::new(Statement {
+        postgres_lazy: connection.name == crate::dsn::DriverName::Postgres
+            && !attributes.pgsql_prefetch,
         connection,
-        sql,
+        sql: Rc::new(sql),
         prepared,
-        bindings: HashMap::new(),
+        stream_owner: None,
+        bindings: Bindings::default(),
         rows: Rows::default(),
+        keys: ColumnKeys::default(),
         cursor: 0,
         fetch: configuration.mode,
         column: configuration.column,
         fetch_flags: configuration.flags,
+        row_class,
         error,
         sqlite_executed: false,
     }))));
@@ -205,7 +243,7 @@ fn bind(
                 None
             } else {
                 let detail = match args::value(arguments, 0) {
-                    Value::String(_) => format!(":{key}"),
+                    Value::InternedStr(_) | Value::String(_) => format!(":{key}"),
                     _ => "parameter was not defined".into(),
                 };
                 Some(DbError::parameter(&detail))

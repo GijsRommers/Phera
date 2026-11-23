@@ -62,6 +62,31 @@ impl Iterators {
         self.slots[index] = Some(state);
     }
 
+    /// Whether the slot holds no loop's state.
+    pub(crate) fn is_free(&self, index: u16) -> bool {
+        self.slots.get(index as usize).is_none_or(Option::is_none)
+    }
+
+    /// Ends a by-value loop over an array (or an empty slot): `Some` with
+    /// what the slot held. `None`, leaving it in place, for the state of a
+    /// by-reference loop or of an object's own iteration, which need more
+    /// to end.
+    pub(crate) fn take_by_value(&mut self, index: u16) -> Option<Option<IteratorState>> {
+        let Some(slot) = self.slots.get_mut(index as usize) else {
+            return Some(None);
+        };
+        match slot {
+            Some(state)
+                if state.source.is_some()
+                    || state.traversal.is_some()
+                    || state.property_hooks.is_some() =>
+            {
+                None
+            }
+            _ => Some(slot.take()),
+        }
+    }
+
     /// Ending foreach transfers its remaining owners out of the activation.
     pub(crate) fn remove(&mut self, index: &u16) -> Option<IteratorState> {
         self.slots.get_mut(*index as usize)?.take()
@@ -70,5 +95,35 @@ impl Iterators {
     /// Borrow a snapshot cursor in place instead of moving the whole state per element.
     pub(crate) fn get_mut(&mut self, index: u16) -> Option<&mut IteratorState> {
         self.slots.get_mut(index as usize)?.as_mut()
+    }
+}
+
+/// A `foreach` over an array goes on in the fork over the fork's array; one
+/// over an object's own iterator cannot be copied.
+impl crate::snapshot::ForkCopy for Iterators {
+    fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
+        let slots = self
+            .slots
+            .iter()
+            .map(|slot| {
+                let state = slot.as_ref()?;
+                if state.traversal.is_some() || state.property_hooks.is_some() {
+                    fork.refuse_state(
+                        "foreach",
+                        "Phera\\snapshot() was called inside a foreach over an object",
+                    );
+                }
+                Some(crate::calls::frame::IteratorState {
+                    snapshot: state.snapshot.fork_copy(fork),
+                    traversal: None,
+                    traversal_mode: state.traversal_mode,
+                    property_hooks: None,
+                    source: state.source.clone(),
+                    position: state.position,
+                    started: state.started,
+                })
+            })
+            .collect();
+        Iterators { slots }
     }
 }

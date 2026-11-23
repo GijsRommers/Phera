@@ -5,6 +5,8 @@
 //! levels bind tighter. Left-associative chains and postfix operators run in
 //! loops, so `1 + 2 + 3 + ...` never recurses per operator.
 
+mod assignment;
+
 use phera_ast::{
     Argument, Arguments, ArrayItem, ArrowFunction, Attribute, BinaryOperator, CastKind, Closure,
     ClosureUse, Expression, ExpressionKind, IncludeKind, Literal, MagicConstant, Match, MatchArm,
@@ -14,7 +16,7 @@ use phera_lexer::TokenKind;
 use phera_source::Span;
 
 use crate::error::ParseError;
-use crate::parser::{Parser, is_word_token};
+use crate::parser::{ParsePurpose, Parser, is_word_token};
 
 /// Operator precedence levels, in the order PHP's grammar declares them
 /// (later declarations bind tighter).
@@ -165,11 +167,13 @@ impl Parser<'_> {
                 let compound = compound_assign_op(kind);
                 let rhs = if kind == TokenKind::Assign && self.at(TokenKind::Ampersand) {
                     self.bump()?;
-                    Rhs::Ref(self.parse_assign_ref_rhs()?)
+                    assignment::Assignment::Reference(self.parse_assign_ref_rhs()?)
                 } else {
-                    Rhs::Value(self.parse_expr(prec::ASSIGN)?)
+                    // PHP's stack holds the target and the `=`.
+                    let value = self.with_php_slots(1, |parser| parser.parse_expr(prec::ASSIGN))?;
+                    assignment::Assignment::Value(value, compound)
                 };
-                left = reassociate_assign(left, &rhs, compound, assign_token.span, self)?;
+                left = assignment::attach(left, rhs, assign_token.span, self)?;
                 banned = None;
                 continue;
             }
@@ -178,8 +182,29 @@ impl Parser<'_> {
                 if prec::TERNARY < min_prec {
                     break;
                 }
+                if banned == Some(prec::TERNARY)
+                    && self.purpose == ParsePurpose::Compilation
+                    && let ExpressionKind::Ternary { then, .. } = &left.kind
+                {
+                    // The middle operand and parentheses start their own
+                    // expression loop. Only a chain at this level is ambiguous.
+                    let forms = match (then.is_some(), self.kind2() != TokenKind::Colon) {
+                        (true, true) => Some(("? b :", "c", "? d : e")),
+                        (true, false) => Some(("? b :", "c", "?: d")),
+                        (false, true) => Some(("?:", "b", "? c : d")),
+                        (false, false) => None,
+                    };
+                    if let Some((first, middle, second)) = forms {
+                        return Err(ParseError::compile(
+                            format!(
+                                "Unparenthesized `a {first} {middle} {second}` is not supported. Use either `(a {first} {middle}) {second}` or `a {first} ({middle} {second})`"
+                            ),
+                            left.span,
+                        ));
+                    }
+                }
                 left = self.parse_ternary(left)?;
-                banned = None;
+                banned = Some(prec::TERNARY);
                 continue;
             }
 
@@ -191,8 +216,8 @@ impl Parser<'_> {
                 // the right side is a class name reference, so not even `**`
                 // binds into it: `a instanceof b ** c` is `(a instanceof b) ** c`.
                 self.bump()?;
-                let span = self.span_since(left.span);
                 let right = self.parse_expr(prec::CLONE)?;
+                let span = self.span_since(left.span);
                 left = Expression {
                     kind: ExpressionKind::InstanceOf {
                         value: Box::new(left),
@@ -221,8 +246,9 @@ impl Parser<'_> {
                 Assoc::Left | Assoc::Nonassoc => level + 1,
                 Assoc::Right => level,
             };
+            // PHP's stack holds the left operand and the operator.
+            let right = self.with_php_slots(1, |parser| parser.parse_expr(next_min))?;
             let span = self.span_since(left.span);
-            let right = self.parse_expr(next_min)?;
             left = Expression {
                 kind: ExpressionKind::Binary {
                     operator: op,
@@ -241,9 +267,8 @@ impl Parser<'_> {
         Ok(left)
     }
 
-    /// `cond ? then : otherwise`, or `cond ?: otherwise`. The grammar declares
-    /// `?` `:` left-associative, so a following `?` chains onto the whole
-    /// ternary: `a ? b : c ? d : e` is `(a ? b : c) ? d : e`.
+    /// `cond ? then : otherwise`, or `cond ?: otherwise`.
+    /// An unparenthesized chain of short ternaries groups from the left.
     fn parse_ternary(&mut self, condition: Expression) -> Result<Expression, ParseError> {
         let start = condition.span;
         self.expect(TokenKind::Question, "'?'")?;
@@ -252,10 +277,14 @@ impl Parser<'_> {
         let then = if self.at(TokenKind::Colon) {
             None
         } else {
-            Some(Box::new(self.parse_expr(0)?))
+            // PHP's stack holds the condition and the `?`.
+            Some(Box::new(
+                self.with_php_slots(1, |parser| parser.parse_expr(0))?,
+            ))
         };
         self.expect(TokenKind::Colon, "':'")?;
-        let otherwise = self.parse_expr(prec::TERNARY + 1)?;
+        // ... and then the middle operand and the `:` too.
+        let otherwise = self.with_php_slots(3, |parser| parser.parse_expr(prec::TERNARY + 1))?;
         Ok(Expression {
             kind: ExpressionKind::Ternary {
                 condition: Box::new(condition),
@@ -353,6 +382,7 @@ impl Parser<'_> {
             }
             TokenKind::Yield => self.parse_yield(),
             TokenKind::YieldFrom => {
+                self.saw_yield = true;
                 self.bump()?;
                 let operand = self.parse_expr(prec::YIELD + 2)?;
                 Ok(Expression {
@@ -510,10 +540,6 @@ impl Parser<'_> {
                     self.bump()?;
                     if self.kind() == TokenKind::Variable || self.kind() == TokenKind::Dollar {
                         let var_expr = self.parse_simple_variable()?;
-                        let ExpressionKind::Variable(variable) = &var_expr.kind else {
-                            return Err(self.error("expected a variable after '::'"));
-                        };
-                        let variable = variable.clone();
                         if self.at(TokenKind::LeftParen) {
                             let arguments = self.parse_argument_list()?;
                             expr = Expression {
@@ -525,10 +551,15 @@ impl Parser<'_> {
                                 span: self.span_since(start),
                             };
                         } else {
+                            let name_start = var_expr.span.start;
+                            let ExpressionKind::Variable(variable) = var_expr.into_kind() else {
+                                return Err(self.error("expected a variable after '::'"));
+                            };
                             expr = Expression {
                                 kind: ExpressionKind::StaticProperty {
                                     class: Box::new(expr),
                                     name: variable,
+                                    name_start,
                                 },
                                 span: self.span_since(start),
                             };
@@ -558,11 +589,13 @@ impl Parser<'_> {
                 }
                 TokenKind::LeftParen => {
                     let start = expr.span;
+                    let opening = self.peek_span().start;
                     let arguments = self.parse_argument_list()?;
                     expr = Expression {
                         kind: ExpressionKind::Call {
                             callee: Box::new(expr),
                             arguments,
+                            opening,
                         },
                         span: self.span_since(start),
                     };
@@ -617,6 +650,7 @@ impl Parser<'_> {
             }
             TokenKind::String => return self.parse_string_token(),
             TokenKind::DoubleQuote => return self.parse_interpolated_string(),
+            TokenKind::Backquote => return self.parse_shell_string(),
             TokenKind::StartHeredoc => return self.parse_heredoc(),
             TokenKind::True => literal_expr(Literal::Bool(true), self.bump()?.span),
             TokenKind::False => literal_expr(Literal::Bool(false), self.bump()?.span),
@@ -933,6 +967,7 @@ impl Parser<'_> {
     /// `yield`, `yield $v`, `yield $k => $v`.
     fn parse_yield(&mut self) -> Result<Expression, ParseError> {
         let start = self.expect(TokenKind::Yield, "'yield'")?.span;
+        self.saw_yield = true;
 
         if !self.can_start_expr() {
             return Ok(Expression {
@@ -946,7 +981,7 @@ impl Parser<'_> {
 
         let key = self.parse_expr(prec::YIELD + 1)?;
         let value = if self.eat(TokenKind::FatArrow)? {
-            Some(Box::new(self.parse_expr(0)?))
+            Some(Box::new(self.parse_expr(prec::YIELD + 1)?))
         } else {
             None
         };
@@ -976,38 +1011,27 @@ impl Parser<'_> {
             });
         }
 
+        let opening = self.peek_span().start;
         let arguments = self.parse_argument_list()?;
-        if matches!(arguments, Arguments::FirstClassCallable) {
-            // `clone(...)` parses in PHP as a call to `\clone`.
-            return Ok(Expression {
-                kind: ExpressionKind::Call {
-                    callee: Box::new(clone_callee()),
-                    arguments,
-                },
-                span: self.span_since(start),
-            });
-        }
-        let Arguments::List(items) = &arguments else {
-            unreachable!()
-        };
-
-        let unnamed = |argument: &Argument| argument.name.is_none() && !argument.spread;
-
-        let kind = match items.as_slice() {
-            [] => ExpressionKind::Call {
+        let kind = match arguments {
+            Arguments::List(items)
+                if (1..=2).contains(&items.len())
+                    && items
+                        .iter()
+                        .all(|argument| argument.name.is_none() && !argument.spread) =>
+            {
+                let mut items = items.into_iter();
+                let Some(first) = items.next() else {
+                    return Err(self.error("clone expects an object"));
+                };
+                ExpressionKind::Clone {
+                    object: Box::new(first.value),
+                    with: items.next().map(|item| Box::new(item.value)),
+                }
+            }
+            arguments => ExpressionKind::Call {
                 callee: Box::new(clone_callee()),
-                arguments: Arguments::List(vec![]),
-            },
-            [first] if unnamed(first) => ExpressionKind::Clone {
-                object: Box::new(first.value.clone()),
-                with: None,
-            },
-            [first, second] if unnamed(first) && unnamed(second) => ExpressionKind::Clone {
-                object: Box::new(first.value.clone()),
-                with: Some(Box::new(second.value.clone())),
-            },
-            _ => ExpressionKind::Call {
-                callee: Box::new(clone_callee()),
+                opening,
                 arguments,
             },
         };
@@ -1030,20 +1054,31 @@ impl Parser<'_> {
 
         let mut modifiers = Modifiers::default();
         loop {
-            if self.eat(TokenKind::Abstract)? {
-                modifiers.is_abstract = true;
-            } else if self.eat(TokenKind::Final)? {
-                modifiers.is_final = true;
-            } else if self.eat(TokenKind::Readonly)? {
-                modifiers.is_readonly = true;
-            } else {
-                break;
-            }
+            let modifier = match self.kind() {
+                TokenKind::Abstract => "abstract",
+                TokenKind::Final => "final",
+                TokenKind::Readonly => {
+                    if modifiers.is_readonly {
+                        return Err(ParseError::compile(
+                            "Multiple readonly modifiers are not allowed",
+                            self.peek_span(),
+                        ));
+                    }
+                    self.bump()?;
+                    modifiers.is_readonly = true;
+                    continue;
+                }
+                _ => break,
+            };
+            return Err(ParseError::compile(
+                format!("Cannot use the {modifier} modifier on an anonymous class"),
+                self.peek_span(),
+            ));
         }
 
-        if self.at(TokenKind::Class) {
+        if modifiers.is_readonly || self.at(TokenKind::Class) {
             let mut arguments = Arguments::List(vec![]);
-            let class = self.parse_anonymous_class(start, attributes, modifiers, &mut arguments)?;
+            let class = self.parse_anonymous_class(attributes, modifiers, &mut arguments)?;
             return Ok(Expression {
                 kind: ExpressionKind::New {
                     class: NewTarget::Anonymous(Box::new(class)),
@@ -1095,20 +1130,26 @@ impl Parser<'_> {
             let span = class.span;
             self.bump()?;
             let var_expr = self.parse_simple_variable()?;
+            let name_start = var_expr.span.start;
             let ExpressionKind::Variable(variable) = var_expr.into_kind() else {
                 return Err(self.error("expected a variable after '::'"));
             };
-            class = Expression {
+            let property = Expression {
                 kind: ExpressionKind::StaticProperty {
                     class: Box::new(class),
                     name: variable,
+                    name_start,
                 },
                 span: self.span_since(span),
             };
+            // `new static::$classes[$key]`: the static property is a
+            // variable like any other, so offsets and properties may follow.
+            class = self.parse_new_target_steps(property)?;
         }
 
         let arguments = if self.at(TokenKind::LeftParen) {
-            self.parse_argument_list()?
+            // `new` and the class name are one symbol more than a call's callee.
+            self.with_php_slots(1, Self::parse_argument_list)?
         } else {
             Arguments::List(vec![])
         };
@@ -1124,7 +1165,15 @@ impl Parser<'_> {
 
     /// `new $a`, `new $a[0]`, `new $a->b`, `new $a::$b`.
     fn parse_new_target_variable(&mut self) -> Result<Expression, ParseError> {
-        let mut expr = self.parse_simple_variable()?;
+        let variable = self.parse_simple_variable()?;
+        self.parse_new_target_steps(variable)
+    }
+
+    /// The offsets, properties and static properties that may follow the
+    /// variable naming the class: `[0]`, `->b`, `::$b`, in any number. A call
+    /// is not one of them: the first `(` starts the constructor's arguments.
+    fn parse_new_target_steps(&mut self, variable: Expression) -> Result<Expression, ParseError> {
+        let mut expr = variable;
 
         loop {
             match self.kind() {
@@ -1163,6 +1212,7 @@ impl Parser<'_> {
                     let start = expr.span;
                     self.bump()?;
                     let var_expr = self.parse_simple_variable()?;
+                    let name_start = var_expr.span.start;
                     let ExpressionKind::Variable(variable) = var_expr.into_kind() else {
                         return Err(self.error("expected a variable after '::'"));
                     };
@@ -1170,6 +1220,7 @@ impl Parser<'_> {
                         kind: ExpressionKind::StaticProperty {
                             class: Box::new(expr),
                             name: variable,
+                            name_start,
                         },
                         span: self.span_since(start),
                     };
@@ -1187,12 +1238,12 @@ impl Parser<'_> {
 
         let value = if self.at(TokenKind::LeftParen) {
             match self.parse_argument_list()? {
-                Arguments::List(items) => match items.as_slice() {
+                Arguments::List(mut items) => match items.as_slice() {
                     [] => None,
-                    [one] if one.name.is_none() && !one.spread => Some(Box::new(one.value.clone())),
-                    _ => {
-                        return Err(self.error_at(start, "exit() accepts at most one argument"));
+                    [one] if one.name.is_none() && !one.spread => {
+                        items.pop().map(|item| Box::new(item.value))
                     }
+                    _ => return Err(self.error_at(start, "exit() accepts at most one argument")),
                 },
                 // `exit(...)` / `die(...)` parse in PHP as a call; the AST has
                 // no exit-callable, so it becomes a bare `exit`.
@@ -1257,6 +1308,11 @@ impl Parser<'_> {
         is_static: bool,
         start: Span,
     ) -> Result<Expression, ParseError> {
+        let declaration_start = self.peek_span();
+        let doc_comment = self
+            .doc_comment()
+            .or_else(|| self.doc_comment_before(start.start))
+            .or_else(|| self.declaration_doc_comment(&attributes));
         if self.at(TokenKind::Function) {
             self.bump()?;
             let by_reference = self.eat(TokenKind::Ampersand)?;
@@ -1268,13 +1324,20 @@ impl Parser<'_> {
             };
             let return_type = self.parse_return_type()?;
             self.expect(TokenKind::LeftBrace, "'{'")?;
-            let body = self.parse_inner_statements()?;
+            // A closure's header is ten symbols on PHP's stack (`static` one more).
+            let (body, is_generator) = self
+                .with_php_slots(10 + u32::from(is_static), |parser| {
+                    parser.generator_body(Self::parse_inner_statements)
+                })?;
             self.close_brace()?;
             Ok(Expression {
                 kind: ExpressionKind::Closure(Box::new(Closure {
+                    declaration_span: self.span_since(declaration_start),
+                    doc_comment,
                     attributes,
                     is_static,
                     by_reference,
+                    is_generator,
                     parameters,
                     uses,
                     return_type,
@@ -1288,12 +1351,18 @@ impl Parser<'_> {
             let parameters = self.parse_parameter_list()?;
             let return_type = self.parse_return_type()?;
             self.expect(TokenKind::FatArrow, "'=>'")?;
-            let body = self.parse_expr(0)?;
+            // An arrow function's header is nine symbols on PHP's stack.
+            let (body, is_generator) = self.with_php_slots(9 + u32::from(is_static), |parser| {
+                parser.generator_body(|parser| parser.parse_expr(0))
+            })?;
             Ok(Expression {
                 kind: ExpressionKind::ArrowFunction(Box::new(ArrowFunction {
+                    declaration_span: self.span_since(declaration_start),
+                    doc_comment,
                     attributes,
                     is_static,
                     by_reference,
+                    is_generator,
                     parameters,
                     return_type,
                     body,
@@ -1369,12 +1438,13 @@ impl Parser<'_> {
             return Ok(Arguments::FirstClassCallable);
         }
 
-        let mut arguments = vec![self.parse_argument()?];
+        // PHP's stack holds the callee and the `(` while an argument is parsed.
+        let mut arguments = vec![self.with_php_slots(1, Self::parse_argument)?];
         while self.eat(TokenKind::Comma)? {
             if self.at(TokenKind::RightParen) {
                 break;
             }
-            arguments.push(self.parse_argument()?);
+            arguments.push(self.with_php_slots(1, Self::parse_argument)?);
         }
         self.expect(TokenKind::RightParen, "')'")?;
 
@@ -1426,6 +1496,7 @@ impl Parser<'_> {
                 | Float
                 | String
                 | DoubleQuote
+                | Backquote
                 | StartHeredoc
                 | True
                 | False
@@ -1483,120 +1554,6 @@ impl Parser<'_> {
                 | Decrement
                 | AttributeStart
         )
-    }
-}
-
-/// The right side of an assignment.
-enum Rhs {
-    Value(Expression),
-    Ref(Expression),
-}
-
-/// PHP's grammar only allows a `variable` on the left of `=`, but its parser
-/// reduces the rightmost operand to a variable when an assignment operator
-/// follows, so `$a + $b = 1` parses as `$a + ($b = 1)`. This re-associates
-/// `left` accordingly: the assignment attaches to the rightmost assignable
-/// operand along the right spine.
-fn reassociate_assign(
-    left: Expression,
-    rhs: &Rhs,
-    compound: Option<BinaryOperator>,
-    err_span: Span,
-    parser: &Parser,
-) -> Result<Expression, ParseError> {
-    let compound_target_ok =
-        |kind: &ExpressionKind| is_assignable(kind) && !matches!(kind, ExpressionKind::List(_));
-    let attach = |target: Expression| -> Expression {
-        let span = target.span;
-        let kind = match (compound, rhs) {
-            (None, Rhs::Value(value)) => ExpressionKind::Assign {
-                target: Box::new(target),
-                value: Box::new(value.clone()),
-            },
-            (None, Rhs::Ref(value)) => ExpressionKind::AssignReference {
-                target: Box::new(target),
-                value: Box::new(value.clone()),
-            },
-            (Some(operator), Rhs::Value(value)) => ExpressionKind::CompoundAssign {
-                operator,
-                target: Box::new(target),
-                value: Box::new(value.clone()),
-            },
-            (Some(_), Rhs::Ref(_)) => ExpressionKind::Assign {
-                target: Box::new(target),
-                value: Box::new(Expression {
-                    kind: ExpressionKind::Literal(Literal::Null),
-                    span,
-                }),
-            },
-        };
-        Expression { kind, span }
-    };
-
-    if compound.is_some() {
-        if compound_target_ok(&left.kind) {
-            return Ok(attach(left));
-        }
-    } else if is_assignable(&left.kind) {
-        return Ok(attach(left));
-    }
-
-    let left_span = left.span;
-    match left.into_kind() {
-        ExpressionKind::Binary {
-            operator,
-            left: l,
-            right,
-        } => {
-            let right = reassociate_assign(*right, rhs, compound, err_span, parser)?;
-            Ok(Expression {
-                kind: ExpressionKind::Binary {
-                    operator,
-                    left: l,
-                    right: Box::new(right),
-                },
-                span: left_span,
-            })
-        }
-        ExpressionKind::Ternary {
-            condition,
-            then,
-            otherwise,
-        } => {
-            let otherwise = reassociate_assign(*otherwise, rhs, compound, err_span, parser)?;
-            Ok(Expression {
-                kind: ExpressionKind::Ternary {
-                    condition,
-                    then,
-                    otherwise: Box::new(otherwise),
-                },
-                span: left_span,
-            })
-        }
-        ExpressionKind::Unary { operator, operand } => {
-            let operand = reassociate_assign(*operand, rhs, compound, err_span, parser)?;
-            Ok(Expression {
-                kind: ExpressionKind::Unary {
-                    operator,
-                    operand: Box::new(operand),
-                },
-                span: left_span,
-            })
-        }
-        ExpressionKind::Clone { object, with } => {
-            let object = reassociate_assign(*object, rhs, compound, err_span, parser)?;
-            Ok(Expression {
-                kind: ExpressionKind::Clone {
-                    object: Box::new(object),
-                    with,
-                },
-                span: left_span,
-            })
-        }
-        _ => Err(parser.error_at(
-            err_span,
-            "syntax error: unexpected assignment operator, cannot assign to this expression",
-        )),
     }
 }
 

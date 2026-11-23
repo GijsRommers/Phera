@@ -1,7 +1,7 @@
 //! Publish PHP diagnostics and fatal traces at the current bytecode location.
 
 use phera_extension_api::NativeError;
-use phera_value::CollectDiagnostics;
+use phera_value::{CollectDiagnostics, PhpString};
 
 use crate::Vm;
 
@@ -17,6 +17,12 @@ impl Vm {
     pub(crate) fn location(&self) -> SourceLocation {
         if let Some(location) = &self.diagnostic_location {
             return location.clone();
+        }
+        if let Some(site) = self.attribute_call_site() {
+            return SourceLocation {
+                file: site.file.clone(),
+                line: site.line,
+            };
         }
         self.current()
             .map(|frame| SourceLocation {
@@ -51,6 +57,15 @@ impl Vm {
     }
 
     pub(crate) fn diagnostic(&mut self, kind: &str, message: String) {
+        self.publish_diagnostic(kind, message.into());
+    }
+
+    pub(crate) fn diagnostic_bytes(&mut self, kind: &str, message: &[u8]) {
+        self.publish_diagnostic(kind, message.into());
+    }
+
+    fn publish_diagnostic(&mut self, kind: &str, message: PhpString) {
+        self.diagnostic_reporter.raised += 1;
         if self.queue_diagnostic(kind, &message) {
             return;
         }
@@ -60,45 +75,35 @@ impl Vm {
             "Deprecated" => 8192,
             _ => 0,
         };
-        if self.diagnostic_reporter.is_visible() && self.error_handlers.reporting & level != 0 {
-            let SourceLocation { file, line } = self.location();
-            if let Some(bytes) = self.diagnostic_reporter.report(kind, message, &file, line) {
-                self.out(&bytes);
-            }
-        }
+        self.report_diagnostic(level, kind, message, self.location());
     }
 
     /// Fatal traces describe heap frames; unwinding never relies on a Rust panic.
     pub(crate) fn unwind(&mut self, error: NativeError) {
-        self.diagnostic_reporter.end_all_silence();
+        self.restore_silence(0);
         let error = self.materialize_error(error);
         match error {
             NativeError::Throw { class, message, .. } => {
-                let SourceLocation { file, line } = self.location();
-                let text = self.error_trace(class, &message, &file, line);
-                self.out(text.as_bytes());
+                let location = self.location();
+                let text = self.error_trace(class, &message, &location.file, location.line);
+                let suffix = format!(" in {} on line {}\n", location.file, location.line);
+                let heading = text.strip_prefix("\nFatal error: ").unwrap_or(&text);
+                let message = heading.strip_suffix(&suffix).unwrap_or(heading);
+                self.report_diagnostic(1, "Fatal error", message.into(), location);
                 self.status = 255;
             }
             NativeError::Unwind(state) => {
-                if state.0.is::<crate::exceptions::Thrown>() {
-                    if let Ok(thrown) = state.0.downcast::<crate::exceptions::Thrown>() {
-                        self.report_throwable(&thrown.object);
+                match state.0.downcast::<crate::last_error::FatalDiagnostic>() {
+                    Ok(diagnostic) => self.report_prepared_fatal(*diagnostic),
+                    Err(state) => {
+                        if let Ok(thrown) = state.downcast::<crate::exceptions::Thrown>() {
+                            self.report_throwable(&thrown.object);
+                        }
                     }
-                } else if let Ok(failure) = state
-                    .0
-                    .downcast::<crate::error_traces::DeclarationFailure>()
-                {
-                    self.out(
-                        format!(
-                            "\nFatal error: {} in {} on line {}\n",
-                            failure.message, failure.file, failure.line
-                        )
-                        .as_bytes(),
-                    );
-                    self.status = 255;
                 }
             }
         }
+        self.park_global_registers();
         self.call_stack.clear();
         self.finally_stack.clear();
     }
@@ -113,7 +118,8 @@ pub(crate) struct OperatorDiagnostics<'vm> {
 impl<'vm> OperatorDiagnostics<'vm> {
     /// Detach the reusable buffer while retaining the VM needed to publish it on every exit.
     pub(crate) fn new(vm: &'vm mut Vm) -> Self {
-        let buffer = vm.diagnostic_reporter.take_operator();
+        let mut buffer = vm.diagnostic_reporter.take_operator();
+        buffer.float_precision = Some(vm.float_precision());
         Self { vm, buffer }
     }
 }

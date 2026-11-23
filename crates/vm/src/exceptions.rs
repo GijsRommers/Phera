@@ -28,13 +28,49 @@ pub(crate) struct Thrown {
 }
 
 impl Thrown {
+    /// A throw that every enclosing `catch` may handle.
+    pub(crate) fn from_object(object: Rc<Object>) -> Self {
+        Thrown {
+            object,
+            skip_handlers: None,
+        }
+    }
+
     /// Native callbacks forward this payload without constructing another exception.
     pub(crate) fn into_error(self) -> NativeError {
         NativeError::Unwind(Unwind(Box::new(self)))
     }
+
+    /// A deferred cleanup can run after the original PHP caller has unwound.
+    pub(crate) fn location(&self) -> crate::diagnostics::SourceLocation {
+        crate::diagnostics::SourceLocation {
+            file: property_text(&self.object, "file"),
+            line: error_line(&self.object),
+        }
+    }
 }
 
 impl Vm {
+    pub(crate) fn exception_with_previous(
+        &mut self,
+        error: NativeError,
+        previous: NativeError,
+    ) -> NativeError {
+        let error = self.materialize_error(error);
+        let previous = self.materialize_error(previous);
+        if let NativeError::Unwind(previous) = &previous
+            && let Some(previous) = previous.0.downcast_ref::<Thrown>()
+            && let NativeError::Unwind(error) = &error
+            && let Some(error) = error.0.downcast_ref::<Thrown>()
+        {
+            error.object.set(
+                Object::private_key(throwable_root(&error.object), "previous"),
+                Value::Object(previous.object.clone()),
+            );
+        }
+        error
+    }
+
     /// PHP accepts only objects implementing Throwable, including derived native classes.
     pub(crate) fn throw_operand(&mut self, source: Reg) -> Result<NativeError, NativeError> {
         let Value::Object(object) = self.read_local(source) else {
@@ -63,21 +99,25 @@ impl Vm {
         parameters: &[phera_extension_api::Param],
         arguments: &mut [Value],
     ) -> Result<(), NativeError> {
-        let call_name = format!("{}::{}", method.declaring, method.name);
+        let call_name = method.signature(&self.code).name.as_ref();
         let tracking = self.error_handlers.error.is_some() && !self.error_handlers.active;
         let previous = if tracking {
             self.error_handlers
                 .native_site
-                .replace(crate::error_traces::NativeTrace::new(&call_name, arguments))
+                .replace(crate::error_traces::NativeTrace::new(call_name, arguments))
         } else {
             None
         };
-        let prepared = self.prepare_throwable_constructor(&call_name, parameters, arguments);
+        let prepared = self.prepare_throwable_constructor(call_name, parameters, arguments);
         if tracking {
             self.error_handlers.native_site = previous;
         }
-        if prepared.is_err() {
-            self.failed_native = Some(crate::error_traces::NativeTrace::new(&call_name, arguments));
+        if let Err(error) = &prepared {
+            self.record_native_failure(
+                error,
+                crate::calls::native_frames::NativeFrame::Method(method),
+                arguments,
+            );
         }
         prepared
     }
@@ -135,14 +175,28 @@ impl Vm {
     #[cold]
     #[inline(never)]
     pub(crate) fn initialize_throwable(&mut self, object: &Rc<Object>, origin: TraceOrigin) {
-        let location = self.location();
-        object.set(Object::protected_key("file"), Value::from(location.file));
-        object.set(
-            Object::protected_key("line"),
-            Value::Int(location.line as i64),
-        );
-        let trace = self.throwable_trace(origin);
+        let (file, line) = self.exception_location();
+        object.set(Object::protected_key("file"), file);
+        object.set(Object::protected_key("line"), Value::Int(line as i64));
+        let redact = self.redact_exception_arguments(object, origin);
+        let trace = self.throwable_trace(origin, redact);
         object.set(Object::private_key(throwable_root(object), "trace"), trace);
+    }
+
+    fn redact_exception_arguments(&self, object: &Object, origin: TraceOrigin) -> bool {
+        // One flag on the class, inherited by subclasses: every exception passes here.
+        let class_redacts = object
+            .class
+            .as_any()
+            .downcast_ref::<crate::classes::Class>()
+            .and_then(|class| class.hooks.as_ref())
+            .is_some_and(|hooks| hooks.redact_trace_arguments);
+        class_redacts
+            || matches!(origin, TraceOrigin::Engine)
+                && matches!(object.class.name(), "TypeError" | "ArgumentCountError")
+                && self.failed_native.as_ref().is_some_and(|native| {
+                    self.registry.argument_error_trace_is_redacted(&native.name)
+                })
     }
 
     /// Turn engine/native failures into the same transport as an explicit PHP throw.
@@ -150,6 +204,24 @@ impl Vm {
     pub(crate) fn materialize_error(&mut self, error: NativeError) -> NativeError {
         let (class, message, code, properties) = match error.into_exception_parts() {
             Ok(parts) => parts,
+            Err(NativeError::Unwind(payload))
+                if payload.0.is::<crate::error_traces::DeclarationFailure>() =>
+            {
+                let Ok(failure) = payload
+                    .0
+                    .downcast::<crate::error_traces::DeclarationFailure>()
+                else {
+                    return internal_error!("declaration diagnostic payload");
+                };
+                return self.fatal_error(
+                    64,
+                    failure.message,
+                    crate::diagnostics::SourceLocation {
+                        file: failure.file,
+                        line: failure.line,
+                    },
+                );
+            }
             Err(error) => {
                 if matches!(&error, NativeError::Unwind(payload) if payload.0.is::<Thrown>()) {
                     self.failed_native = None;
@@ -176,6 +248,7 @@ impl Vm {
                 .find(|property| name == phera_value::ArrayKey::str(property.name.as_str()));
             let Some(property) = property else {
                 let name = match name {
+                    phera_value::ArrayKey::Interned(name) => name.to_string_lossy(),
                     phera_value::ArrayKey::String(name) => name.to_string_lossy(),
                     phera_value::ArrayKey::Int(name) => name.to_string(),
                 };
@@ -194,7 +267,13 @@ impl Vm {
         }
         self.initialize_throwable(&object, TraceOrigin::Engine);
         object.set(Object::protected_key("message"), Value::from(message));
-        object.set(Object::protected_key("code"), code);
+        let public_code = phera_value::ArrayKey::str("code");
+        let code_key = if object.has(&public_code) {
+            public_code
+        } else {
+            Object::protected_key("code")
+        };
+        object.set(code_key, code);
         for (key, value) in declared_properties {
             object.set(key, value);
         }
@@ -234,6 +313,19 @@ impl Vm {
 
     /// Stored object metadata survives complete unwinding of the original stack.
     pub(crate) fn report_throwable(&mut self, object: &Rc<Object>) {
+        if object.class.name() == "ParseError" {
+            let message = property_text(object, "message");
+            let file = property_text(object, "file");
+            let line = error_line(object);
+            self.report_diagnostic(
+                4,
+                "Parse error",
+                message.into(),
+                crate::diagnostics::SourceLocation { file, line },
+            );
+            self.status = 255;
+            return;
+        }
         let text = crate::exception_rendering::describe_chain(
             object,
             self.error_handlers.trace_string_limit,
@@ -244,13 +336,20 @@ impl Vm {
         } else {
             file
         };
-        let line = property_text(object, "line");
-        self.out(
-            format!("\nFatal error: Uncaught {text}\n  thrown in {file} on line {line}\n")
-                .as_bytes(),
+        let line = error_line(object);
+        let message = format!("Uncaught {text}\n  thrown");
+        self.report_diagnostic(
+            1,
+            "Fatal error",
+            message.into(),
+            crate::diagnostics::SourceLocation { file, line },
         );
         self.status = 255;
     }
+}
+
+fn error_line(object: &Object) -> usize {
+    property_text(object, "line").parse().unwrap_or_default()
 }
 
 /// PHP stores inherited private fields under the native root declaring them.

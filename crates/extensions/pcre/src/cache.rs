@@ -7,6 +7,7 @@
 
 use crate::compile::{self, Compiled};
 use crate::errors::{self, Error};
+use crate::settings::{self, Settings};
 use phera_extension_api::Context;
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
@@ -15,8 +16,8 @@ use std::rc::Rc;
 const CAPACITY: usize = 4096;
 #[derive(Default)]
 struct Cache {
-    patterns: HashMap<Vec<u8>, Rc<Compiled>>,
-    insertion_order: VecDeque<Vec<u8>>,
+    patterns: HashMap<Settings, HashMap<Vec<u8>, Rc<Compiled>>>,
+    insertion_order: VecDeque<(Vec<u8>, Settings)>,
 }
 
 thread_local! {
@@ -30,7 +31,7 @@ pub(crate) fn get(
     function: &str,
     pattern: &[u8],
 ) -> Option<Rc<Compiled>> {
-    match lookup(pattern) {
+    match lookup(pattern, settings::read(context)) {
         Ok(compiled) => Some(compiled),
         Err(message) => {
             context.warning(format!("{function}(): {message}"));
@@ -41,43 +42,61 @@ pub(crate) fn get(
 }
 
 /// The compiled pattern, or the text of the warning.
-pub(crate) fn lookup(pattern: &[u8]) -> Result<Rc<Compiled>, String> {
-    let cached = CACHE.with(|cache| cache.borrow().patterns.get(pattern).cloned());
+pub(crate) fn lookup(pattern: &[u8], settings: Settings) -> Result<Rc<Compiled>, String> {
+    let cached = CACHE.with(|cache| {
+        cache
+            .borrow()
+            .patterns
+            .get(&settings)?
+            .get(pattern)
+            .cloned()
+    });
     if let Some(compiled) = cached {
         return Ok(compiled);
     }
-    let compiled = Rc::new(compile::compile(pattern)?);
+    let compiled = Rc::new(compile::compile(pattern, settings)?);
     CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
-        if cache.patterns.len() == CAPACITY {
+        if cache.insertion_order.len() == CAPACITY {
             for _ in 0..CAPACITY / 8 {
-                if let Some(key) = cache.insertion_order.pop_front() {
-                    cache.patterns.remove(&key);
+                if let Some((key, settings)) = cache.insertion_order.pop_front()
+                    && let Some(patterns) = cache.patterns.get_mut(&settings)
+                {
+                    patterns.remove(&key);
+                    if patterns.is_empty() {
+                        cache.patterns.remove(&settings);
+                    }
                 }
             }
         }
-        cache.insertion_order.push_back(pattern.to_vec());
-        cache.patterns.insert(pattern.to_vec(), compiled.clone());
+        cache
+            .insertion_order
+            .push_back((pattern.to_vec(), settings));
+        cache
+            .patterns
+            .entry(settings)
+            .or_default()
+            .insert(pattern.to_vec(), compiled.clone());
     });
     Ok(compiled)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{CACHE, CAPACITY, lookup};
+    use super::{CACHE, CAPACITY, Settings, lookup};
 
     #[test]
     fn full_pattern_keys_and_bounded_worker_storage() {
         CACHE.with(|cache| *cache.borrow_mut() = Default::default());
-        let plain = lookup(b"/a/").unwrap();
-        let cached = lookup(b"/a/").unwrap();
-        let insensitive = lookup(b"/a/i").unwrap();
+        let plain = lookup(b"/a/", Settings::default()).unwrap();
+        let cached = lookup(b"/a/", Settings::default()).unwrap();
+        let insensitive = lookup(b"/a/i", Settings::default()).unwrap();
         assert!(std::rc::Rc::ptr_eq(&plain, &cached));
         assert!(!std::rc::Rc::ptr_eq(&plain, &insensitive));
         for index in 0..CAPACITY {
-            lookup(format!("/entry{index}/").as_bytes()).unwrap();
+            lookup(format!("/entry{index}/").as_bytes(), Settings::default()).unwrap();
         }
-        CACHE.with(|cache| assert!(cache.borrow().patterns.len() <= CAPACITY));
+        CACHE.with(|cache| assert!(cache.borrow().insertion_order.len() <= CAPACITY));
         assert!(plain.regex.is_match(b"a").unwrap());
     }
 }

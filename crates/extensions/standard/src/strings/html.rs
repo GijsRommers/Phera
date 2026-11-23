@@ -11,14 +11,23 @@ use super::buffer;
 use super::url::hex_digit;
 use crate::constants::{ENT_HTML401, ENT_QUOTES, ENT_SUBSTITUTE};
 
+mod decode;
 mod encoding;
 mod entities;
+mod full;
+mod legacy;
 mod options;
 
 use encoding::{Decoded, Encoding};
 use options::{Document, InvalidInput, Options};
 
-pub(super) const FUNCTIONS: &[FunctionEntry] = &[HTMLSPECIALCHARS, HTMLSPECIALCHARS_DECODE];
+pub(super) const FUNCTIONS: &[FunctionEntry] = &[
+    HTMLSPECIALCHARS,
+    full::HTMLENTITIES,
+    HTMLSPECIALCHARS_DECODE,
+    decode::HTML_ENTITY_DECODE,
+    decode::GET_HTML_TRANSLATION_TABLE,
+];
 
 /// The `$flags` both functions default to.
 const DEFAULT_FLAGS: i64 = ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML401;
@@ -39,20 +48,39 @@ const DEFAULT_FLAGS: i64 = ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML401;
 /// htmlspecialchars("T&amp;C", ENT_QUOTES, null, false); // "T&amp;C"
 /// htmlspecialchars("\xff", ENT_QUOTES);                 // ""
 /// ```
-const HTMLSPECIALCHARS: FunctionEntry = FunctionEntry::sync(
-    "htmlspecialchars",
-    &[
-        Param::new("string", ParamType::String),
-        Param::new("flags", ParamType::Int).optional(),
-        Param::new("encoding", ParamType::String)
-            .nullable()
-            .optional(),
-        Param::new("double_encode", ParamType::Bool).optional(),
-    ],
-    htmlspecialchars,
-);
+const HTMLSPECIALCHARS: FunctionEntry =
+    FunctionEntry::sync("htmlspecialchars", ENCODE, htmlspecialchars);
+
+const ENCODE: &[Param] = &[
+    Param::new("string", ParamType::String),
+    Param::new("flags", ParamType::Int)
+        .with_default(phera_extension_api::ConstantValue::Int(DEFAULT_FLAGS)),
+    Param::new("encoding", ParamType::String)
+        .nullable()
+        .optional(),
+    Param::new("double_encode", ParamType::Bool)
+        .with_default(phera_extension_api::ConstantValue::Bool(true)),
+];
+
+#[derive(Clone, Copy)]
+enum SubstituteEntities {
+    Special,
+    All,
+}
 
 fn htmlspecialchars(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    encode(context, arguments, SubstituteEntities::Special)
+}
+
+fn encode(
+    context: &mut dyn Context,
+    arguments: &[Value],
+    entities: SubstituteEntities,
+) -> NativeResult {
+    let function = match entities {
+        SubstituteEntities::Special => "htmlspecialchars",
+        SubstituteEntities::All => "htmlentities",
+    };
     let string = args::bytes(arguments, 0);
     let options = Options::from_flags(args::int(arguments, 1).unwrap_or(DEFAULT_FLAGS));
     // An empty string returns before the encoding is looked at, so an
@@ -60,7 +88,21 @@ fn htmlspecialchars(context: &mut dyn Context, arguments: &[Value]) -> NativeRes
     if string.is_empty() {
         return Ok(Value::from(""));
     }
-    let encoding = Encoding::resolve(context, args::bytes(arguments, 2));
+    let encoding = Encoding::resolve(context, function, args::bytes(arguments, 2));
+    let mut full = matches!(entities, SubstituteEntities::All);
+    if full
+        && !matches!(
+            encoding,
+            Encoding::Utf8 | Encoding::Latin1 | Encoding::SingleByte(_)
+        )
+    {
+        context.notice(
+            "htmlentities(): Only basic entities substitution is supported for multi-byte encodings other than UTF-8; functionality is equivalent to htmlspecialchars".into()
+        );
+        full = false;
+    }
+    let table = full
+        .then(|| self::entities::translation(options.document, options.document != Document::Xml1));
     let double_encode = args::bool(arguments, 3).unwrap_or(true);
     let mut result = buffer(string.len().saturating_mul(9))?;
     let mut cursor = 0;
@@ -85,9 +127,21 @@ fn htmlspecialchars(context: &mut dyn Context, arguments: &[Value]) -> NativeRes
                 cursor += length;
             }
             Decoded::Valid { code, length } => {
-                if let Some(escaped) = escape(rest[0], options) {
+                if let Some((name, extra)) = table
+                    .and_then(|rows| full::entry(rows, &encoding, options, code, &rest[length..]))
+                {
+                    result.push(b'&');
+                    result.extend_from_slice(name.as_bytes());
+                    result.push(b';');
+                    cursor += extra;
+                } else if let Some(escaped) = escape(rest[0], options) {
                     result.extend_from_slice(escaped);
-                } else if options.replace_disallowed && encoding.disallowed(code, options.document)
+                } else if options.replace_disallowed
+                    && if full {
+                        !options.document.allows(full::unicode(&encoding, code))
+                    } else {
+                        encoding.disallowed(code, options.document)
+                    }
                 {
                     result.extend_from_slice(encoding.replacement());
                 } else {
@@ -172,6 +226,10 @@ fn numeric_entity(name: &[u8]) -> Option<u32> {
         [b'x' | b'X', rest @ ..] => (16, rest),
         _ => (10, digits),
     };
+    parse_numeric_digits(digits, radix)
+}
+
+fn parse_numeric_digits(digits: &[u8], radix: u32) -> Option<u32> {
     if digits.is_empty() {
         return None;
     }
@@ -213,11 +271,5 @@ fn is_valid_entity(name: &[u8], options: Options) -> bool {
                 _ => document.allows(code),
             };
     }
-    let names = match document {
-        Document::Xml1 => return matches!(name, b"amp" | b"lt" | b"gt" | b"quot" | b"apos"),
-        Document::Xhtml if name == b"apos" => return true,
-        Document::Html5 => entities::HTML5,
-        Document::Html401 | Document::Xhtml => entities::HTML4,
-    };
-    names.split(' ').any(|known| known.as_bytes() == name)
+    entities::named(name, document).is_some()
 }

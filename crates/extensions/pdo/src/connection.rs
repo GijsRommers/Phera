@@ -1,21 +1,32 @@
 //! A PDO owns its connection: `$pdo = new PDO($dsn, $user, $password)` awaits the handshake.
 
+mod construct;
+
+pub use construct::construct;
+
+#[cfg(test)]
+mod tls_tests;
+
+use crate::dsn::ParseDsn;
+use crate::errors::PdoError;
+
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use phera_extension_api::{
-    ArrayKey, Context, LocalFuture, NativeError, NativeResult, Object, PhpArray, Value, args,
+    Context, LocalFuture, NativeError, NativeResult, Object, PhpArray, Value, args,
 };
-use tokio::sync::Mutex;
 
-use crate::attributes::Attributes;
-use crate::constants::{PARAM_BOOL, PARAM_INT, PARAM_NULL, PARAM_STR};
+use crate::attributes::{AttributeCall, Attributes};
+use crate::constants::{
+    PARAM_BOOL, PARAM_INT, PARAM_LOB, PARAM_NULL, PARAM_STR, STR_CHAR, STR_NATL,
+};
 use crate::dsn::{DriverName, Dsn};
-use crate::errors::{DbError, ErrorState, unsupported};
-use crate::pool::{self, Lease, Policy};
+use crate::errors::{DbError, ErrorMode, ErrorState, unsupported};
+use crate::pool::Lease;
 
 pub struct Session {
-    pub driver: Mutex<Lease>,
+    pub driver: Lease,
     pub name: DriverName,
     pub version: String,
     pub attributes: RefCell<Attributes>,
@@ -44,6 +55,74 @@ impl Session {
     pub fn success(&self) {
         *self.error.borrow_mut() = ErrorState::Success;
     }
+
+    pub fn fail_get_attribute(&self, context: &mut dyn Context, error: DbError) -> NativeResult {
+        *self.error.borrow_mut() = ErrorState::Failed(DbError {
+            detail: String::new(),
+            ..error.clone()
+        });
+        error.report(context, self.attribute_error_mode(), "PDO::getAttribute")
+    }
+
+    pub fn fail_attribute(
+        &self,
+        context: &mut dyn Context,
+        error: DbError,
+        call: AttributeCall,
+    ) -> NativeResult {
+        let actual = self.attributes.borrow().errors;
+        *self.error.borrow_mut() = ErrorState::Failed(DbError::general(""));
+        if !matches!(call, AttributeCall::Set) && !matches!(actual, ErrorMode::Exception) {
+            return Err(crate::errors::exception(
+                format!("{}(): {}", call.method(), error.message()),
+                None,
+                0,
+            ));
+        }
+        if matches!(actual, ErrorMode::Exception) {
+            return error.report(context, actual, "PDO::setAttribute");
+        }
+        context.warning(format!("PDO::setAttribute(): {}", error.message()));
+        Ok(Value::Bool(false))
+    }
+
+    fn attribute_error_mode(&self) -> ErrorMode {
+        match self.attributes.borrow().errors {
+            ErrorMode::Exception => ErrorMode::Exception,
+            _ => ErrorMode::Warning,
+        }
+    }
+}
+
+/// The fork hook of `PDO`: each fork's copy borrows its own session on
+/// first use (see [`crate::pool::Lease::forked`]). Laravel and Doctrine
+/// connect after `Phera\snapshot()` anyway; WordPress plugins and plain
+/// scripts often connect before it.
+pub fn fork_session(
+    _object: &Object,
+    state: &dyn std::any::Any,
+    fork: &mut phera_extension_api::value::Fork<'_>,
+) -> Result<Box<dyn std::any::Any>, String> {
+    let session = state
+        .downcast_ref::<Rc<Session>>()
+        .ok_or("its built-in state is not initialized")?;
+    if session.transaction.get() {
+        return Err("a transaction is open on it (beginTransaction()); commit it before Phera\\snapshot(), or connect after the call".into());
+    }
+    let driver = session.driver.forked()?;
+    let mut attributes = session.attributes.borrow().clone();
+    attributes.statement_class = attributes.statement_class.forked(fork);
+    let copy = Session {
+        driver,
+        name: session.name,
+        version: session.version.clone(),
+        attributes: RefCell::new(attributes),
+        error: RefCell::new(session.error.borrow().clone()),
+        last_error: RefCell::new(session.last_error.borrow().clone()),
+        transaction: Cell::new(false),
+        statement_sequence: Cell::new(session.statement_sequence.get()),
+    };
+    Ok(Box::new(Rc::new(copy)) as Box<dyn std::any::Any>)
 }
 
 pub fn session(this: Option<&Rc<Object>>) -> Result<Rc<Session>, NativeError> {
@@ -55,71 +134,6 @@ pub fn session(this: Option<&Rc<Object>>) -> Result<Rc<Session>, NativeError> {
         .and_then(|native| native.downcast_ref::<Rc<Session>>())
         .cloned()
         .ok_or_else(|| NativeError::error("PDO object is uninitialized"))
-}
-
-pub fn construct<'a>(
-    context: &'a mut dyn Context,
-    this: Option<Rc<Object>>,
-    arguments: Vec<Value>,
-) -> LocalFuture<'a, NativeResult> {
-    Box::pin(async move {
-        let object = this.ok_or_else(|| NativeError::error("PDO object is missing"))?;
-        if object.native.borrow().is_some() {
-            return Err(NativeError::error("PDO object is already initialized"));
-        }
-        let dsn_text = args::string(&arguments, 0)
-            .map(|s| s.to_string_lossy())
-            .unwrap_or_default();
-        let mut dsn = Dsn::parse(&dsn_text)?;
-        let username = args::string(&arguments, 1)
-            .map(|s| s.to_string_lossy())
-            .unwrap_or_else(|| dsn.get("user", "").to_owned());
-        let password = args::string(&arguments, 2)
-            .map(|s| s.to_string_lossy())
-            .unwrap_or_else(|| dsn.get("password", "").to_owned());
-        let policy = Policy::from_options(args::array(&arguments, 3).map(Rc::as_ref));
-        let mut attributes = Attributes::new(dsn.driver);
-        if let Some(options) = args::array(&arguments, 3) {
-            for (key, value) in options.iter() {
-                if let ArrayKey::Int(attribute) = key
-                    && attribute != pool::PHERA_ATTR_POOL
-                    && crate::attributes::constructor_accepts(dsn.driver, attribute)
-                {
-                    attributes.set(context, attribute, value)?;
-                }
-            }
-        }
-        if dsn.driver == DriverName::Sqlite {
-            // The driver opens the file with the options' flags and timeout.
-            dsn.fields
-                .insert("flags".into(), attributes.sqlite_flags.to_string());
-            dsn.fields
-                .insert("timeout".into(), attributes.timeout.to_string());
-        }
-        let driver = match pool::acquire(&dsn, &username, &password, policy).await {
-            Ok(driver) => driver,
-            Err(error) => {
-                let code = error.code.unwrap_or(0);
-                return Err(crate::errors::exception(
-                    format!("SQLSTATE[{}] [{code}] {}", error.state, error.detail),
-                    Some(&error),
-                    code,
-                ));
-            }
-        };
-        let version = driver.version().to_owned();
-        *object.native.borrow_mut() = Some(Box::new(Rc::new(Session {
-            driver: Mutex::new(driver),
-            name: dsn.driver,
-            version,
-            attributes: RefCell::new(attributes),
-            error: RefCell::new(ErrorState::Unused),
-            last_error: RefCell::new(None),
-            transaction: Cell::new(false),
-            statement_sequence: Cell::new(0),
-        })));
-        Ok(Value::Null)
-    })
 }
 
 pub fn available(_: &mut dyn Context, _: Option<&Rc<Object>>, _: &[Value]) -> NativeResult {
@@ -149,12 +163,11 @@ pub fn exec<'a>(
                 "PDO::exec(): Argument #1 ($statement) must not be empty",
             ));
         }
-        let mut driver = session.driver.lock().await;
+        let driver = &session.driver;
         let result = driver.exec(&sql).await;
         if let Some(active) = driver.observed_transaction_state() {
             session.transaction.set(active);
         }
-        drop(driver);
         match result {
             Ok(rows) => {
                 session.success();
@@ -182,7 +195,10 @@ pub fn quote<'a>(
             return Ok(Value::from(crate::drivers::sqlite::quote(bytes)));
         }
         let kind = args::int(&arguments, 1).unwrap_or(PARAM_STR);
-        if !matches!(kind, PARAM_NULL | PARAM_INT | PARAM_STR | PARAM_BOOL) {
+        let base = kind & !(STR_CHAR | STR_NATL);
+        if !matches!(base, PARAM_NULL | PARAM_INT | PARAM_STR | PARAM_BOOL)
+            && !(base == PARAM_LOB && session.name == DriverName::Mysql)
+        {
             return Err(unsupported("LOB quoting"));
         }
         let bytes = args::string(&arguments, 0).map_or(&b""[..], |s| s.as_bytes());
@@ -192,9 +208,26 @@ pub fn quote<'a>(
         if std::str::from_utf8(bytes).is_err() {
             return Err(unsupported("Quoting non-UTF-8 strings"));
         }
-        let result = session.driver.lock().await.quote(bytes).await;
+        let result = session.driver.quote(bytes).await;
         match result {
-            Ok(quoted) => Ok(Value::from(quoted)),
+            Ok(quoted) => {
+                let prefix = if session.name != DriverName::Mysql {
+                    ""
+                } else if base == PARAM_LOB {
+                    "_binary"
+                } else if kind & STR_CHAR == 0
+                    && (kind & STR_NATL != 0 || session.attributes.borrow().national_strings)
+                {
+                    "N"
+                } else {
+                    ""
+                };
+                Ok(Value::from(if prefix.is_empty() {
+                    quoted
+                } else {
+                    format!("{prefix}{quoted}")
+                }))
+            }
             Err(error) => session.fail(context, error, "PDO::quote"),
         }
     })
@@ -208,7 +241,7 @@ pub fn last_id<'a>(
     Box::pin(async move {
         let session = session(this.as_ref())?;
         let name = args::string(&arguments, 0).map(|s| s.to_string_lossy());
-        let result = session.driver.lock().await.last_id(name.as_deref()).await;
+        let result = session.driver.last_id(name.as_deref()).await;
         match result {
             Ok(id) => {
                 session.success();
@@ -248,7 +281,13 @@ pub fn connect<'a>(
                 "PDO allocation did not create an object",
             ));
         };
-        construct(context, Some(instance.clone()), arguments).await?;
+        construct::construct_with_call(
+            context,
+            Some(instance.clone()),
+            arguments,
+            AttributeCall::Connect,
+        )
+        .await?;
         Ok(object)
     })
 }

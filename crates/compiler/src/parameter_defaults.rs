@@ -15,15 +15,16 @@ impl Compiler<'_> {
         if let Some(message) = crate::constant_callables::callable_constant_error(default) {
             return Err(self.error(message, line));
         }
-        if !parameter_expression(default) {
-            return Err(self.error("Constant expression contains invalid operations", line));
+        if let Some(message) = initializer_error(default, true) {
+            return Err(self.error(message, line));
         }
         let Some(declaration) = &parameter.ty else {
             return Ok(());
         };
         let declared = type_name(declaration);
         let actual = match constant(default) {
-            Some(Constant::Null) => return Ok(()),
+            Some(Constant::Null) if !parameter.is_promoted() => return Ok(()),
+            Some(Constant::Null) => "null",
             Some(Constant::Bool(true)) => "true",
             Some(Constant::Bool(false)) => "false",
             Some(Constant::Int(_)) => "int",
@@ -33,16 +34,17 @@ impl Compiler<'_> {
             None if matches!(default.kind, ExpressionKind::Array(_)) => "array",
             None => return Ok(()),
         };
-        let accepted = declared
-            .trim_start_matches('?')
-            .split('|')
-            .any(|candidate| {
-                candidate == actual
-                    || candidate == "mixed"
-                    || candidate == "float" && actual == "int"
-                    || candidate == "bool" && matches!(actual, "true" | "false")
-                    || candidate == "iterable" && actual == "array"
-            });
+        let accepted = actual == "null" && declared.starts_with('?')
+            || declared
+                .trim_start_matches('?')
+                .split('|')
+                .any(|candidate| {
+                    candidate == actual
+                        || candidate == "mixed"
+                        || candidate == "float" && actual == "int"
+                        || candidate == "bool" && matches!(actual, "true" | "false")
+                        || candidate == "iterable" && actual == "array"
+                });
         if accepted {
             return Ok(());
         }
@@ -61,75 +63,122 @@ impl Compiler<'_> {
     }
 }
 
-/// Defaults permit constant arithmetic and arrays, but never variables or function calls.
+/// Visit every initializer operand without recursing through long PHP expressions.
 pub(crate) fn constant_expression(expression: &Expression) -> bool {
-    match &expression.kind {
-        ExpressionKind::Literal(_) | ExpressionKind::Name(_) | ExpressionKind::MagicConstant(_) => {
-            true
-        }
-        ExpressionKind::ClassConstant { .. } => true,
-        ExpressionKind::Call {
-            callee,
-            arguments: phera_ast::Arguments::FirstClassCallable,
-        } => {
-            matches!(
-                callee.kind,
-                ExpressionKind::Name(_) | ExpressionKind::Literal(phera_ast::Literal::String(_))
-            )
-        }
-        ExpressionKind::StaticCall {
-            class,
-            name: phera_ast::MemberName::Identifier(_),
-            arguments: phera_ast::Arguments::FirstClassCallable,
-        } => {
-            matches!(class.kind, ExpressionKind::Name(_))
-        }
-        ExpressionKind::Closure(closure) => closure.is_static && closure.uses.is_empty(),
-        ExpressionKind::ArrowFunction(_) => false,
-        ExpressionKind::Array(items) => items.iter().all(|item| {
-            !item.by_reference
-                && item.key.as_ref().is_none_or(constant_expression)
-                && constant_expression(&item.value)
-        }),
-        ExpressionKind::Unary { operator, operand } => {
-            *operator != phera_ast::UnaryOperator::ErrorSuppress && constant_expression(operand)
-        }
-        ExpressionKind::Ternary {
-            condition,
-            then,
-            otherwise,
-        } => {
-            constant_expression(condition)
-                && then.as_deref().is_none_or(constant_expression)
-                && constant_expression(otherwise)
-        }
-        ExpressionKind::Index { target, index } => {
-            constant_expression(target) && index.as_deref().is_some_and(constant_expression)
-        }
-        ExpressionKind::Binary { left, right, .. } => {
-            constant_expression(left) && constant_expression(right)
-        }
-        _ => false,
-    }
+    initializer_error(expression, false).is_none()
 }
 
-/// PHP permits named-class construction in parameter defaults but not property defaults.
-fn parameter_expression(expression: &Expression) -> bool {
-    match &expression.kind {
-        ExpressionKind::New {
-            class: phera_ast::NewTarget::Class(class),
-            arguments: phera_ast::Arguments::List(arguments),
-        } => {
-            matches!(class.kind, ExpressionKind::Name(_))
-                && arguments
-                    .iter()
-                    .all(|argument| !argument.spread && parameter_expression(&argument.value))
+/// Constructors are allowed in defaults for parameters and in attribute arguments.
+pub(crate) fn initializer_error(
+    expression: &Expression,
+    allow_dynamic: bool,
+) -> Option<&'static str> {
+    use ExpressionKind::*;
+    use phera_ast::{Arguments, MemberName, NewTarget};
+
+    let mut pending = vec![expression];
+    while let Some(expression) = pending.pop() {
+        match &expression.kind {
+            Literal(_) | Name(_) | MagicConstant(_) => {}
+            ClassConstant { class, name } => {
+                match &class.kind {
+                    Name(class) if class.text.eq_ignore_ascii_case("static") => {
+                        return Some(
+                            if matches!(name, MemberName::Identifier(member) if member.name.eq_ignore_ascii_case("class"))
+                            {
+                                "static::class cannot be used for compile-time class name resolution"
+                            } else {
+                                "\"static::\" is not allowed in compile-time constants"
+                            },
+                        );
+                    }
+                    Name(_) => {}
+                    _ => return Some("Cannot use dynamic class name in constant expression"),
+                }
+                if let MemberName::Expression(name) = name {
+                    pending.push(name);
+                }
+            }
+            Property {
+                target,
+                name,
+                nullsafe: false,
+            } => {
+                pending.push(target);
+                if let MemberName::Expression(name) = name {
+                    pending.push(name);
+                }
+            }
+            Call {
+                callee,
+                arguments: Arguments::FirstClassCallable,
+                ..
+            } if matches!(
+                callee.kind,
+                Name(_) | Literal(phera_ast::Literal::String(_))
+            ) => {}
+            StaticCall {
+                class,
+                name: MemberName::Identifier(_),
+                arguments: Arguments::FirstClassCallable,
+                ..
+            } if matches!(class.kind, Name(_)) => {}
+            Closure(closure) if closure.is_static && closure.uses.is_empty() => {}
+            New {
+                class: NewTarget::Class(class),
+                arguments: Arguments::List(arguments),
+            } if allow_dynamic && matches!(class.kind, Name(_)) => {
+                if matches!(&class.kind, Name(name) if name.text.eq_ignore_ascii_case("static")) {
+                    return Some("\"static\" is not allowed in compile-time constants");
+                }
+                for argument in arguments.iter().rev() {
+                    if argument.spread {
+                        return Some("Argument unpacking in constant expressions is not supported");
+                    }
+                    pending.push(&argument.value);
+                }
+            }
+            Array(items) => {
+                for item in items.iter().rev() {
+                    if item.by_reference {
+                        return Some("Cannot use references in constant expression");
+                    }
+                    pending.push(&item.value);
+                    pending.extend(item.key.as_ref());
+                }
+            }
+            Unary { operator, operand } if *operator != phera_ast::UnaryOperator::ErrorSuppress => {
+                pending.push(operand)
+            }
+            Cast { kind, operand } => {
+                if !allow_dynamic && *kind == phera_ast::CastKind::Object {
+                    return Some("Object casts are not supported in this context");
+                }
+                pending.push(operand);
+            }
+            Ternary {
+                condition,
+                then,
+                otherwise,
+            } => {
+                pending.push(otherwise);
+                pending.extend(then.as_deref());
+                pending.push(condition);
+            }
+            Index {
+                target,
+                index: Some(index),
+            }
+            | Binary {
+                left: target,
+                right: index,
+                ..
+            } => {
+                pending.push(index);
+                pending.push(target);
+            }
+            _ => return Some("Constant expression contains invalid operations"),
         }
-        ExpressionKind::Array(items) => items.iter().all(|item| {
-            !item.by_reference
-                && item.key.as_ref().is_none_or(parameter_expression)
-                && parameter_expression(&item.value)
-        }),
-        _ => constant_expression(expression),
     }
+    None
 }

@@ -11,7 +11,7 @@ fn int_keys(array: &PhpArray) -> Vec<i64> {
         .keys()
         .map(|key| match key {
             ArrayKey::Int(i) => i,
-            ArrayKey::String(_) => panic!("expected integer keys only"),
+            ArrayKey::Interned(_) | ArrayKey::String(_) => panic!("expected integer keys only"),
         })
         .collect()
 }

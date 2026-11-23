@@ -50,6 +50,7 @@ fn request(method: &str, target: &str) -> HttpRequest {
         body: Vec::new(),
         remote_addr: "203.0.113.9:51000".parse().expect("address"),
         local_addr: address,
+        https: false,
     }
 }
 
@@ -61,6 +62,26 @@ async fn serve(site: &Site, script: &Path, request: HttpRequest) -> HttpResponse
 
 fn body(response: &HttpResponse) -> String {
     String::from_utf8_lossy(&response.body).into_owned()
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_worker_keeps_inherited_environment_separate_from_request_writes() {
+    let site = Site::new("inherited-env");
+    let script = site.file(
+        "index.php",
+        "<?php if (isset($_GET['change'])) $_ENV['APP_ENV'] = 'request'; echo $_ENV['APP_ENV'];",
+    );
+    let mut environment = phera_dotenv::Environment::default();
+    environment.insert(b"APP_ENV".to_vec(), b"inherited".to_vec());
+    let worker = Runtime::with_environment(environment).web_worker(0);
+    let first = worker
+        .handle_request(&script, &site.root, request("GET", "/index.php?change=1"))
+        .await;
+    let next = worker
+        .handle_request(&script, &site.root, request("GET", "/index.php"))
+        .await;
+    assert_eq!(body(&first), "request");
+    assert_eq!(body(&next), "inherited");
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -156,15 +177,29 @@ async fn failures_become_error_responses() {
     let broken = site.file("broken.php", "<?php echo 1 +;");
     let response = serve(&site, &broken, request("GET", "/broken.php")).await;
     assert_eq!(response.status, 500);
+    assert!(response.body.is_empty());
+
+    let crashing = site.file("crash.php", "<?php echo 'before'; undefined_function();");
+    let response = serve(&site, &crashing, request("GET", "/crash.php")).await;
+    assert_eq!(response.status, 200);
+    assert_eq!(body(&response), "before");
+
+    let settings = vec![("display_errors".into(), "1".into())];
+    let runtime = Runtime::new().with_startup_ini(settings);
+    let response = runtime
+        .handle_request(&broken, &site.root, request("GET", "/broken.php"))
+        .await;
+    assert_eq!(response.status, 200);
     assert!(
         body(&response).contains("Parse error"),
         "{}",
         body(&response)
     );
 
-    let crashing = site.file("crash.php", "<?php echo 'before'; undefined_function();");
-    let response = serve(&site, &crashing, request("GET", "/crash.php")).await;
-    assert_eq!(response.status, 500);
+    let response = runtime
+        .handle_request(&crashing, &site.root, request("GET", "/crash.php"))
+        .await;
+    assert_eq!(response.status, 200);
     assert!(body(&response).starts_with("before"), "{}", body(&response));
     assert!(body(&response).contains("Call to undefined function"));
 }
@@ -222,4 +257,69 @@ async fn compiled_code_is_shared_and_output_is_streamed() {
     assert_eq!(result.status, 0);
     assert_eq!(result.output, b"hello world");
     assert_eq!(*streamed.borrow(), b"hello world");
+}
+
+/// `mb_internal_encoding('ASCII')` affects one request; the next starts with UTF-8.
+#[tokio::test(flavor = "current_thread")]
+async fn multibyte_functions_and_settings_run_in_each_request() {
+    let site = Site::new("mbstring");
+    let script = site.file(
+        "text.php",
+        r#"<?php
+echo mb_internal_encoding(), '|', mb_substitute_character(), '|', mb_language(), '|';
+echo mb_strtoupper('Straße'), '|', mb_strlen('👩🏽‍💻'), '|';
+mb_parse_str('name=%C3%A9', $result);
+echo $result['name'], '|', iconv('UTF-8', 'UTF-8', '日本語');
+mb_internal_encoding('ASCII');
+mb_substitute_character('none');
+mb_language('Japanese');
+"#,
+    );
+    let runtime = Runtime::new();
+    for _ in 0..2 {
+        let response = runtime
+            .handle_request(&script, &site.root, request("GET", "/text.php"))
+            .await;
+        assert_eq!(body(&response), "UTF-8|63|neutral|STRASSE|4|é|日本語");
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn wrapper_registration_and_included_source_belong_to_each_request() {
+    let site = Site::new("wrapper-includes");
+    let script = site.file(
+        "index.php",
+        r#"<?php
+class RequestSource {
+    public $context;
+    private $code;
+    private $read = false;
+    public function stream_open($path, $mode, $flags, &$opened_path) {
+        $opened_path = 'virtual-source.php';
+        $this->code = '<?php return ' . (int) $_GET['value'] . ';';
+        return true;
+    }
+    public function stream_read($count) {
+        if ($this->read) return '';
+        $this->read = true;
+        return $this->code;
+    }
+    public function stream_eof() { return $this->read; }
+    public function stream_set_option($option, $arg1, $arg2) { return true; }
+    public function stream_stat() { return ['size' => strlen($this->code)]; }
+}
+echo in_array('request-code', stream_get_wrappers(), true) ? 'leaked:' : 'fresh:';
+stream_wrapper_register('request-code', RequestSource::class);
+echo include 'request-code://source';
+"#,
+    );
+    let worker = Runtime::new().web_worker(0);
+    for (value, output) in [(1, "fresh:1"), (2, "fresh:2")] {
+        let path = format!("/index.php?value={value}");
+        let response = worker
+            .handle_request(&script, &site.root, request("GET", &path))
+            .await;
+        assert_eq!(response.status, 200);
+        assert_eq!(body(&response), output);
+    }
 }

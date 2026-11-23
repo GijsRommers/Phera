@@ -3,6 +3,9 @@
 
 use crate::diagnostic::Diagnostic;
 use std::collections::BTreeSet;
+use std::path::Path;
+
+mod neon;
 
 pub fn write(path: &str, diagnostics: &[Diagnostic]) -> Result<(), String> {
     let entries = diagnostics
@@ -16,6 +19,12 @@ pub fn write(path: &str, diagnostics: &[Diagnostic]) -> Result<(), String> {
 
 pub fn filter(path: &str, diagnostics: &mut Vec<Diagnostic>) -> Result<(), String> {
     let content = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
+    if Path::new(path)
+        .extension()
+        .is_some_and(|extension| extension == "neon")
+    {
+        return neon::filter(Path::new(path), &content, diagnostics);
+    }
     if !content.starts_with("{\"version\":1,\"diagnostics\":[\n") || !content.ends_with("]}\n") {
         return Err(format!(
             "{path}: expected a version 1 baseline from --generate-baseline"

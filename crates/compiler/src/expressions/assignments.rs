@@ -7,42 +7,47 @@ use crate::ir::{Instruction, Target};
 use crate::{CompileError, Compiler, binary, writable};
 
 impl Compiler<'_> {
-    /// Read a variable or indexed value after evaluating its path.
-    pub(crate) fn compile_read(
-        &mut self,
-        expression: &ast::Expression,
-        line: usize,
-    ) -> Result<Reg, CompileError> {
-        let place = self.readable_place(expression)?;
-        if place
-            .path
-            .iter()
-            .any(|step| matches!(step, crate::ir::PathStep::Append))
-        {
-            return Err(self.error("Cannot use [] for reading", line));
-        }
-        let dst = self.allocate_register()?;
-        self.emit(
-            Instruction::Read {
-                destination: dst,
-                place,
-                mode: phera_bytecode::FetchMode::Read,
-            },
-            line,
-        );
-        Ok(dst)
-    }
-
-    /// Evaluate the source before writing, retaining references in destructuring.
+    /// Evaluate property receivers and keys before the source. A simple local
+    /// source is read only when the destination is ready to be written.
     pub(crate) fn compile_assignment(
         &mut self,
         target: &ast::Expression,
         value: &ast::Expression,
         line: usize,
     ) -> Result<Reg, CompileError> {
+        if contains_property(target) {
+            let place = self.place(target)?;
+            if matches!(
+                value.kind,
+                ast::ExpressionKind::Variable(ast::Variable::Named(_))
+            ) {
+                let source = self.readable_place(value)?;
+                if source.scope == crate::ir::PlaceScope::Local && source.path.is_empty() {
+                    let destination = self.allocate_register()?;
+                    self.emit(
+                        Instruction::WriteFromLocal {
+                            place,
+                            source: source.base,
+                            destination,
+                        },
+                        line,
+                    );
+                    return Ok(destination);
+                }
+            }
+            let source = self.compile_expression(value)?;
+            self.emit(Instruction::Write { place, source }, line);
+            return Ok(source);
+        }
+        if matches!(target.kind, ast::ExpressionKind::Index { .. }) {
+            return self.compile_index_assignment(target, value, line);
+        }
+        if let ast::ExpressionKind::Variable(ast::Variable::Named(name)) = &target.kind {
+            self.declare_file_symbol(name);
+        }
         let references = super::places::contains_reference(target);
-        let src = if references && writable(value) {
-            let place = self.place(value)?;
+        let src = if references && (writable(value) || crate::helpers::is_this(value)) {
+            let place = self.reference_source(value, line)?;
             let dst = self.allocate_register()?;
             self.emit(
                 Instruction::Reference {
@@ -57,6 +62,35 @@ impl Compiler<'_> {
         };
         self.assign(target, src, line)?;
         Ok(src)
+    }
+
+    /// Index expressions run before the right-hand side. A compiled local
+    /// key is looked up by the write, after that side has run.
+    fn compile_index_assignment(
+        &mut self,
+        target: &ast::Expression,
+        value: &ast::Expression,
+        line: usize,
+    ) -> Result<Reg, CompileError> {
+        let mut indexes = Vec::new();
+        let place = self.assignment_place(target, &mut indexes)?;
+        let source = self.compile_expression(value)?;
+        self.read_deferred_indexes(&indexes);
+        self.emit(Instruction::Write { place, source }, line);
+        Ok(source)
+    }
+
+    fn read_deferred_indexes(&mut self, indexes: &[super::paths::DeferredIndex]) {
+        for index in indexes {
+            self.emit(
+                Instruction::Read {
+                    destination: index.destination,
+                    place: index.source.clone(),
+                    mode: phera_bytecode::FetchMode::Read,
+                },
+                index.line,
+            );
+        }
     }
 
     /// Bind references while retaining the original target evaluation order.
@@ -78,13 +112,9 @@ impl Compiler<'_> {
             return Ok(src);
         }
         let source = self.readable_place(value)?;
-        if place
-            .path
-            .iter()
-            .any(|step| matches!(step, crate::ir::PathStep::Append))
-        {
-            // In `$a[] =& $a`, the result is the bound value after the append.
-            // The append path is write-only, so read it through the bound cell.
+        if !place.path.is_empty() {
+            // Binding leaves the expression's result in the shared cell.
+            // Reading the target again would convert its keys a second time.
             let reference = self.allocate_register()?;
             self.emit(
                 Instruction::Reference {
@@ -144,8 +174,10 @@ impl Compiler<'_> {
         line: usize,
     ) -> Result<Reg, CompileError> {
         if *operator != ast::BinaryOperator::NullCoalesce {
-            let place = self.place(target)?;
+            let mut indexes = Vec::new();
+            let place = self.assignment_place(target, &mut indexes)?;
             let source = self.compile_expression(value)?;
+            self.read_deferred_indexes(&indexes);
             let dst = self.allocate_register()?;
             let operator =
                 binary(*operator).ok_or_else(|| self.error("Operator not supported yet", line))?;
@@ -170,7 +202,9 @@ impl Compiler<'_> {
         value: &ast::Expression,
         line: usize,
     ) -> Result<Reg, CompileError> {
-        let place = self.place(target)?;
+        let mut indexes = Vec::new();
+        let place = self.assignment_place(target, &mut indexes)?;
+        self.read_deferred_indexes(&indexes);
         let lhs = self.allocate_register()?;
         self.emit(
             Instruction::Read {
@@ -190,6 +224,7 @@ impl Compiler<'_> {
         let end = self.emit(Instruction::Jump(Target(0)), line);
         self.patch(jump, self.position());
         let rhs = self.compile_expression(value)?;
+        self.read_deferred_indexes(&indexes);
         self.emit(Instruction::Write { place, source: rhs }, line);
         self.emit(
             Instruction::Move {
@@ -201,4 +236,11 @@ impl Compiler<'_> {
         self.patch(end, self.position());
         Ok(lhs)
     }
+}
+
+fn contains_property(mut target: &ast::Expression) -> bool {
+    while let ast::ExpressionKind::Index { target: inner, .. } = &target.kind {
+        target = inner;
+    }
+    matches!(target.kind, ast::ExpressionKind::Property { .. })
 }

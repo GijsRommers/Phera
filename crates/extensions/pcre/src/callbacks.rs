@@ -18,7 +18,6 @@ use crate::flags::CaptureFlags;
 use crate::replace::{self, Splice};
 use crate::scan::Scanner;
 use crate::{cache, callable, errors, matches};
-use phera_extension_api::value::to_php_string;
 use phera_extension_api::{
     ArrayKey, Context, LocalFuture, NativeError, NativeResult, PhpArray, Value, args,
 };
@@ -41,14 +40,12 @@ impl Operation<'_> {
     /// Every pattern over one subject, in turn. Null when a pattern does not
     /// compile or a match fails.
     async fn subject(&mut self, context: &mut dyn Context, value: &Value) -> NativeResult {
-        let mut subject = to_php_string(value, context.diagnostics())?
-            .as_bytes()
-            .to_vec();
+        let mut subject = context.stringify(value).await?.as_bytes().to_vec();
         for pattern in &self.patterns {
-            let pattern = to_php_string(pattern, context.diagnostics())?;
+            let pattern = context.stringify(pattern).await?;
             let compiled = if self.exception.is_some() {
                 // While an exception is pending PHP gives no new warnings.
-                match cache::lookup(pattern.as_bytes()) {
+                match cache::lookup(pattern.as_bytes(), crate::settings::read(context)) {
                     Ok(compiled) => Some(compiled),
                     Err(_) => {
                         errors::set(context, Error::Internal);
@@ -63,9 +60,16 @@ impl Operation<'_> {
             };
             errors::set(context, Error::None);
             let mut splice = Splice::new(&subject);
-            for found in Scanner::new(&compiled, &subject, 0).take(self.limit) {
-                let captures = match found {
-                    Ok(captures) => captures,
+            let mut scanner = Scanner::new(&compiled, &subject, 0);
+            let next = std::iter::from_fn(|| match compiled.marks.as_deref() {
+                Some(probe) => scanner.next_marked(probe),
+                None => scanner
+                    .next()
+                    .map(|found| found.map(|captures| (captures, None))),
+            });
+            for found in next.take(self.limit) {
+                let (captures, mark) = match found {
+                    Ok(found) => found,
                     Err(error) => {
                         errors::set(context, error);
                         return Ok(Value::Null);
@@ -76,6 +80,7 @@ impl Operation<'_> {
                     &captures,
                     compiled.regex.capture_names(),
                     self.flags,
+                    mark,
                 );
                 self.count += 1;
                 // With an exception pending (from a callback on an earlier
@@ -93,11 +98,12 @@ impl Operation<'_> {
                         return Ok(Value::Null);
                     }
                 };
-                let replacement = to_php_string(&replacement, context.diagnostics())?;
+                let replacement = context.stringify(&replacement).await?;
                 splice
                     .replace(&captures)
                     .extend_from_slice(replacement.as_bytes());
             }
+            drop(scanner);
             subject = splice.finish();
         }
         Ok(Value::from(subject))
@@ -158,11 +164,15 @@ pub(crate) fn replace_array(
         let mut count = 0;
         if let Some(patterns) = args::array(&arguments, 0) {
             for (key, callback) in patterns.iter() {
-                let ArrayKey::String(pattern) = key else {
-                    return Err(NativeError::type_error(
-                        "preg_replace_callback_array(): Argument #1 ($pattern) \
-                         must contain only string patterns as keys",
-                    ));
+                let pattern = match key {
+                    ArrayKey::Interned(pattern) => Value::InternedStr(pattern),
+                    ArrayKey::String(pattern) => Value::String(pattern),
+                    ArrayKey::Int(_) => {
+                        return Err(NativeError::type_error(
+                            "preg_replace_callback_array(): Argument #1 ($pattern) \
+                             must contain only string patterns as keys",
+                        ));
+                    }
                 };
                 if callable::invalid_reason(callback).is_some() {
                     return Err(NativeError::type_error(
@@ -172,7 +182,7 @@ pub(crate) fn replace_array(
                 }
                 let mut operation = Operation {
                     name: "preg_replace_callback_array",
-                    patterns: vec![Value::String(pattern.clone())],
+                    patterns: vec![pattern],
                     callback,
                     limit: replace::match_limit(args::int(&arguments, 2).unwrap_or(-1)),
                     flags: CaptureFlags::parse(args::int(&arguments, 4).unwrap_or(0)),

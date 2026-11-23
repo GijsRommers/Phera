@@ -2,9 +2,14 @@
 //! `var_export`), type tests and conversions, `count`, the engine's constants,
 //! and the exception classes.
 
+mod assertions;
+mod backtrace;
 mod constants;
 mod count;
 mod dump;
+mod included_files;
+mod interfaces;
+mod iterator_functions;
 mod throwable;
 mod types;
 
@@ -14,14 +19,19 @@ pub struct Core;
 
 impl Extension for Core {
     fn name(&self) -> &'static str {
-        "core"
+        "Core"
     }
 
     fn register(&self, registry: &mut Registry) {
+        interfaces::register(registry);
+        included_files::register(registry);
         constants::register(registry);
+        backtrace::register(registry);
         count::register(registry);
+        iterator_functions::register(registry);
         dump::register(registry);
         throwable::register(registry);
         types::register(registry);
+        assertions::register(registry);
     }
 }

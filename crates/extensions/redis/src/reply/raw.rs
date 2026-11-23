@@ -62,7 +62,7 @@ fn convert_inner(reply: Reply, options: &Options, zip: bool) -> NativeResult {
                 if matches!(task, Task::Zip(_)) {
                     let mut values = values.into_iter();
                     while let Some(k) = values.next() {
-                        if matches!(k, Value::String(_))
+                        if k.is_string()
                             && let Some(v) = values.next()
                         {
                             array.insert(ArrayKey::from_value(&k)?, v);

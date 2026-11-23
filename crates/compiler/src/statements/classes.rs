@@ -1,9 +1,13 @@
 //! Class declarations compile methods as ordinary functions so calls keep heap-frame execution.
 
+use super::builtin_attributes::AttributePlacement;
+use super::class_default_types::DefaultKind;
+use super::property_hooks::HookedDeclaration;
 use phera_ast as ast;
 use phera_bytecode::{ClassKind, Visibility};
+use phera_source::attributes::AttributeTarget;
 
-use crate::ir::{ClassDeclaration, ClassMethod, ClassProperty, Instruction};
+use crate::ir::{ClassDeclaration, ClassProperty, Instruction};
 use crate::policies::{DeclarationTiming, NameKind};
 use crate::{CompileError, Compiler};
 
@@ -14,50 +18,131 @@ impl Compiler<'_> {
         declaration: &ast::ClassDeclaration,
         timing: DeclarationTiming,
         line: usize,
-    ) -> Result<(), CompileError> {
-        if self.function.name.contains("::") {
+    ) -> Result<String, CompileError> {
+        if declaration.name.is_some() && self.class_scope.is_some() {
             return Err(self.error("Class declarations may not be nested", line));
         }
-        if !matches!(
-            declaration.kind,
-            ast::ClassKind::Class | ast::ClassKind::Interface
-        ) {
-            return Err(self.error("Traits and enums not supported yet", line));
-        }
-        let Some(identifier) = &declaration.name else {
-            return Err(self.error("Anonymous classes not supported yet", line));
+        let name = match &declaration.name {
+            Some(identifier) if self.namespace.is_empty() => identifier.name.clone(),
+            Some(identifier) => format!("{}\\{}", self.namespace, identifier.name),
+            None => self.anonymous_class_name(declaration),
         };
-        let name = if self.namespace.is_empty() {
-            identifier.name.clone()
-        } else {
-            format!("{}\\{}", self.namespace, identifier.name)
-        };
-        self.validate_class_declaration(declaration, &name)?;
-        if declaration.attributes.iter().any(|attribute| {
-            attribute.name.text.trim_start_matches('\\') != "AllowDynamicProperties"
-        }) {
-            return Err(self.error("Attributes not supported yet", line));
+        let display = name.split('\0').next().unwrap_or(&name);
+        let enum_backing = self.validate_enum(declaration, display)?;
+        self.validate_class_declaration(declaration, display)?;
+        let mut metadata = self.declaration_metadata(
+            &declaration.attributes,
+            declaration.span,
+            declaration.doc_comment,
+            Some(&name),
+            AttributePlacement::Declaration(AttributeTarget::Class),
+        )?;
+        if !metadata.attributes.is_empty() {
+            self.validate_class_attributes(declaration, display, &mut metadata)?;
         }
         let mut methods = Vec::new();
+        // Lowercased, to find a redeclared method without comparing it with
+        // every earlier one: a generated class can have 100,000 methods.
+        let mut method_names = std::collections::HashSet::new();
         let mut properties = Vec::new();
         let mut constants = Vec::new();
+        let mut traits = Vec::new();
+        let mut enum_cases = Vec::new();
+        let trait_scope = (declaration.kind == ast::ClassKind::Trait).then_some(name.as_str());
+        // The resolved parent, known before the members compile, so a
+        // `parent::CONST` in a method can use the parent's own name.
+        let parent = declaration
+            .extends
+            .first()
+            .filter(|_| declaration.kind == ast::ClassKind::Class)
+            .map(|parent| self.resolve(parent, NameKind::Class).0);
+        let previous_parent = std::mem::replace(&mut self.parent_scope, parent.clone());
         for member in &declaration.members {
+            if let ast::ClassMemberKind::EnumCase {
+                name: case,
+                value,
+                attributes,
+            } = &member.kind
+            {
+                let case_line = self.lines.line(case.span.start);
+                if declaration.kind != ast::ClassKind::Enum {
+                    return Err(self.error("Case can only be used in enums", case_line));
+                }
+                let metadata = self.declaration_metadata(
+                    attributes,
+                    member.span,
+                    member.doc_comment,
+                    Some(&name),
+                    AttributePlacement::Declaration(AttributeTarget::ClassConstant),
+                )?;
+                let value = value
+                    .as_ref()
+                    .map(|value| {
+                        self.compile_initializer(
+                            value,
+                            &name,
+                            None,
+                            self.lines.line(value.span.start),
+                        )
+                    })
+                    .transpose()?;
+                enum_cases.push((case.name.clone(), value, metadata));
+                continue;
+            }
+            if let ast::ClassMemberKind::TraitUse {
+                traits: names,
+                adaptations,
+            } = &member.kind
+            {
+                traits.push(self.compile_trait_use(
+                    declaration.kind,
+                    display,
+                    names,
+                    adaptations,
+                    member.span,
+                )?);
+                continue;
+            }
             if let ast::ClassMemberKind::Constant {
                 modifiers,
                 ty,
                 items,
-                ..
+                attributes,
             } = &member.kind
             {
+                let metadata = self.declaration_metadata(
+                    attributes,
+                    member.span,
+                    member.doc_comment,
+                    Some(&name),
+                    AttributePlacement::Declaration(AttributeTarget::ClassConstant),
+                )?;
+                self.reject_member_set_visibility(modifiers, "class constant", member.span)?;
                 for constant in items {
                     if constant.name.name.eq_ignore_ascii_case("class") {
                         return Err(self.error("A class constant must not be called 'class'; it is reserved for class name fetching", self.lines.line(member.span.start)));
                     }
+                    if let Some(ty) = ty {
+                        let member = format!("{display}::{}", constant.name.name);
+                        self.validate_literal_member_default(
+                            &constant.value,
+                            ty,
+                            &member,
+                            DefaultKind::Constant,
+                            self.lines.line(constant.name.span.start),
+                        )?;
+                    }
                     constants.push(crate::ir::ClassConstant {
+                        metadata: metadata.clone(),
                         name: constant.name.name.clone(),
                         visibility: member_visibility(modifiers),
                         is_final: modifiers.is_final,
-                        initializer: self.compile_initializer(&constant.value, line)?,
+                        initializer: self.compile_initializer(
+                            &constant.value,
+                            &name,
+                            trait_scope,
+                            line,
+                        )?,
                         ty: ty
                             .as_ref()
                             .map(|declared_type| self.declaration_type(declared_type)),
@@ -72,58 +157,67 @@ impl Compiler<'_> {
                 items,
             } = &member.kind
             {
-                if !attributes.is_empty() {
-                    return Err(self.error("Attributes not supported yet", line));
-                }
-                if modifiers.set_visibility.is_some() {
-                    return Err(self.error("Asymmetric visibility not supported yet", line));
-                }
+                let metadata = self.declaration_metadata(
+                    attributes,
+                    member.span,
+                    member.doc_comment,
+                    Some(&name),
+                    AttributePlacement::Declaration(AttributeTarget::Property),
+                )?;
                 for property in items {
-                    if !property.hooks.is_empty() {
-                        return Err(self.error("Property hooks not supported yet", line));
-                    }
-                    if ty.as_ref().is_some_and(|ty| {
-                        self.declaration_type(ty)
-                            .split(['|', '&', '?'])
-                            .any(|name| name == "callable")
-                    }) {
-                        return Err(self.error(
-                            format!(
-                                "Property {name}::${} cannot have type {}",
-                                property.name,
-                                ty.as_ref()
-                                    .map(|ty| self.declaration_type(ty))
-                                    .unwrap_or_default()
-                            ),
-                            self.lines.line(property.span.start),
-                        ));
-                    }
+                    let property_line = self.lines.line(property.span.start);
                     let readonly = modifiers.is_readonly || declaration.modifiers.is_readonly;
-                    if readonly && modifiers.is_static {
+                    let declared_type = ty.as_ref().map(|ty| self.declaration_type(ty));
+                    let (set_visibility, is_final) = self.property_write_visibility(
+                        modifiers,
+                        (display, &property.name, property.span),
+                        declared_type.as_deref(),
+                        readonly,
+                    )?;
+                    if readonly && declaration.name.is_none() && property.default.is_some() {
                         return Err(self.error(
                             format!(
-                                "Static property {name}::${} cannot be readonly",
+                                "Readonly property {display}::${} cannot have default value",
                                 property.name
                             ),
                             self.lines.line(property.span.start),
                         ));
                     }
-                    if readonly && ty.is_none() {
-                        return Err(self.error(
-                            format!(
-                                "Readonly property {name}::${} must have type",
-                                property.name
-                            ),
+                    if let (Some(default), Some(ty)) = (&property.default, ty) {
+                        self.validate_literal_member_default(
+                            default,
+                            ty,
+                            &format!("{display}::${}", property.name),
+                            DefaultKind::Property,
                             self.lines.line(property.span.start),
-                        ));
+                        )?;
                     }
                     let default = property
                         .default
                         .as_ref()
-                        .map(|value| self.compile_initializer(value, line))
+                        .map(|value| self.compile_initializer(value, &name, trait_scope, line))
                         .transpose()?;
+                    let hooks = self.compile_property_metadata(HookedDeclaration {
+                        class: &name,
+                        trait_scope,
+                        kind: declaration.kind,
+                        property: &property.name,
+                        modifiers,
+                        readonly,
+                        ty: ty.as_ref(),
+                        default: property.default.as_ref(),
+                        hooks: &property.hooks,
+                        has_hook_list: property.has_hook_list,
+                        has_parent: !declaration.extends.is_empty(),
+                        line: property_line,
+                    })?;
                     properties.push(ClassProperty {
+                        hooks,
                         name: property.name.clone(),
+                        set_visibility,
+                        is_final,
+                        metadata: metadata.clone(),
+                        promoted: false,
                         visibility: match modifiers.visibility {
                             Some(ast::Visibility::Private) => Visibility::Private,
                             Some(ast::Visibility::Protected) => Visibility::Protected,
@@ -131,9 +225,7 @@ impl Compiler<'_> {
                         },
                         is_static: modifiers.is_static,
                         is_readonly: modifiers.is_readonly || declaration.modifiers.is_readonly,
-                        ty: ty
-                            .as_ref()
-                            .map(|declared_type| self.declaration_type(declared_type)),
+                        ty: declared_type,
                         default,
                     });
                 }
@@ -142,60 +234,111 @@ impl Compiler<'_> {
             let ast::ClassMemberKind::Method(method) = &member.kind else {
                 return Err(self.error("Class properties and constants not supported yet", line));
             };
-            if methods
-                .iter()
-                .any(|entry: &ClassMethod| entry.name.eq_ignore_ascii_case(&method.name.name))
-            {
+            self.reject_member_set_visibility(&method.modifiers, "method", method.span)?;
+            if !method_names.insert(method.name.name.to_ascii_lowercase()) {
                 return Err(self.error(
-                    format!("Cannot redeclare {name}::{}()", method.name.name),
+                    format!("Cannot redeclare {display}::{}()", method.name.name),
                     self.lines.line(method.name.span.start),
                 ));
             }
-            if method.name.name.eq_ignore_ascii_case("__invoke")
-                && matches!(
-                    method.modifiers.visibility,
-                    Some(ast::Visibility::Private | ast::Visibility::Protected)
-                )
-            {
-                self.declaration_warnings
-                    .push(phera_bytecode::DeclarationWarning {
-                        message: format!(
-                            "The magic method {name}::{}() must have public visibility",
-                            method.name.name
-                        ),
-                        line: self.lines.line(method.name.span.start) as u32,
-                    });
-            }
+            self.validate_magic_method(display, method)?;
             for parameter in &method.parameters {
-                if parameter.modifiers.visibility.is_some() {
+                let parameter_line = || self.lines.line(parameter.span.start);
+                if parameter.modifiers.is_static {
+                    return Err(self.error(
+                        "Cannot use the static modifier on a parameter",
+                        parameter_line(),
+                    ));
+                }
+                if parameter.is_promoted() {
+                    if !method.name.name.eq_ignore_ascii_case("__construct") {
+                        return Err(self.error(
+                            "Cannot declare promoted property outside a constructor",
+                            parameter_line(),
+                        ));
+                    }
+                    if method.body.is_none() {
+                        return Err(self.error(
+                            "Cannot declare promoted property in an abstract constructor",
+                            parameter_line(),
+                        ));
+                    }
+                    if parameter.variadic {
+                        return Err(self.error(
+                            "Cannot declare variadic promoted property",
+                            parameter_line(),
+                        ));
+                    }
+                    let metadata = self.declaration_metadata(
+                        &parameter.attributes,
+                        parameter.span,
+                        parameter.doc_comment,
+                        Some(&name),
+                        AttributePlacement::Promoted(AttributeTarget::Property),
+                    )?;
+                    let readonly =
+                        parameter.modifiers.is_readonly || declaration.modifiers.is_readonly;
+                    let ty = parameter.ty.as_ref().map(|ty| self.declaration_type(ty));
+                    let (set_visibility, is_final) = self.property_write_visibility(
+                        &parameter.modifiers,
+                        (display, &parameter.name, parameter.span),
+                        ty.as_deref(),
+                        readonly,
+                    )?;
+                    let hooks = self.compile_property_metadata(HookedDeclaration {
+                        class: &name,
+                        trait_scope,
+                        kind: declaration.kind,
+                        property: &parameter.name,
+                        modifiers: &parameter.modifiers,
+                        readonly: parameter.modifiers.is_readonly
+                            || declaration.modifiers.is_readonly,
+                        ty: parameter.ty.as_ref(),
+                        default: None,
+                        hooks: &parameter.hooks,
+                        has_hook_list: parameter.has_hook_list,
+                        has_parent: !declaration.extends.is_empty(),
+                        line: self.lines.line(parameter.span.start),
+                    })?;
                     properties.push(ClassProperty {
+                        hooks,
                         name: parameter.name.clone(),
+                        set_visibility,
+                        is_final,
+                        metadata,
+                        promoted: true,
                         visibility: member_visibility(&parameter.modifiers),
                         is_static: false,
                         is_readonly: parameter.modifiers.is_readonly
                             || declaration.modifiers.is_readonly,
-                        ty: parameter
-                            .ty
-                            .as_ref()
-                            .map(|declared_type| self.declaration_type(declared_type)),
+                        ty,
                         default: None,
                     });
                 }
             }
             methods.push(self.compile_method(
                 &name,
+                trait_scope,
                 method,
+                member.doc_comment,
                 self.lines.line(method.name.span.start),
             )?);
         }
+        self.parent_scope = previous_parent;
+        let can_hoist = timing == DeclarationTiming::Hoisted
+            && declaration.kind != ast::ClassKind::Enum
+            && traits.is_empty();
         let index = self.classes.len();
+        let allows_dynamic_properties = metadata.attributes.iter().any(|attribute| {
+            attribute
+                .name
+                .eq_ignore_ascii_case("AllowDynamicProperties")
+        });
         self.classes.push(ClassDeclaration {
-            name,
-            parent: declaration
-                .extends
-                .first()
-                .filter(|_| declaration.kind == ast::ClassKind::Class)
-                .map(|parent| self.resolve(parent, NameKind::Class).0),
+            metadata,
+            line: line as u32,
+            name: name.clone(),
+            parent,
             interfaces: declaration
                 .implements
                 .iter()
@@ -208,99 +351,43 @@ impl Compiler<'_> {
                 ))
                 .map(|interface| self.resolve(interface, NameKind::Class).0)
                 .collect(),
-            kind: if declaration.kind == ast::ClassKind::Interface {
-                ClassKind::Interface
-            } else {
-                ClassKind::Class
+            kind: match (declaration.kind, &declaration.name) {
+                (ast::ClassKind::Interface, _) => ClassKind::Interface,
+                (ast::ClassKind::Trait, _) => ClassKind::Trait,
+                (ast::ClassKind::Enum, _) => ClassKind::Enum,
+                (_, None) => ClassKind::Anonymous,
+                _ => ClassKind::Class,
             },
             is_abstract: declaration.modifiers.is_abstract,
-            is_final: declaration.modifiers.is_final,
+            is_final: declaration.modifiers.is_final || declaration.kind == ast::ClassKind::Enum,
             is_readonly: declaration.modifiers.is_readonly,
-            allows_dynamic_properties: declaration
-                .attributes
-                .iter()
-                .any(|attribute| attribute.name.text == "AllowDynamicProperties"),
+            allows_dynamic_properties,
             constants,
             properties,
             methods,
+            traits,
+            enum_backing,
+            enum_cases,
         });
-        if timing == DeclarationTiming::Hoisted {
+        if can_hoist {
             self.hoisted_classes.push(index);
         }
         self.emit(Instruction::DeclareClass(index), line);
-        Ok(())
+        Ok(name)
     }
 
-    /// A separate pure function retains expression evaluation order without storing AST nodes.
-    fn compile_initializer(
-        &mut self,
-        expression: &ast::Expression,
-        line: usize,
-    ) -> Result<usize, CompileError> {
-        if let Some(message) = crate::constant_callables::callable_constant_error(expression) {
-            return Err(self.error(message, line));
-        }
-        if !crate::parameter_defaults::constant_expression(expression) {
-            return Err(self.error("Constant expression contains invalid operations", line));
-        }
-        let mut builder = Compiler::new(self.file, self.lines, "{initializer}", &self.namespace);
-        builder.imports = self.imports.clone();
-        let result = builder.compile_expression(expression)?;
-        builder.emit(Instruction::Return(result), line);
-        let index = self.functions.len();
-        let mut function = builder.finish();
-        for instruction in function.instructions.iter_mut().chain(
-            builder
-                .functions
-                .iter_mut()
-                .flat_map(|function| function.instructions.iter_mut()),
-        ) {
-            if let Instruction::Closure { function, .. } | Instruction::Declare(function) =
-                instruction
-            {
-                *function += index + 1;
-            }
-        }
-        self.functions.push(function);
-        self.functions.extend(builder.functions);
-        Ok(index)
-    }
-
-    /// Reuse parameter/default lowering while keeping method names out of the function table.
-    fn compile_method(
-        &mut self,
-        class: &str,
-        method: &ast::Method,
-        line: usize,
-    ) -> Result<ClassMethod, CompileError> {
-        let declaration = ast::FunctionDeclaration {
-            attributes: method.attributes.clone(),
-            name: ast::Identifier {
-                name: format!("{class}::{}", method.name.name),
-                span: method.name.span,
-            },
-            by_reference: method.by_reference,
-            parameters: method.parameters.clone(),
-            return_type: method.return_type.clone(),
-            body: method.body.clone().unwrap_or_default(),
-        };
-        let index = self.functions.len();
-        // The synthetic name is already fully qualified.
-        let result = self.compile_function(&declaration, DeclarationTiming::Hoisted, line);
-        result?;
-        self.hoisted.retain(|candidate| *candidate != index);
-        Ok(ClassMethod {
-            name: method.name.name.clone(),
-            function: index,
-            visibility: match method.modifiers.visibility {
-                Some(ast::Visibility::Private) => Visibility::Private,
-                Some(ast::Visibility::Protected) => Visibility::Protected,
-                _ => Visibility::Public,
-            },
-            is_static: method.modifiers.is_static,
-            is_abstract: method.body.is_none(),
-            is_final: method.modifiers.is_final,
-        })
+    /// The first named ancestor supplies the prefix of PHP's anonymous class name.
+    fn anonymous_class_name(&self, declaration: &ast::ClassDeclaration) -> String {
+        let prefix = declaration
+            .extends
+            .first()
+            .or_else(|| declaration.implements.first())
+            .map(|ancestor| self.resolve(ancestor, NameKind::Class).0)
+            .unwrap_or_else(|| "class".into());
+        let number = self.anonymous_classes.get();
+        self.anonymous_classes.set(number + 1);
+        let line = self.lines.line(declaration.span.start);
+        format!("{prefix}@anonymous\0{}:{line}${number:x}", self.file)
     }
 }
 

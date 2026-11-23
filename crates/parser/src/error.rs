@@ -1,13 +1,24 @@
+//! Syntax failures are parse errors, while `new final class {}` is a compile error.
+
 use phera_lexer::{LexError, LexErrorKind};
 use phera_source::Span;
 
-/// The first thing in the source that did not fit the grammar.
+pub(crate) const MULTIPLE_ACCESS_MODIFIERS: &str = "Multiple access type modifiers are not allowed";
+
+/// The first syntax or declaration error detected by the parser.
 ///
 /// A lexer error is reported as a `ParseError` with the lexer's span.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParseError {
     pub message: String,
     pub span: Span,
+    kind: ErrorKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ErrorKind {
+    Syntax,
+    Compile,
 }
 
 impl ParseError {
@@ -15,7 +26,29 @@ impl ParseError {
         Self {
             message: message.into(),
             span,
+            kind: ErrorKind::Syntax,
         }
+    }
+
+    pub(crate) fn compile(message: impl Into<String>, span: Span) -> Self {
+        Self {
+            message: message.into(),
+            span,
+            kind: ErrorKind::Compile,
+        }
+    }
+
+    /// Return the PHP-facing line and wording for the parser error.
+    pub fn php_diagnostic(
+        &self,
+        source: &[u8],
+        lines: &phera_source::LineTable,
+    ) -> (usize, String) {
+        crate::diagnostics::php_diagnostic(self, source, lines)
+    }
+
+    pub fn is_compile_error(&self) -> bool {
+        self.kind == ErrorKind::Compile
     }
 
     pub(crate) fn from_lex(error: &LexError) -> Self {
@@ -26,14 +59,11 @@ impl ParseError {
             LexErrorKind::UnterminatedHeredoc => "unterminated heredoc".to_string(),
             LexErrorKind::UnterminatedComment => "unterminated comment".to_string(),
         };
-        Self {
-            message,
-            span: error.span,
-        }
+        Self::new(message, error.span)
     }
 
     /// Whether this error came from the lexer rejecting syntax Phera does not
-    /// support on purpose (backticks, `${...}` interpolation, `(real)`, ...).
+    /// support on purpose, such as `(real)`.
     pub fn is_unsupported_lex(&self) -> bool {
         self.message.starts_with("unsupported syntax:")
     }

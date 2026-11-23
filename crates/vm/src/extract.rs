@@ -94,19 +94,10 @@ impl Vm {
     /// A defined symbol may hold null; undefined slots must not satisfy EXTR_IF_EXISTS.
     fn extracted_symbol_status(&self, name: &str) -> SymbolStatus {
         self.current().map_or(SymbolStatus::Missing, |frame| {
-            let register = frame
-                .function()
-                .locals
-                .iter()
-                .position(|candidate| {
-                    frame
-                        .unit()
-                        .names
-                        .get(candidate.index())
-                        .is_some_and(|candidate| candidate == name)
-                })
-                .map(|index| phera_bytecode::Reg(index as u16))
-                .or_else(|| frame.extras.dynamic.get(name).copied());
+            let register = frame.named_register(name);
+            if register.is_none() && self.in_global_scope() && self.globals.get(name).is_some() {
+                return SymbolStatus::Defined;
+            }
             match register.and_then(|register| frame.slots(&self.registers).get(register.index())) {
                 Some(Some(_)) => SymbolStatus::Defined,
                 Some(None) => SymbolStatus::Undefined,
@@ -156,6 +147,7 @@ impl Vm {
     ) -> Result<bool, NativeError> {
         let ExtractEntry { key, value } = entry;
         let original = match &key {
+            ArrayKey::Interned(name) => name.to_string_lossy(),
             ArrayKey::String(name) => name.to_string_lossy(),
             ArrayKey::Int(number) => number.to_string(),
         };
@@ -176,6 +168,9 @@ impl Vm {
             } else {
                 Value::Reference(Rc::new(RefCell::new(value)))
             };
+            if let Value::Reference(cell) = &reference {
+                self.state.track_cycle_reference(cell);
+            }
             Rc::make_mut(array).insert(key, reference.clone());
             self.set(register, reference);
         } else {
@@ -199,10 +194,10 @@ impl ExtractSettings {
             })
             .unwrap_or(0);
         let mode = ExtractMode::parse(flags)?;
-        let prefix = match arguments.get(2) {
-            Some(Value::String(prefix)) => prefix.to_string_lossy(),
-            _ => String::new(),
-        };
+        let prefix = arguments
+            .get(2)
+            .and_then(Value::str_ref)
+            .map_or_else(String::new, |prefix| prefix.to_string_lossy());
         if matches!(
             mode,
             ExtractMode::PrefixSame

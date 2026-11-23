@@ -6,13 +6,15 @@ use phera_bytecode::{NameId, Reg, Visibility};
 use phera_extension_api::NativeError;
 use phera_value::{Object, Value};
 
-use super::{Class, Invocation, Method, MethodContext};
+use super::{
+    Class, Invocation, Method, MethodContext, class::ClassOrigin, magic_calls::MethodSyntax,
+};
 use crate::Vm;
 use crate::calls::call_state::{CallTarget, Callee};
 
 impl Vm {
     /// Receiver errors precede argument evaluation, matching ordinary PHP calls.
-    pub(crate) fn init_method_call(
+    pub(crate) fn init_method_call<const TRACK_GENERATORS: bool>(
         &mut self,
         receiver: Reg,
         method: NameId,
@@ -37,13 +39,10 @@ impl Vm {
             .classes
             .for_object(&object)
             .ok_or_else(|| internal_error!("receiver class"))?;
-        let resolved = self.find_method(&class, name, Invocation::Method)?;
-        if let Some(resolved) = resolved {
-            self.prepare_resolved_method(class, Some(object), resolved, Invocation::Method)?;
-        } else {
-            self.prepare_method(class, Some(object), name, Invocation::Method)?;
+        if TRACK_GENERATORS && class.origin == ClassOrigin::Native && class.name == "Generator" {
+            self.discard_generator_temporary(receiver);
         }
-        Ok(())
+        self.prepare_method(class, Some(object), name, Invocation::Method)
     }
 
     /// Snapshot a bound target so nested calls during argument sends cannot replace the receiver.
@@ -73,17 +72,22 @@ impl Vm {
             callee.argument_binding = crate::calls::callback_binding::ArgumentBinding::Internal;
             return self.prepare_call(callee);
         }
-        let resolved = self.find_method(&class, name, invocation)?;
-        let Some(super::method_lookup::ResolvedMethod { method, scope }) = resolved else {
+        let resolved = self.find_method(&class, name, invocation);
+        if invocation == Invocation::Method {
+            let syntax = if receiver.is_some() {
+                MethodSyntax::Instance
+            } else {
+                MethodSyntax::Static
+            };
+            return self.prepare_method_lookup(class, receiver, name, syntax, resolved);
+        }
+        let Some(super::method_lookup::ResolvedMethod { method, scope }) = resolved? else {
             if invocation == Invocation::Constructor {
                 let object = receiver.ok_or_else(|| internal_error!("constructor receiver"))?;
                 self.prepare_constructed_object(object);
                 return Ok(());
             }
-            return Err(NativeError::error(format!(
-                "Call to undefined method {}::{name}()",
-                class.name
-            )));
+            return Err(crate::unsupported_items::undefined_method(&class, name));
         };
         self.prepare_resolved_method(
             class,
@@ -117,8 +121,10 @@ impl Vm {
         let signature = method.signature(&self.code);
         let call_name = signature.name.clone();
         let parameters = signature.parameters.clone();
+        let needs_receiver = !method.is_static
+            || matches!(&method.body, super::class::MethodBody::Native(entry) if entry.uses_instance_receiver);
         let context = MethodContext {
-            receiver: if method.is_static { None } else { receiver },
+            receiver: if needs_receiver { receiver } else { None },
             scope,
             called: class,
             invocation,
@@ -149,6 +155,15 @@ impl Vm {
         let scope = initializer_scope
             .as_ref()
             .or_else(|| self.current().and_then(|frame| frame.scope()));
+        self.check_visibility_in_scope(method, invocation, scope)
+    }
+
+    pub(super) fn check_visibility_in_scope(
+        &self,
+        method: &Method,
+        invocation: Invocation,
+        scope: Option<&Rc<Class>>,
+    ) -> Result<(), NativeError> {
         let allowed = match method.visibility {
             Visibility::Public => true,
             Visibility::Private => scope.is_some_and(|scope| scope.name == method.declaring),
@@ -157,7 +172,10 @@ impl Vm {
                     || self
                         .classes
                         .get(&method.declaring)
-                        .is_some_and(|declaring| declaring.is_a(&scope.name))
+                        .is_some_and(|declaring| {
+                            declaring.is_a(&scope.name)
+                                || protected_prototype_applies(scope, declaring, method)
+                        })
             }),
         };
         if allowed {
@@ -169,7 +187,7 @@ impl Vm {
             "protected"
         };
         let from = scope
-            .map(|scope| format!("scope {}", scope.name))
+            .map(|scope| format!("scope {}", phera_value::class_display_name(&scope.name)))
             .unwrap_or_else(|| "global scope".into());
         let kind = if invocation == Invocation::Constructor {
             ""
@@ -178,9 +196,28 @@ impl Vm {
         };
         Err(NativeError::error(format!(
             "Call to {visibility} {kind}{}::{}() from {from}",
-            method.declaring, method.name
+            phera_value::class_display_name(&method.declaring),
+            method.name
         )))
     }
+}
+
+/// A protected override keeps the visibility of its ancestor's prototype.
+fn protected_prototype_applies(scope: &Class, declaring: Rc<Class>, method: &Method) -> bool {
+    let name = method.name.to_ascii_lowercase();
+    let mut ancestor = declaring.parent.as_ref();
+    while let Some(class) = ancestor {
+        if scope.is_a(&class.name)
+            && class
+                .methods
+                .get(&name)
+                .is_some_and(|method| method.visibility == Visibility::Protected)
+        {
+            return true;
+        }
+        ancestor = class.parent.as_ref();
+    }
+    false
 }
 
 impl Vm {

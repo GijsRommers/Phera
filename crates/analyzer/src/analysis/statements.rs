@@ -20,11 +20,43 @@ impl Analyzer<'_> {
         }
         self.depth += 1;
         let mut flow = Flow::Next;
-        for statement in statements {
-            flow = self.statement(statement, scope);
+        let mut reported_unreachable = false;
+        for (position, statement) in statements.iter().enumerate() {
             if flow != Flow::Next {
-                break;
+                if !contains_label(statement) {
+                    if !reported_unreachable {
+                        self.discarded_statements(statement);
+                        reported_unreachable = true;
+                    }
+                    continue;
+                }
+                scope.unknown_writes();
+                reported_unreachable = false;
             }
+            let binding = self.pending_binding.clone();
+            let last_condition = self.last_condition;
+            if let Some(next) = statements.get(position + 1) {
+                self.prepare_local_rebinding(statement, next, scope);
+                if self.level >= 4
+                    && position + 2 == statements.len()
+                    && is_throw(next)
+                    && let StatementKind::If {
+                        condition,
+                        elseifs,
+                        otherwise: None,
+                        ..
+                    } = &statement.kind
+                {
+                    self.last_condition = Some(
+                        elseifs
+                            .last()
+                            .map_or(condition.span, |branch| branch.condition.span),
+                    );
+                }
+            }
+            flow = self.statement(statement, scope);
+            self.pending_binding = binding;
+            self.last_condition = last_condition;
         }
         self.depth -= 1;
         flow
@@ -33,7 +65,13 @@ impl Analyzer<'_> {
     fn statement(&mut self, statement: &Statement, scope: &mut Scope) -> Flow {
         let previous = self.context.known.clone();
         self.context.known.extend(scope.known.iter().cloned());
+        let annotations = self.statement_var_annotations(statement, scope);
         let flow = self.statement_kind(statement, scope);
+        for (name, ty) in annotations {
+            if scope.get(&name).definition == Definition::Definite {
+                scope.define(&name, ty);
+            }
+        }
         self.context.known = previous;
         flow
     }
@@ -47,6 +85,22 @@ impl Analyzer<'_> {
             | StatementKind::DoWhile { .. }
             | StatementKind::For { .. }
             | StatementKind::Foreach { .. } => return self.iteration(statement, scope),
+            StatementKind::Const {
+                attributes, items, ..
+            } => {
+                self.check_attributes(attributes, scope);
+                for constant in items {
+                    self.expression(&constant.value, scope, false);
+                }
+            }
+            StatementKind::Echo(expressions) => {
+                if expressions
+                    .iter()
+                    .any(|expr| self.expression(expr, scope, false) == ValueType::Never)
+                {
+                    return Flow::Terminal;
+                }
+            }
             StatementKind::Global(_) | StatementKind::Static(_) | StatementKind::Unset(_) => {
                 self.binding_statement(statement, scope)
             }
@@ -55,7 +109,7 @@ impl Analyzer<'_> {
                 body: Some(body), ..
             } => return self.block(body, scope),
             StatementKind::Expression(expression) => {
-                if self.expression(expression, scope, false) == ValueType::Never {
+                if self.expression_statement(expression, scope) == ValueType::Never {
                     return Flow::Terminal;
                 }
             }
@@ -65,8 +119,11 @@ impl Analyzer<'_> {
             StatementKind::If {
                 condition,
                 then,
+                elseifs,
                 otherwise,
-            } => return self.if_statement(condition, then, otherwise.as_deref(), scope),
+            } => {
+                return self.if_statement(condition, then, elseifs, otherwise.as_deref(), scope);
+            }
             StatementKind::Switch { subject, cases } => {
                 return self.switch(subject, cases, scope);
             }
@@ -77,7 +134,8 @@ impl Analyzer<'_> {
             } => return self.try_statement(body, catches, finally.as_deref(), scope),
             StatementKind::Break(levels) => return self.control_exit(*levels, false, scope),
             StatementKind::Continue(levels) => return self.control_exit(*levels, true, scope),
-            StatementKind::Goto(_) | StatementKind::Label(_) => scope.dynamic = true,
+            // Incoming jumps can bypass assignments or revisit a label.
+            StatementKind::Goto(_) | StatementKind::Label(_) => scope.unknown_writes(),
             _ => {
                 for e in crate::walk::statement_expressions(statement) {
                     self.expression(e, scope, false);
@@ -126,58 +184,79 @@ impl Analyzer<'_> {
             if self.context.by_reference && matches!(value.kind, ExpressionKind::Variable(_)) {
                 self.ensure_reference(value, scope);
             }
-            self.expression(value, scope, false);
+            let given = self.expression(value, scope, false);
+            if let Some(inferred) = &mut self.context.inferred_return {
+                *inferred = inferred.join(&given);
+            }
+            self.check_return_value(Some(value), &given, scope, span);
             if self.context.returns == ValueType::Void {
                 self.report(Finding::VoidReturn, span);
             }
-        } else if self.context.declared_return && self.context.returns != ValueType::Void {
+        } else if self.level >= 3 {
+            self.check_return_value(None, &ValueType::Null, scope, span);
+        } else if self.level >= 1
+            && self.context.declared_return
+            && !self.context.generator
+            && self.context.returns != ValueType::Void
+        {
             self.report(Finding::MissingReturn(self.context.function.clone()), span);
+        }
+        if value.is_none()
+            && let Some(inferred) = &mut self.context.inferred_return
+        {
+            *inferred = inferred.join(&ValueType::Null);
         }
         self.record_return(scope);
         Flow::Terminal
     }
 
-    fn if_statement(
+    /// Runs one branch of a conditional on the scope its outcome leaves, or,
+    /// when that outcome cannot happen, only if a label inside can be jumped to.
+    pub(super) fn statement_branch(
         &mut self,
-        condition: &Expression,
-        then: &[Statement],
-        otherwise: Option<&[Statement]>,
-        scope: &mut Scope,
-    ) -> Flow {
-        let truth = self.condition_truth(condition, scope);
-        if self.expression(condition, scope, false) == ValueType::Never {
-            return Flow::Terminal;
+        body: &[Statement],
+        branch: Option<Scope>,
+        entry: &Scope,
+    ) -> (Flow, Option<Scope>) {
+        let mut scope = match branch {
+            Some(scope) => scope,
+            None if body.iter().any(contains_label) => {
+                let mut scope = entry.clone();
+                scope.unknown_writes();
+                scope
+            }
+            None => return (Flow::Terminal, None),
+        };
+        let flow = self.block(body, &mut scope);
+        (flow, (flow == Flow::Next).then_some(scope))
+    }
+}
+
+pub(super) fn is_throw(statement: &Statement) -> bool {
+    matches!(
+        statement.kind,
+        StatementKind::Expression(Expression {
+            kind: ExpressionKind::Throw(_),
+            ..
+        })
+    )
+}
+
+/// A label can re-enter a block after an otherwise terminal statement.
+pub(super) fn contains_label(statement: &Statement) -> bool {
+    let mut pending = vec![statement];
+    while let Some(statement) = pending.pop() {
+        if matches!(statement.kind, StatementKind::Label(_)) {
+            return true;
         }
-        if let Some(truth) = truth {
-            return if truth {
-                self.block(then, scope)
-            } else {
-                otherwise.map_or(Flow::Next, |body| self.block(body, scope))
-            };
-        }
-        let mut left = scope.clone();
-        let mut right = scope.clone();
-        self.refine(condition, &mut left, true);
-        self.refine(condition, &mut right, false);
-        let a = self.block(then, &mut left);
-        let b = otherwise.map_or(Flow::Next, |body| self.block(body, &mut right));
-        let mut paths = Vec::new();
-        if a == Flow::Next {
-            paths.push(left);
-        }
-        if b == Flow::Next {
-            paths.push(right);
-        }
-        if !paths.is_empty() {
-            *scope = Scope::join(&paths);
-            return Flow::Next;
-        }
-        if a == Flow::Terminal && b == Flow::Terminal {
-            Flow::Terminal
-        } else if a == Flow::Break || b == Flow::Break {
-            Flow::Break
-        } else {
-            Flow::Continue
+        pending.extend(
+            crate::collect::child_blocks(statement)
+                .into_iter()
+                .flatten(),
+        );
+        if let StatementKind::Namespace { statements, .. } = &statement.kind {
+            pending.extend(statements);
         }
     }
+    false
 }

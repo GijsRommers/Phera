@@ -8,7 +8,7 @@ use phera_extension_api::{
 
 use super::interval::{FIELDS, Interval, optional_integer};
 
-pub(super) const ACCESS: NativePropertyAccess = NativePropertyAccess { read, mutate };
+pub(super) const ACCESS: NativePropertyAccess = NativePropertyAccess::new(read, mutate);
 
 enum Field {
     Unit(usize),

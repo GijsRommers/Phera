@@ -8,6 +8,13 @@ The additional cases exercise five million mixed method iterations, typed and ar
 Run `bench-exceptions.php` against Phera and `php -n` for one million calls, a throw every tenth call, and `finally`; its CPU target is at most 6 times PHP.
 Run `bench-closures.php` for captures, arrow callbacks and method factories; target: 6x PHP CPU.
 
+On macOS, run `python3 benchmarks/bench-http.py target/release/phera --baseline /path/to/main/phera`
+to measure retired instructions for 200 and 1,000 PHP requests on one worker.
+The script alternates baseline and candidate, keeps the HTTP connection open,
+checks every response, and reports the median of six runs per binary. The
+measurement includes starting and stopping the server and the first script
+compilation. `--requests` and `--rounds` override the defaults.
+
 The three `bench-function-*.php` scripts run their loops inside functions, which is where real code spends its time. The older scripts keep their loops at the top level of the file, and until November 2026 top-level code had its own, faster interpreter path, so those scripts alone gave too good a picture. Keep both kinds when comparing builds.
 
 `bench-calls.php` mixes calls of many shapes (typed and untyped functions, defaults, variadics, instance, static, private and parent methods, getters returning floats, strings and arrays, constructors) inside one function. On 17 November 2026 it ran at 12 times PHP's CPU time; it is the reference for the call work in docs/architecture.md section 10.
@@ -23,3 +30,5 @@ echo (hrtime(true) - $started) / 1e6, " ms\n";
 ```
 
 Whole-process time is still right for comparing two builds of Phera with each other. Figures quoted as "times PHP" in commit messages before that date are too favourable to Phera by a factor of two to four.
+
+`bench-framework-patterns.php` runs, inside methods, what framework code does on every request: elements of array properties read and tested (`isset($this->bindings[$id])`, `$this->items[$group][$key] ?? $default`), string comparison and concatenation, `??` on variables, `!`, `static::class`, protected calls between a class and its parent, and namespaced calls of built-in functions. On 20 November 2026 it ran at 9.7 times PHP's instructions before the interpreter's second round (architecture.md 10.9 and 10.10) and 4.4 times after it; the other scripts in this directory were then between 1 and 4 times, so this one stands for the framework gap that they do not show.

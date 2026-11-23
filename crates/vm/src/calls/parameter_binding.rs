@@ -7,6 +7,7 @@ use phera_extension_api::NativeError;
 use phera_value::{ArrayKey, PhpArray, PhpString, Value};
 
 use crate::calls::call_view::ArgumentSlots;
+use crate::calls::callback_binding::ArgumentOrigin;
 use crate::calls::frame_extras::ArgumentFacts;
 use crate::calls::prepared_call::{CallFlags, PreparedCall};
 use crate::code_table::FunctionIndex;
@@ -94,7 +95,7 @@ impl Vm {
     }
 
     /// Relative class types use the callee's lexical scope while strictness comes from the caller.
-    fn check_window_argument(
+    pub(super) fn check_window_argument(
         &mut self,
         (entry, call): (FunctionIndex, &PreparedCall),
         index: usize,
@@ -116,29 +117,42 @@ impl Vm {
         {
             return Ok(value);
         }
+        // A fork's file has no class checks until one is asked for: make
+        // them from the snapshot's and check again, so that this value and
+        // the next of its class are accepted by the remembered answer.
+        if !cache.class_types.is_made() {
+            self.code.make_class_types(entry);
+            return self.check_window_argument((entry, call), index, offset, value);
+        }
         // The coercion below may run PHP code (a `__toString`), so it gets
         // its own owner of the unit instead of a borrow of the code table.
         let unit = unit.clone();
-        let function = self.code.function(entry);
         let name = match parameter.variadic {
             true => String::new(),
             false => unit.names[parameter.name.index()].clone(),
         };
-        let function_name = function.name.clone();
+        let function_name = self.code.function_name(entry);
+        let function_name = function_name
+            .split('\0')
+            .next()
+            .unwrap_or(function_name)
+            .to_owned();
         let declared = &unit.types[declaration.index()];
-        let context = match scope {
-            types::DeclarationScope::Relative => self.prepared_context(entry, call).method(),
-            _ => None,
-        };
+        let context = (scope == types::DeclarationScope::Relative
+            || declared.mask.intersects(phera_bytecode::TypeMask::CALLABLE))
+        .then(|| self.prepared_context(entry, call).method())
+        .flatten();
         let scoped = context
             .as_ref()
+            .filter(|_| scope == types::DeclarationScope::Relative)
             .map(|context| crate::closure_types::parameter_type(declared, context));
         let ty = scoped.as_ref().unwrap_or(declared);
-        self.check_argument(value, ty, &function_name, offset, &name)
+        self.check_argument(value, ty, &function_name, offset, (&name, context.as_ref()))
     }
 
     /// Arity errors keep the caller's source location and the complete supplied arity.
     pub(crate) fn missing_argument(&self, function: FunctionIndex, supplied: usize) -> NativeError {
+        let name = self.code.function_name(function);
         let function = self.code.function(function);
         let required = function
             .parameters
@@ -150,11 +164,16 @@ impl Vm {
         } else {
             "at least"
         };
-        let location = self.location();
+        let location = if self.argument_origin == ArgumentOrigin::Callback {
+            String::new()
+        } else {
+            let location = self.location();
+            format!(" in {} on line {}", location.file, location.line)
+        };
         NativeError::argument_count_error(format!(
-            "Too few arguments to function {}(), {supplied} passed in {} on line {} and \
+            "Too few arguments to function {}(), {supplied} passed{location} and \
              {qualifier} {required} expected",
-            function.name, location.file, location.line,
+            name,
         ))
     }
 

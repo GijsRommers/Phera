@@ -17,20 +17,21 @@ impl Compiler<'_> {
     ) -> Result<(), CompileError> {
         let start = self.position();
         self.loops.push(Loop {
+            start: self.position(),
+            cleanup: None,
             breaks: vec![],
             continues: vec![],
         });
         self.block(body, DeclarationTiming::AtExecution)?;
         let continue_at = self.position();
-        let register = self.compile_expression(condition)?;
-        self.emit(
-            Instruction::Branch {
-                value: register,
-                target: Target(start),
-                when: true,
-            },
-            line,
-        );
+        self.fresh_temporaries();
+        let mark = self.temporaries_start();
+        let back = self.compile_condition(condition, true, line)?;
+        let condition = self.temporaries_since(mark);
+        for patch in &back {
+            self.patch(*patch, start);
+        }
+        self.clear_condition_temporaries(&condition, line);
         self.loop_end(continue_at);
 
         Ok(())
@@ -46,35 +47,44 @@ impl Compiler<'_> {
         line: usize,
     ) -> Result<(), CompileError> {
         for expression in init {
+            let mark = self.temporaries_start();
             self.compile_expression(expression)?;
+            let temporaries = self.temporaries_since(mark);
+            self.clear_owning_temporaries(&temporaries, line);
         }
         let start = self.position();
-        let mut last = None;
-        for expression in condition {
-            last = Some(self.compile_expression(expression)?)
+        let mark = self.temporaries_start();
+        // Only the last condition controls the loop; earlier ones still run.
+        for expression in condition.iter().take(condition.len().saturating_sub(1)) {
+            self.compile_expression(expression)?;
         }
-        let end = last.map(|register| {
-            self.emit(
-                Instruction::Branch {
-                    value: register,
-                    target: Target(0),
-                    when: false,
-                },
-                line,
-            )
-        });
+        let end = condition
+            .last()
+            .map(|expression| self.compile_condition(expression, false, line))
+            .transpose()?;
+        let conditions = self.temporaries_since(mark);
+        self.clear_condition_temporaries(&conditions, line);
         self.loops.push(Loop {
+            start: self.position(),
+            cleanup: None,
             breaks: vec![],
             continues: vec![],
         });
         self.block(body, DeclarationTiming::AtExecution)?;
         let continue_at = self.position();
+        self.fresh_temporaries();
         for expression in step {
+            let mark = self.temporaries_start();
             self.compile_expression(expression)?;
+            let temporaries = self.temporaries_since(mark);
+            self.clear_owning_temporaries(&temporaries, line);
         }
         self.emit(Instruction::Jump(Target(start)), line);
-        if let Some(jump) = end {
-            self.patch(jump, self.position())
+        if let Some(end) = end {
+            for patch in &end {
+                self.patch(*patch, self.position());
+            }
+            self.clear_condition_temporaries(&conditions, line);
         }
         self.loop_end(continue_at);
 
@@ -112,14 +122,26 @@ impl Compiler<'_> {
         }) {
             return Err(self.error("jump out of a finally block is disallowed", line));
         }
-        self.emit_finally_exits(
-            Some(at),
+        let leaves_target = is_break
+            || matches!(
+                self.loops[at].cleanup,
+                Some(super::exits::LoopCleanup::Switch(_))
+            );
+        let retained = super::exits::ExitDepth {
+            loops: if leaves_target { at } else { at + 1 },
+            finally_blocks: self
+                .finalies
+                .partition_point(|scope| scope.loop_depth <= at),
+        };
+        self.emit_control_exits(
+            retained,
             if is_break {
                 phera_bytecode::FinallyEntry::Break
             } else {
                 phera_bytecode::FinallyEntry::Continue
             },
             line,
+            |_, _| {},
         );
         let jump = self.emit(Instruction::Jump(Target(0)), line);
         if let Some(loop_state) = self.loops.get_mut(at) {
@@ -136,14 +158,17 @@ impl Compiler<'_> {
     /// Return a reference only when the function declaration requires one.
     pub(crate) fn compile_return(
         &mut self,
-        expression: &Option<ast::Expression>,
+        expression: Option<&ast::Expression>,
         line: usize,
     ) -> Result<(), CompileError> {
-        if let Some(return_type) = &self.function.return_type {
+        let returns_reference = self.function.returns_reference && !self.function.is_generator;
+        if !self.function.is_generator
+            && let Some(return_type) = &self.function.return_type
+        {
             let message = match (return_type.as_str(), expression.is_some()) {
                 ("never", _) => Some("A never-returning function must not return"),
                 ("void", true)
-                    if expression.as_ref().is_some_and(|expression| {
+                    if expression.is_some_and(|expression| {
                         matches!(
                             expression.kind,
                             ast::ExpressionKind::Literal(ast::Literal::Null)
@@ -165,19 +190,28 @@ impl Compiler<'_> {
                 (_, false) => Some("A function with return type must return a value"),
             };
             if let Some(message) = message {
+                let message = if self.hooked_property.is_some()
+                    || self
+                        .function
+                        .name
+                        .rsplit_once("::")
+                        .is_some_and(|(_, method)| method.eq_ignore_ascii_case("__toString"))
+                {
+                    message.replace("function", "method")
+                } else {
+                    message.into()
+                };
                 return Err(self.error(message, line));
             }
         }
         let source = if let Some(expression) = expression {
-            if !self.function.returns_reference
+            if !returns_reference
                 && self.finalies.is_empty()
                 && let ast::ExpressionKind::Variable(ast::Variable::Named(name)) = &expression.kind
                 && name != "this"
             {
                 self.local(name)?
-            } else if self.function.returns_reference
-                && crate::helpers::reference_capable(expression)
-            {
+            } else if returns_reference && crate::helpers::reference_capable(expression) {
                 let place = self.readable_place(expression)?;
                 let dst = self.allocate_register()?;
                 self.emit(
@@ -194,7 +228,7 @@ impl Compiler<'_> {
         } else {
             self.literal(Constant::Null, line)?
         };
-        let source = if !self.finalies.is_empty() && !self.function.returns_reference {
+        let source = if !self.finalies.is_empty() && !returns_reference {
             let destination = self.allocate_register()?;
             self.emit(
                 Instruction::Move {
@@ -210,11 +244,19 @@ impl Compiler<'_> {
         if !self.finalies.is_empty() {
             self.emit(Instruction::CheckReturn { source }, line);
         }
-        self.emit_finally_exits(None, phera_bytecode::FinallyEntry::Return, line);
+        self.emit_control_exits(
+            super::exits::ExitDepth {
+                loops: self.loops.len(),
+                finally_blocks: 0,
+            },
+            phera_bytecode::FinallyEntry::Return,
+            line,
+            |_, _| {},
+        );
         self.emit(
             if !self.finalies.is_empty() {
                 Instruction::ReturnChecked { source }
-            } else if self.function.returns_reference {
+            } else if returns_reference {
                 Instruction::ReturnReference(source)
             } else {
                 Instruction::Return(source)

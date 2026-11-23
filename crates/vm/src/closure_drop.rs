@@ -23,7 +23,12 @@ impl Drop for ClosureState {
                     pending.extend(array.values().cloned());
                     // Pending owners prevent the array's own drop from freeing native payloads.
                 }
-                Value::Object(object) if Rc::strong_count(&object) == 1 => {
+                // An object with a due destructor is handed to the
+                // interpreter whole when it drops (see `crate::destructors`).
+                Value::Object(object)
+                    if Rc::strong_count(&object) == 1
+                        && object.destruction() != phera_value::Destruction::Due =>
+                {
                     let native = object.native.borrow_mut().take();
                     if let Some(native) = native
                         && let Ok(mut state) = native.downcast::<ClosureState>()
@@ -43,16 +48,20 @@ impl Drop for ClosureState {
 /// Empty a state before dropping it so the next payload's Drop has constant depth.
 fn drain_state(state: &mut ClosureState, pending: &mut Vec<Value>) {
     pending.extend(state.captures.drain(..).flatten());
-    if Rc::strong_count(&state.statics) == 1 {
-        pending.extend(state.statics.borrow_mut().drain().map(|(_, value)| value));
+    if let Some(statics) = &state.statics
+        && Rc::strong_count(statics) == 1
+    {
+        pending.extend(statics.borrow_mut().drain().map(|(_, value)| value));
     }
     if let Some(context) = &mut state.context
         && let Some(receiver) = context.receiver.take()
+        && Rc::strong_count(&receiver) == 1
     {
         pending.push(Value::Object(receiver));
     }
     if let CallTarget::Method { context, .. } = &mut state.callee.target
         && let Some(receiver) = context.receiver.take()
+        && Rc::strong_count(&receiver) == 1
     {
         pending.push(Value::Object(receiver));
     }

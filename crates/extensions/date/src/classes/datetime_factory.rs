@@ -12,7 +12,7 @@ use crate::{
 };
 
 #[derive(Default)]
-struct LastErrors(Option<Value>);
+pub(crate) struct LastErrors(Option<Value>);
 
 pub fn remember(context: &mut dyn Context, parsed: &Parsed) {
     let errors = (!parsed.errors.is_empty() || !parsed.warnings.is_empty())
@@ -165,7 +165,12 @@ fn resolve(mut parsed: State, base: ZoneKind, explicit: Option<ZoneKind>, now: b
     date
 }
 
-pub fn from_timestamp(context: &mut dyn Context, arguments: &[Value], class: &str) -> NativeResult {
+pub fn from_timestamp(
+    context: &mut dyn Context,
+    arguments: &[Value],
+    class: &str,
+    declaring: &str,
+) -> NativeResult {
     let (timestamp, micros) = match arguments[0] {
         Value::Int(timestamp) => (timestamp, 0),
         Value::Float(value) if (i64::MIN as f64..-(i64::MIN as f64)).contains(&value) => {
@@ -181,12 +186,16 @@ pub fn from_timestamp(context: &mut dyn Context, arguments: &[Value], class: &st
             return Err(NativeError::throw(
                 "DateRangeError",
                 format!(
-                    "{class}::createFromTimestamp(): Argument #1 ($timestamp) must be a finite \
+                    "{declaring}::createFromTimestamp(): Argument #1 ($timestamp) must be a finite \
                  number between {bounds}, {shown} given"
                 ),
             ));
         }
-        _ => unreachable!("prepared numeric parameter"),
+        _ => {
+            return Err(NativeError::type_error(
+                "Expected an int or float timestamp",
+            ));
+        }
     };
     make(
         context,

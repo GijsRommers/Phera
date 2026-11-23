@@ -20,10 +20,7 @@ pub(crate) enum Resolved {
     /// Run this PHP file.
     Script(PathBuf),
     /// Send this file as it is.
-    File {
-        content_type: &'static str,
-        body: Vec<u8>,
-    },
+    File(PathBuf),
     NotFound,
 }
 
@@ -64,6 +61,11 @@ impl Site {
         }
     }
 
+    /// The script that answers every path without a file of its own.
+    pub(crate) fn front_controller(&self) -> Option<&Path> {
+        self.front_controller.as_deref()
+    }
+
     pub(crate) fn document_root(&self) -> &Path {
         &self.document_root
     }
@@ -97,23 +99,31 @@ impl Site {
         if !file.starts_with(&self.document_root) || !file.is_file() {
             return fallback();
         }
-        // `.PHP` and `.Php` run as scripts too, as in PHP's own server. Serving
-        // them as files would hand out their source, with whatever passwords
-        // it contains.
-        let is_script = file
-            .extension()
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("php"));
-        if is_script {
-            return Resolved::Script(file);
-        }
-        match std::fs::read(&file) {
-            Ok(body) => Resolved::File {
-                content_type: content_type(&file),
-                body,
-            },
-            Err(_) => Resolved::NotFound,
+        if is_script(&file) {
+            Resolved::Script(file)
+        } else {
+            Resolved::File(file)
         }
     }
+
+    /// The real path of `candidate` when it is a file this site may send as
+    /// it is: inside the document root, not excluded, and not a script.
+    pub(crate) fn plain_file(&self, candidate: &Path) -> Option<PathBuf> {
+        let file = candidate.canonicalize().ok()?;
+        let allowed = file.starts_with(&self.document_root)
+            && !self.excluded.contains(&file)
+            && file.is_file()
+            && !is_script(&file);
+        allowed.then_some(file)
+    }
+}
+
+/// `.PHP` and `.Php` run as scripts too, as in PHP's own server. Serving
+/// them as files would hand out their source, with whatever passwords it
+/// contains.
+fn is_script(file: &Path) -> bool {
+    file.extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("php"))
 }
 
 /// Turns `/css/site.css` into `css/site.css`. Returns `None` for a path that
@@ -158,31 +168,6 @@ fn percent_decode(path: &str) -> Option<String> {
 
 fn hex_digit(byte: u8) -> Option<u8> {
     char::from(byte).to_digit(16).map(|digit| digit as u8)
-}
-
-fn content_type(file: &Path) -> &'static str {
-    let extension = file
-        .extension()
-        .map(|extension| extension.to_string_lossy().to_ascii_lowercase());
-    match extension.as_deref() {
-        Some("html" | "htm") => "text/html; charset=UTF-8",
-        Some("css") => "text/css; charset=UTF-8",
-        Some("js" | "mjs") => "text/javascript; charset=UTF-8",
-        Some("json" | "map") => "application/json",
-        Some("txt") => "text/plain; charset=UTF-8",
-        Some("xml") => "application/xml",
-        Some("svg") => "image/svg+xml",
-        Some("png") => "image/png",
-        Some("jpg" | "jpeg") => "image/jpeg",
-        Some("gif") => "image/gif",
-        Some("webp") => "image/webp",
-        Some("ico") => "image/x-icon",
-        Some("woff") => "font/woff",
-        Some("woff2") => "font/woff2",
-        Some("pdf") => "application/pdf",
-        Some("wasm") => "application/wasm",
-        _ => "application/octet-stream",
-    }
 }
 
 #[cfg(test)]

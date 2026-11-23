@@ -8,12 +8,13 @@
 mod print_r;
 mod var_dump;
 mod var_export;
+mod walker;
+use walker::walk;
 
-use std::collections::HashSet;
 use std::rc::Rc;
 
 use phera_extension_api::value::Object;
-use phera_extension_api::{ArrayKey, Context, PhpArray, Registry, Value};
+use phera_extension_api::{ArrayKey, Context, PhpArray, PropertyPurpose, Registry, Value};
 
 pub(crate) fn register(registry: &mut Registry) {
     var_dump::register(registry);
@@ -46,13 +47,42 @@ pub(crate) struct Place {
     pub depth: usize,
     /// Whether it is a PHP reference that something else still shares.
     pub is_reference: bool,
+    pub leading_written: bool,
 }
 
 /// What differs between the three functions. The walker calls these in
 /// document order.
 pub(crate) trait Style {
+    fn call_site(&self) -> (&'static str, &[Value]) {
+        ("", &[])
+    }
+
+    fn before_debug(&mut self, _out: &mut Vec<u8>, _place: Place, _context: &mut dyn Context) {}
+
+    fn property_purpose(&self) -> PropertyPurpose {
+        PropertyPurpose::Debug
+    }
+
     /// Anything that is not an array or object.
-    fn scalar(&mut self, out: &mut Vec<u8>, value: &Value, place: Place);
+    fn scalar(&mut self, out: &mut Vec<u8>, value: &Value, place: Place, context: &mut dyn Context);
+
+    fn uninitialized(&mut self, out: &mut Vec<u8>, ty: &str, depth: usize) {
+        spaces(out, depth * 2);
+        out.extend_from_slice(b"uninitialized(");
+        out.extend_from_slice(ty.as_bytes());
+        out.extend_from_slice(b")\n");
+    }
+
+    /// A case can be printed as one value or as a container of its readonly properties.
+    fn enum_case(
+        &mut self,
+        _: &mut Vec<u8>,
+        _: &Object,
+        _: &phera_extension_api::PhpString,
+        _: Place,
+    ) -> bool {
+        false
+    }
 
     /// The start of an array or object with `len` entries.
     fn open(&mut self, out: &mut Vec<u8>, container: &Container, len: usize, place: Place);
@@ -76,94 +106,6 @@ pub(crate) trait Style {
     );
 }
 
-/// A container whose entries are partly printed.
-struct Frame {
-    container: Container,
-    /// The entries: the array itself, or a copy of an object's properties so
-    /// no borrow of the object is held while printing.
-    entries: Rc<PhpArray>,
-    next: Option<usize>,
-}
-
-pub(crate) fn walk(
-    style: &mut dyn Style,
-    out: &mut Vec<u8>,
-    value: &Value,
-    context: &mut dyn Context,
-) {
-    let mut frames: Vec<Frame> = Vec::new();
-    let mut active: HashSet<usize> = HashSet::new();
-    frames.extend(enter(style, out, value, 0, &mut active, context));
-
-    loop {
-        let depth = frames.len();
-        let Some(frame) = frames.last_mut() else {
-            break;
-        };
-        let entry = frame
-            .next
-            .and_then(|position| Some((position, frame.entries.entry_at(position)?)));
-        match entry {
-            Some((position, (key, item))) => {
-                frame.next = frame.entries.next_position(position);
-                style.key(out, &key, &frame.container, depth);
-                match enter(style, out, item, depth, &mut active, context) {
-                    Some(child) => frames.push(child),
-                    None => style.after_entry(out),
-                }
-            }
-            None => {
-                style.close(out, &frame.container, depth - 1);
-                active.remove(&frame.container.identity());
-                frames.pop();
-                if !frames.is_empty() {
-                    style.after_entry(out);
-                }
-            }
-        }
-    }
-}
-
-/// Prints a scalar, or the start of a container. Returns the frame to walk
-/// when the value has entries to print.
-fn enter(
-    style: &mut dyn Style,
-    out: &mut Vec<u8>,
-    value: &Value,
-    depth: usize,
-    active: &mut HashSet<usize>,
-    context: &mut dyn Context,
-) -> Option<Frame> {
-    // PHP marks a reference only while a second holder exists. A variable
-    // that was the last one bound to it prints like a plain value.
-    let is_reference = matches!(value, Value::Reference(cell) if Rc::strong_count(cell) > 1);
-    let place = Place {
-        depth,
-        is_reference,
-    };
-    let (container, entries) = match &*value.deref() {
-        Value::Array(array) => (Container::Array(array.clone()), array.clone()),
-        Value::Object(object) => (
-            Container::Object(object.clone()),
-            Rc::new(object.to_array()),
-        ),
-        scalar => {
-            style.scalar(out, scalar, place);
-            return None;
-        }
-    };
-    if !active.insert(container.identity()) {
-        style.recursion(out, &container, place, context);
-        return None;
-    }
-    style.open(out, &container, entries.len(), place);
-    Some(Frame {
-        container,
-        next: entries.first_position(),
-        entries,
-    })
-}
-
 pub(crate) fn spaces(out: &mut Vec<u8>, count: usize) {
     out.resize(out.len() + count, b' ');
 }
@@ -185,7 +127,13 @@ mod tests {
     }
 
     impl Style for Tally {
-        fn scalar(&mut self, _out: &mut Vec<u8>, _value: &Value, _place: Place) {
+        fn scalar(
+            &mut self,
+            _out: &mut Vec<u8>,
+            _value: &Value,
+            _place: Place,
+            _context: &mut dyn Context,
+        ) {
             self.scalars += 1;
         }
 
@@ -229,12 +177,20 @@ mod tests {
             value = Value::from(array);
         }
         let mut tally = Tally::default();
-        walk(
-            &mut tally,
-            &mut Vec::new(),
-            &value,
-            &mut TestContext::default(),
-        );
+        {
+            use std::{
+                future::Future,
+                task::{Context as TaskContext, Poll, Waker},
+            };
+            let mut out = Vec::new();
+            let mut context = TestContext::default();
+            let mut walk = std::pin::pin!(walk(&mut tally, &mut out, &value, &mut context));
+            assert!(matches!(
+                walk.as_mut()
+                    .poll(&mut TaskContext::from_waker(Waker::noop())),
+                Poll::Ready(Ok(()))
+            ));
+        }
         assert_eq!(
             (tally.opened, tally.closed, tally.scalars),
             (200_000, 200_000, 1)

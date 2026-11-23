@@ -12,11 +12,13 @@ pub(crate) mod rounding;
 mod trig;
 
 pub(crate) fn register(registry: &mut Registry) {
+    rounding::register_enum(registry);
+    minmax::register(registry);
+    registry.describe_function("round", "float", None);
     let modules = [
         aggregate::FUNCTIONS,
         base::FUNCTIONS,
         basic::FUNCTIONS,
-        minmax::FUNCTIONS,
         misc::FUNCTIONS,
         rounding::FUNCTIONS,
         trig::FUNCTIONS,

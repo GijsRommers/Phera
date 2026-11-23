@@ -16,116 +16,208 @@
 use crate::error::{self, Error};
 use crate::flags::EncodeFlags;
 use crate::string::encode_string;
-use phera_extension_api::value::{
-    NumVal, PropertyScope, float_repr, parse_numeric, split_property_key,
+use phera_extension_api::value::{NumVal, float_repr, parse_numeric};
+use phera_extension_api::{
+    ArrayKey, Context, LocalFuture, NativeError, NativeResult, Object, PhpArray, PropertyPurpose,
+    PropertyViewContinuation, PropertyViewRequest, Value, args,
 };
-use phera_extension_api::{ArrayKey, Context, NativeResult, Value, args};
-use std::collections::HashSet;
+use std::fmt::Write;
 use std::rc::Rc;
 
-/// What is left to write, last item first.
-enum Work {
-    /// A value at nesting `level`.
-    Value { value: Value, level: usize },
-    /// Punctuation: `,`, `:` or `: `.
-    Text(&'static str),
-    /// A newline and the indentation of `level`, for `JSON_PRETTY_PRINT`.
-    Indent(usize),
-    /// An object key, written as a JSON string.
-    Key(ArrayKey),
-    /// The end of a container that `identity` opened at `level`.
-    Close {
-        identity: usize,
-        level: usize,
-        closing: char,
-        empty: bool,
-    },
-    /// The end of the value behind a reference.
-    Release(usize),
-}
+mod object;
+mod traversal;
+
+use traversal::{Container, Owner, Stack, Work};
 
 struct Encoder {
     flags: EncodeFlags,
     depth: i64,
     output: String,
     error: Error,
-    /// The containers and references being encoded, by address.
-    active: HashSet<usize>,
-    work: Vec<Work>,
+    work: Stack,
+}
+
+struct EncodingView {
+    object: Rc<Object>,
+    level: usize,
+}
+
+struct PendingEncoding {
+    encoder: Encoder,
+    view: EncodingView,
+}
+
+impl PropertyViewContinuation for PendingEncoding {
+    fn resume(
+        self: Box<Self>,
+        context: &mut dyn Context,
+        properties: Rc<PhpArray>,
+    ) -> LocalFuture<'_, NativeResult> {
+        let Self { mut encoder, view } = *self;
+        encoder.object_entries(view.object, view.level, properties);
+        Box::pin(complete_encoding(context, encoder))
+    }
+
+    fn abandon(self: Box<Self>, context: &mut dyn Context) {
+        self.encoder.record_exception(context);
+    }
 }
 
 /// PHP checks `$depth` when a container is finished, so a too deep value
 /// is still written in full with `JSON_PARTIAL_OUTPUT_ON_ERROR`.
-pub(crate) fn json_encode(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let flags = EncodeFlags::from_bits(args::int(arguments, 1).unwrap_or(0));
-    let value = arguments.first().cloned().unwrap_or_default();
-    let mut encoder = Encoder {
-        flags,
-        // PHP keeps the depth in a C int.
-        depth: i64::from(args::int(arguments, 2).unwrap_or(512) as i32),
-        output: String::new(),
-        error: Error::None,
-        active: HashSet::new(),
-        work: vec![Work::Value { value, level: 0 }],
-    };
-    encoder.run();
-    let result = if encoder.error == Error::None || flags.partial_output {
-        Value::from(encoder.output)
-    } else {
-        Value::Bool(false)
-    };
-    error::finish(
-        context,
-        encoder.error,
-        flags.throw_on_error && !flags.partial_output,
-        result,
+pub(crate) fn json_encode(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    Box::pin(encode(context, arguments))
+}
+
+async fn encode(context: &mut dyn Context, arguments: Vec<Value>) -> NativeResult {
+    let mut encoder = Encoder::new(&arguments);
+    encoder.work.push(Work::value(
+        arguments.first().cloned().unwrap_or_default(),
+        0,
+    ));
+    complete_encoding(context, encoder).await
+}
+
+pub(crate) fn can_encode_sync(slots: &[Option<Value>]) -> bool {
+    match slots.first().and_then(Option::as_ref) {
+        Some(Value::Array(array)) => array.values().all(plain_value),
+        Some(value) => plain_value(value),
+        None => false,
+    }
+}
+
+fn plain_value(value: &Value) -> bool {
+    !matches!(
+        value,
+        Value::Object(_) | Value::Reference(_) | Value::Array(_)
     )
 }
 
-impl Encoder {
-    /// Works until done, or until the first error unless the output is
-    /// partial: then it goes on, and the last error is the one reported.
-    fn run(&mut self) {
-        while let Some(work) = self.work.pop() {
-            match work {
-                Work::Value { value, level } => self.value(value, level),
-                Work::Text(text) => self.output.push_str(text),
-                Work::Indent(level) => self.indent(level),
-                Work::Key(key) => self.key(key),
-                Work::Release(identity) => {
-                    self.active.remove(&identity);
+pub(crate) fn encode_sync(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let mut encoder = Encoder::new(arguments);
+    if let Some(value) = arguments.first() {
+        encoder.value(value, 0);
+    }
+    if encoder.advance().is_some() {
+        return Err(NativeError::error(
+            "Object encoding requires the native call frame",
+        ));
+    }
+    encoder.finish(context)
+}
+
+async fn complete_encoding(context: &mut dyn Context, mut encoder: Encoder) -> NativeResult {
+    while let Some((object, level)) = encoder.advance() {
+        match encoder.object(context, object, level).await {
+            Ok(Some(view)) => {
+                return Err(PropertyViewRequest {
+                    object: view.object.clone(),
+                    purpose: PropertyPurpose::Json,
+                    function: "json_encode",
+                    arguments: Vec::new(),
+                    continuation: Box::new(PendingEncoding { encoder, view }),
                 }
-                Work::Close {
-                    identity,
-                    level,
-                    closing,
-                    empty,
-                } => {
-                    self.active.remove(&identity);
-                    if level as i64 > self.depth {
-                        self.error = Error::Depth;
-                    }
-                    if !empty {
-                        self.indent(level - 1);
-                    }
-                    self.output.push(closing);
-                }
+                .suspend());
             }
-            if self.error != Error::None && !self.flags.partial_output {
-                break;
+            Ok(None) => {}
+            Err(exception) => {
+                encoder.record_exception(context);
+                return Err(exception);
             }
         }
+    }
+    encoder.finish(context)
+}
+
+impl Encoder {
+    fn new(arguments: &[Value]) -> Self {
+        Self {
+            flags: EncodeFlags::from_bits(args::int(arguments, 1).unwrap_or(0)),
+            // PHP keeps the depth in a C int.
+            depth: i64::from(args::int(arguments, 2).unwrap_or(512) as i32),
+            output: String::new(),
+            error: Error::None,
+            work: Stack::default(),
+        }
+    }
+
+    fn finish(self, context: &mut dyn Context) -> NativeResult {
+        let result = if self.error == Error::None || self.flags.partial_output {
+            Value::from(self.output)
+        } else {
+            Value::Bool(false)
+        };
+        error::finish(
+            context,
+            self.error,
+            self.flags.throw_on_error && !self.flags.partial_output,
+            result,
+        )
+    }
+
+    fn record_exception(&self, context: &mut dyn Context) {
+        if !self.flags.throw_on_error || self.flags.partial_output {
+            let _ = error::finish(context, self.error, false, Value::Null);
+        }
+    }
+
+    /// Writes until done or until an object needs services from the runtime.
+    fn advance(&mut self) -> Option<(Rc<Object>, usize)> {
+        while self.error == Error::None || self.flags.partial_output {
+            match self.work.pop()? {
+                Work::Value(Value::Object(object), level) => return Some((object, level)),
+                Work::Value(value, level) => self.value(&value, level),
+                Work::ReleaseSerializer(guard) => drop(guard),
+                Work::ReleaseReference(_) => {}
+                Work::Container(mut container) => {
+                    let level = container.level;
+                    let object = container.object;
+                    if let Some((key, value)) = container.next_entry() {
+                        if container.wrote_entry {
+                            self.output.push(',');
+                        }
+                        container.wrote_entry = true;
+                        self.indent(level);
+                        if object {
+                            self.key(key);
+                            self.output
+                                .push_str(if self.flags.pretty_print { ": " } else { ":" });
+                        }
+                        self.work.push(Work::Container(container));
+                        if self.error == Error::None || self.flags.partial_output {
+                            if let Value::Object(object) = value {
+                                return Some((object, level));
+                            }
+                            self.value(&value, level);
+                        }
+                    } else {
+                        if level as i64 > self.depth {
+                            self.error = Error::Depth;
+                        }
+                        if container.wrote_entry {
+                            self.indent(level - 1);
+                        }
+                        self.output.push(if object { '}' } else { ']' });
+                    }
+                }
+            }
+        }
+        None
     }
 
     /// Records an error and writes what PHP writes in place of the value:
     /// 0 for a float that is not finite, null for anything else.
     fn failure(&mut self, error: Error) {
         self.error = error;
-        self.output.push_str(if error == Error::Infinite {
-            "0"
-        } else {
-            "null"
-        });
+        self.output
+            .push_str(if matches!(error, Error::Infinite | Error::NonBackedEnum) {
+                "0"
+            } else {
+                "null"
+            });
     }
 
     fn indent(&mut self, level: usize) {
@@ -142,12 +234,16 @@ impl Encoder {
         match key {
             ArrayKey::Int(integer) => {
                 self.output.push('"');
-                self.output.push_str(&integer.to_string());
+                let _ = write!(self.output, "{integer}");
                 self.output.push('"');
             }
-            ArrayKey::String(name) => {
+            ArrayKey::Interned(_) | ArrayKey::String(_) => {
                 let start = self.output.len();
-                if let Err(error) = encode_string(&mut self.output, name.as_bytes(), self.flags) {
+                if let Err(error) = encode_string(
+                    &mut self.output,
+                    key.as_str_bytes().expect("checked string key"),
+                    self.flags,
+                ) {
                     self.output.truncate(start);
                     self.error = error;
                     self.output.push_str("\"\"");
@@ -156,94 +252,51 @@ impl Encoder {
         }
     }
 
-    fn value(&mut self, value: Value, level: usize) {
+    fn value(&mut self, value: &Value, level: usize) {
         match value {
             Value::Null => self.output.push_str("null"),
-            Value::Bool(boolean) => self.output.push_str(if boolean { "true" } else { "false" }),
-            Value::Int(integer) => self.output.push_str(&integer.to_string()),
-            Value::Float(number) => self.number(number),
+            Value::Bool(boolean) => self
+                .output
+                .push_str(if *boolean { "true" } else { "false" }),
+            Value::Int(integer) => {
+                let _ = write!(self.output, "{integer}");
+            }
+            Value::Float(number) => self.number(*number),
+            Value::InternedStr(bytes) => self.string(bytes.as_bytes()),
             Value::String(bytes) => self.string(bytes.as_bytes()),
             Value::Resource(_) => self.failure(Error::Unsupported),
             Value::Reference(reference) => {
-                let identity = Rc::as_ptr(&reference) as usize;
-                if !self.active.insert(identity) {
+                let identity = Rc::as_ptr(reference) as usize;
+                if self.work.contains(identity) {
                     self.failure(Error::Recursion);
                     return;
                 }
-                // A reference already borrowed for writing is one being
-                // changed further up: recursion too.
+                // A reference already borrowed for writing is one being changed further up.
                 if let Ok(value) = reference.try_borrow() {
-                    self.work.push(Work::Release(identity));
-                    self.work.push(Work::Value {
-                        value: value.clone(),
-                        level,
-                    });
+                    self.work.push(Work::ReleaseReference(reference.clone()));
+                    self.work.push(Work::value(value.clone(), level));
                 } else {
                     self.failure(Error::Recursion);
                 }
             }
             Value::Array(array) => {
-                let entries = array
-                    .iter()
-                    .map(|(key, value)| (key, value.clone()))
-                    .collect();
                 let object = !array.is_list() || self.flags.force_object;
-                self.container(Rc::as_ptr(&array) as usize, entries, object, level);
+                self.container(Owner::Array(array.clone()), object, level);
             }
-            Value::Object(object) => {
-                // Only public properties are encoded.
-                let entries = object
-                    .to_array()
-                    .iter()
-                    .filter(|(key, _)| match key {
-                        ArrayKey::String(name) => {
-                            split_property_key(name.as_bytes()).1 == PropertyScope::Public
-                        }
-                        ArrayKey::Int(_) => true,
-                    })
-                    .map(|(key, value)| (key, value.clone()))
-                    .collect();
-                self.container(Rc::as_ptr(&object) as usize, entries, true, level);
-            }
+            Value::Object(object) => self
+                .work
+                .push(Work::Value(Value::Object(object.clone()), level)),
         }
     }
 
-    /// Writes the opening bracket and schedules the entries and the closing
-    /// bracket. The work stack runs last item first, so the items are
-    /// pushed from the last entry back to the first.
-    fn container(
-        &mut self,
-        identity: usize,
-        entries: Vec<(ArrayKey, Value)>,
-        object: bool,
-        level: usize,
-    ) {
-        if !self.active.insert(identity) {
+    fn container(&mut self, owner: Owner, object: bool, level: usize) {
+        if self.work.contains(owner.identity()) {
             self.failure(Error::Recursion);
             return;
         }
         self.output.push(if object { '{' } else { '[' });
-        self.work.push(Work::Close {
-            identity,
-            level: level + 1,
-            closing: if object { '}' } else { ']' },
-            empty: entries.is_empty(),
-        });
-        for (index, (key, value)) in entries.into_iter().enumerate().rev() {
-            self.work.push(Work::Value {
-                value,
-                level: level + 1,
-            });
-            if object {
-                self.work
-                    .push(Work::Text(if self.flags.pretty_print { ": " } else { ":" }));
-                self.work.push(Work::Key(key));
-            }
-            self.work.push(Work::Indent(level + 1));
-            if index != 0 {
-                self.work.push(Work::Text(","));
-            }
-        }
+        self.work
+            .push(Work::Container(Container::new(owner, object, level + 1)));
     }
 
     /// A float in the shortest decimal form that reads back as the same
@@ -268,7 +321,7 @@ impl Encoder {
             if parsed.exact {
                 match parsed.value {
                     Some(NumVal::Int(integer)) => {
-                        self.output.push_str(&integer.to_string());
+                        let _ = write!(self.output, "{integer}");
                         return;
                     }
                     Some(NumVal::Float(number)) if number.is_finite() => {

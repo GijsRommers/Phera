@@ -9,7 +9,7 @@ fn usage_errors_exit_two() {
     let project = Project::new();
     for args in [
         &[][..],
-        &["--level", "2"],
+        &["--level", "6"],
         &["--format", "xml"],
         &["missing.php"],
         &["--generate-baseline"],
@@ -67,6 +67,46 @@ fn baseline_ignores_exact_entries_and_preserves_new_errors() {
 }
 
 #[test]
+fn phpstan_baseline_suppresses_only_matching_messages_up_to_the_count() {
+    let project = Project::new();
+    let program = "<?php\nfunction number(int $value): int { return $value; }\n";
+    project.write(
+        "src.php",
+        &format!("{program}echo number('one');\necho number('two');\n"),
+    );
+    project.write(
+        "phpstan-baseline.neon",
+        r#"parameters:
+    ignoreErrors:
+        -
+            message: '#^Parameter \#1 \$value of function number expects int, string given\.$#'
+            identifier: argument.type
+            count: 2
+            path: src.php
+"#,
+    );
+    let args = [
+        "--level",
+        "max",
+        "--baseline",
+        "--format",
+        "json",
+        "src.php",
+    ];
+    assert!(project.run(&args).status.success());
+    project.write(
+        "src.php",
+        &format!("{program}echo number([]);\necho number('one');\necho number('two');\necho number('three');\n"),
+    );
+    let output = project.run(&args);
+    assert_eq!(output.status.code(), Some(1));
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(text.matches("argument.type").count(), 2);
+    assert!(text.contains("\"line\":3"), "{text}");
+    assert!(text.contains("\"line\":6"), "{text}");
+}
+
+#[test]
 fn namespace_imports_and_inherited_trait_methods_cross_files() {
     let project = Project::new();
     project.write(
@@ -97,6 +137,45 @@ fn syntax_errors_do_not_hide_other_files_and_code_is_never_executed() {
     assert!(text.contains("phpstan.parse"));
     assert!(text.contains("function.notFound"));
     assert!(!project.0.join("executed").exists());
+}
+
+#[test]
+fn source_tools_report_parser_compile_errors() {
+    let project = Project::new();
+    let files = [
+        ("ternary.php", "<?php 1 ?: 2 ? 3 : 4;", "Unparenthesized"),
+        (
+            "jump.php",
+            "<?php while (true) { break '2'; }",
+            "operator accepts only positive integers",
+        ),
+        (
+            "namespace.php",
+            "<?php function f() {} namespace Project;",
+            "Namespace declaration statement has to be the very first statement",
+        ),
+        (
+            "mixed.php",
+            "<?php namespace A; namespace B {}",
+            "Cannot mix bracketed namespace declarations",
+        ),
+    ];
+    for (file, source, _) in files {
+        project.write(file, source);
+    }
+    for command in ["check", "lint"] {
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_phera"))
+            .current_dir(&project.0)
+            .args([command, "--format", "json", "."])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1), "{command}");
+        let text = String::from_utf8(output.stdout).unwrap();
+        for (file, _, message) in files {
+            assert!(text.contains(file), "{command}: {file}: {text}");
+            assert!(text.contains(message), "{command}: {message}: {text}");
+        }
+    }
 }
 
 #[test]

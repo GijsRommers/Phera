@@ -22,11 +22,13 @@ impl Compiler<'_> {
         cases: &[ast::SwitchCase],
         line: usize,
     ) -> Result<(), CompileError> {
+        let mark = self.temporaries_start();
         let value = self.compile_expression(subject)?;
         let mut jumps = vec![];
         let mut default = None;
         for (i, case) in cases.iter().enumerate() {
             if let Some(expression) = &case.condition {
+                let mark = self.mark_temporaries();
                 let rhs = self.compile_expression(expression)?;
                 let dst = self.allocate_register()?;
                 self.emit(
@@ -49,26 +51,37 @@ impl Compiler<'_> {
                         line,
                     ),
                 });
+                self.release_temporaries(mark);
             } else {
                 default = Some(i)
             }
         }
+        let comparisons = self.temporaries_since(mark);
+        // Found once: a switch may have thousands of cases.
+        let owned = self.owning_temporaries(&comparisons);
         let miss = self.emit(Instruction::Jump(Target(0)), line);
         self.loops.push(Loop {
+            start: self.position(),
+            cleanup: Some(super::exits::LoopCleanup::Switch(value)),
             breaks: vec![],
             continues: vec![],
         });
+        // `jumps` is in case order, so one pass over it patches every case.
+        let mut pending = jumps.iter().peekable();
         for (i, case) in cases.iter().enumerate() {
-            for jump in jumps.iter().filter(|jump| jump.case_index == i) {
+            while let Some(jump) = pending.next_if(|jump| jump.case_index == i) {
                 self.patch(jump.instruction, self.position())
             }
             if default == Some(i) {
                 self.patch(miss, self.position())
             }
+            // The subject and the case values are dead in every body.
+            self.clear_registers(&owned, line);
             self.block(&case.body, DeclarationTiming::AtExecution)?
         }
         if default.is_none() {
-            self.patch(miss, self.position())
+            self.patch(miss, self.position());
+            self.clear_registers(&owned, line);
         }
         self.loop_end(self.position());
         Ok(())

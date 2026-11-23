@@ -1,10 +1,31 @@
 //! Function declarations, parameter prologues, and nested declarations.
 
+use super::builtin_attributes::AttributePlacement;
+use super::type_declarations::{TypeScope, TypeSite};
 use phera_ast as ast;
+use phera_source::attributes::AttributeTarget;
 
 use crate::ir::{Constant, Instruction, Parameter};
 use crate::policies::DeclarationTiming;
 use crate::{CompileError, Compiler};
+
+/// Borrow AST nodes while lowering so long expression trees are never cloned.
+pub(crate) struct FunctionSource<'a> {
+    pub(crate) span: phera_source::Span,
+    pub(crate) doc_comment: Option<phera_source::Span>,
+    pub(crate) attributes: &'a [ast::Attribute],
+    pub(crate) name: &'a str,
+    pub(crate) by_reference: bool,
+    pub(crate) is_generator: bool,
+    pub(crate) parameters: &'a [ast::Parameter],
+    pub(crate) return_type: Option<&'a ast::Type>,
+    pub(crate) body: FunctionBody<'a>,
+}
+
+pub(crate) enum FunctionBody<'a> {
+    Statements(&'a [ast::Statement]),
+    Arrow(&'a ast::Expression),
+}
 
 impl<'ast> Compiler<'ast> {
     /// Build a separate frame, then relocate declarations nested within its body.
@@ -14,95 +35,236 @@ impl<'ast> Compiler<'ast> {
         timing: DeclarationTiming,
         line: usize,
     ) -> Result<(), CompileError> {
-        self.compile_captured_function(declaration, timing, line, &[])
+        if declaration.name.name.eq_ignore_ascii_case("assert") {
+            return Err(self.error(
+                "Defining a custom assert() function is not allowed, as the function has special semantics",
+                line,
+            ));
+        }
+        self.compile_captured_function(
+            &FunctionSource {
+                span: declaration.span,
+                doc_comment: declaration.doc_comment,
+                attributes: &declaration.attributes,
+                name: &declaration.name.name,
+                by_reference: declaration.by_reference,
+                is_generator: declaration.is_generator,
+                parameters: &declaration.parameters,
+                return_type: declaration.return_type.as_ref(),
+                body: FunctionBody::Statements(&declaration.body),
+            },
+            timing,
+            line,
+            &[],
+        )
     }
 
     /// Captures must be allocated before default expressions introduce other locals.
     pub(crate) fn compile_captured_function(
         &mut self,
-        declaration: &ast::FunctionDeclaration,
+        declaration: &FunctionSource<'_>,
         timing: DeclarationTiming,
         line: usize,
         captures: &[String],
     ) -> Result<(), CompileError> {
-        self.validate_function_attributes(declaration, line)?;
+        self.validate_parameter_features(declaration)?;
         let name = if self.namespace.is_empty()
-            || declaration.name.name.contains("::")
-            || declaration.name.name.starts_with("{closure:")
+            || declaration.name.contains("::")
+            || declaration.name.starts_with("{closure:")
         {
-            declaration.name.name.clone()
+            declaration.name.to_owned()
         } else {
-            format!("{}\\{}", self.namespace, declaration.name.name)
+            format!("{}\\{}", self.namespace, declaration.name)
         };
         if timing == DeclarationTiming::Hoisted
-            && self
-                .hoisted
-                .iter()
-                .filter_map(|i| self.functions.get(*i))
-                .any(|declaration| declaration.name.eq_ignore_ascii_case(&name))
+            && self.hoisted_names.contains(&name.to_ascii_lowercase())
         {
             return Err(self.error(format!("Cannot redeclare function {name}()"), line));
         }
         let mut builder = self.function_builder(declaration, &name, captures, line)?;
-        builder.compile_parameter_defaults(&declaration.parameters, line)?;
-        builder.compile_promoted_properties(&declaration.parameters, line)?;
+        let is_closure = declaration.name.starts_with("{closure:");
+        if !declaration.name.contains("::") || is_closure {
+            let scope = if is_closure {
+                TypeScope::Deferred
+            } else {
+                TypeScope::Global
+            };
+            for parameter in declaration.parameters {
+                if let Some(ty) = &parameter.ty {
+                    builder.validate_declared_type(ty, TypeSite::Parameter, scope)?;
+                }
+            }
+            if let Some(ty) = declaration.return_type {
+                builder.validate_declared_type(ty, TypeSite::Return, scope)?;
+            }
+        }
+        if builder.has_builtin(declaration.attributes, "Deprecated")
+            || builder.has_builtin(declaration.attributes, "NoDiscard")
+        {
+            builder.emit(Instruction::AttributeDiagnostics, line);
+        }
+        builder.compile_parameter_defaults(declaration.parameters, line)?;
+        if declaration.is_generator {
+            let entry = declaration
+                .parameters
+                .first()
+                .map_or(declaration.span.start, |p| p.span.start);
+            builder.emit(Instruction::GeneratorStart, self.lines.line(entry));
+        }
+        let scope = builder.class_scope.clone();
+        builder.function.metadata.declaration = builder.declaration_metadata(
+            declaration.attributes,
+            declaration.span,
+            declaration.doc_comment,
+            scope.as_deref(),
+            AttributePlacement::Declaration(
+                if declaration.name.contains("::") && !declaration.name.starts_with("{closure:") {
+                    AttributeTarget::Method
+                } else {
+                    AttributeTarget::Function
+                },
+            ),
+        )?;
+        builder.validate_nodiscard(declaration, line)?;
+        if declaration.parameters.iter().any(|parameter| {
+            parameter.default.is_some()
+                || !parameter.attributes.is_empty()
+                || parameter.is_promoted()
+        }) {
+            builder.function.metadata.parameters = declaration
+                .parameters
+                .iter()
+                .map(|parameter| builder.reflected_parameter(parameter))
+                .collect::<Result<_, _>>()?;
+        }
+        builder.compile_promoted_properties(declaration.parameters, line)?;
         builder.function.return_type = declaration
             .return_type
-            .as_ref()
             .map(|declared_type| self.declaration_type(declared_type));
-        builder.block(&declaration.body, DeclarationTiming::AtExecution)?;
-        let register = builder.literal(Constant::Null, line)?;
-        let implicit_return = if declaration.by_reference {
-            Instruction::ReturnReference(register)
+        builder.validate_generator_type()?;
+        match declaration.body {
+            FunctionBody::Statements(body) => {
+                builder.block(body, DeclarationTiming::AtExecution)?
+            }
+            FunctionBody::Arrow(body) => builder.compile_return(Some(body), line)?,
+        }
+        let implicit_return = if !declaration.is_generator
+            && declaration
+                .name
+                .rsplit_once("::")
+                .is_some_and(|(_, method)| method.eq_ignore_ascii_case("__toString"))
+        {
+            Instruction::ReturnMissing
         } else {
-            Instruction::Return(register)
+            let register = builder.literal(Constant::Null, line)?;
+            if declaration.by_reference && !declaration.is_generator {
+                Instruction::ReturnReference(register)
+            } else {
+                Instruction::Return(register)
+            }
         };
         builder.emit(implicit_return, line);
-        if !builder.classes.is_empty() {
-            return Err(self.error("Nested class declarations not supported yet", line));
-        }
-        self.append_function(builder, timing, line);
-        Ok(())
+        self.append_function(builder, timing, line)
     }
 
     /// Nested declarations use indices relative to their builder until attached to the unit.
-    fn append_function(
+    pub(super) fn append_function(
         &mut self,
         mut builder: Compiler<'_>,
         timing: DeclarationTiming,
         line: usize,
-    ) {
+    ) -> Result<(), CompileError> {
+        let id = self.append_function_body(&mut builder)?;
+        if timing == DeclarationTiming::Hoisted {
+            self.hoisted.push(id);
+            if let Some(function) = self.functions.get(id) {
+                self.hoisted_names
+                    .insert(function.name.to_ascii_lowercase());
+            }
+        } else if timing == DeclarationTiming::AtExecution {
+            self.emit(Instruction::Declare(id), line);
+        }
+        Ok(())
+    }
+
+    /// Finalize the lexical frame and relocate its code and metadata.
+    pub(crate) fn append_function_body(
+        &mut self,
+        builder: &mut Compiler<'_>,
+    ) -> Result<usize, CompileError> {
         let id = self.functions.len();
-        let mut function = builder.finish();
+        let class_offset = self.classes.len();
+        let mut function = builder.finish()?;
         for instruction in function.instructions.iter_mut().chain(
             builder
                 .functions
                 .iter_mut()
                 .flat_map(|declaration| declaration.instructions.iter_mut()),
         ) {
-            if let Instruction::Declare(i) | Instruction::Closure { function: i, .. } = instruction
-            {
-                *i += id + 1;
+            match instruction {
+                Instruction::Declare(index)
+                | Instruction::Closure {
+                    function: index, ..
+                } => {
+                    *index += id + 1;
+                }
+                Instruction::DeclareClass(index) => *index += class_offset,
+                _ => {}
+            }
+        }
+        for class in &mut builder.classes {
+            for method in &mut class.methods {
+                method.function += id + 1;
+            }
+            for constant in &mut class.constants {
+                constant.initializer += id + 1;
+            }
+            for property in &mut class.properties {
+                if let Some(hooks) = &mut property.hooks {
+                    for hook in hooks.get.iter_mut().chain(hooks.set.iter_mut()) {
+                        hook.function += id + 1;
+                    }
+                }
+                if let Some(default) = &mut property.default {
+                    *default += id + 1;
+                }
+            }
+            for (_, backing, _) in &mut class.enum_cases {
+                if let Some(initializer) = backing {
+                    *initializer += id + 1;
+                }
             }
         }
         self.functions.push(function);
-        self.functions.extend(builder.functions);
-        if timing == DeclarationTiming::Hoisted {
-            self.hoisted.push(id)
-        } else {
-            self.emit(Instruction::Declare(id), line);
-        }
+        self.functions.append(&mut builder.functions);
+        self.classes.append(&mut builder.classes);
+        self.declaration_warnings
+            .append(&mut builder.declaration_warnings);
+        Ok(id)
     }
 
     /// Independent builders keep captured locals ahead of ordinary body temporaries.
-    fn function_builder(
+    pub(super) fn function_builder(
         &self,
-        declaration: &ast::FunctionDeclaration,
+        declaration: &FunctionSource<'_>,
         name: &str,
         captures: &[String],
         line: usize,
     ) -> Result<Compiler<'ast>, CompileError> {
-        let mut builder = Compiler::new(self.file, self.lines, name, &self.namespace);
+        let mut builder = Compiler::new(
+            self.file,
+            self.source,
+            self.lines,
+            name,
+            &self.namespace,
+            self.compile_diagnostics,
+            self.reflection,
+        );
+        builder.anonymous_classes = self.anonymous_classes.clone();
+        builder.native_functions = self.native_functions;
+        if name.starts_with("{closure:") || name.contains("::") {
+            builder.trait_scope = self.trait_scope.clone();
+        }
         builder.class_scope = if !name.starts_with("{closure:") {
             name.split_once("::")
                 .map(|(class, _)| class.to_owned())
@@ -110,12 +272,15 @@ impl<'ast> Compiler<'ast> {
         } else {
             self.class_scope.clone()
         };
+        builder.parent_scope = self.parent_scope.clone();
         builder.function.definition_line = line;
         builder.function.returns_reference = declaration.by_reference;
+        builder.function.is_generator = declaration.is_generator;
         builder.imports = self.imports.clone();
         builder.function.strict_types = self.function.strict_types;
-        for parameter in &declaration.parameters {
+        for parameter in declaration.parameters {
             builder.local(&parameter.name)?;
+            let declaration_type = builder.parameter_type(parameter);
             builder.function.parameters.push(Parameter {
                 default_display: parameter
                     .default
@@ -123,10 +288,7 @@ impl<'ast> Compiler<'ast> {
                     .map(crate::helpers::default_display),
                 name: parameter.name.clone(),
                 has_default: parameter.default.is_some(),
-                declaration_type: parameter
-                    .ty
-                    .as_ref()
-                    .map(|declared_type| self.declaration_type(declared_type)),
+                declaration_type,
                 by_reference: parameter.by_reference,
                 variadic: parameter.variadic,
             });

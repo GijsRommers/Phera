@@ -16,6 +16,7 @@ mod floats;
 mod mt19937;
 mod procedural;
 mod randomizer;
+mod serialization;
 
 use phera_extension_api::{ClassEntry, Extension, Registry, Value};
 
@@ -27,12 +28,14 @@ impl Extension for Random {
     }
 
     fn register(&self, registry: &mut Registry) {
+        // How a fork of a snapshot gets this extension's request state.
+        registry.fork_state::<crate::procedural::RequestRandom>(phera_extension_api::fresh_state);
         registry.constant("MT_RAND_MT19937", mt19937::MT_RAND_MT19937);
-        registry.constant("MT_RAND_PHP", mt19937::MT_RAND_PHP);
         // Error and Exception come from the core extension.
         for &class in ERRORS.iter().chain(engine_classes::CLASSES) {
             registry.class(class);
         }
+        registry.class(floats::INTERVAL_BOUNDARY);
         registry.class(randomizer::RANDOMIZER);
         for functions in [procedural::FUNCTIONS, collections::FUNCTIONS] {
             for &entry in functions {

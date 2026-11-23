@@ -1,6 +1,7 @@
 //! Property and array mutations share iterative path reconstruction and PHP reference binding.
 
 use crate::access_mode::{Binding, Creation, Missing, Mutation};
+use crate::property_set_visibility::PropertyChange;
 use crate::{
     AccessPath, Vm,
     path_update::{PathKey, update},
@@ -29,13 +30,24 @@ impl Vm {
             && let Some(Value::Array(array)) =
                 self.current_slot_mut(register).and_then(Option::as_mut)
         {
+            let reference = match &value {
+                Value::Reference(cell) => Some(cell.clone()),
+                _ => None,
+            };
             Rc::make_mut(array).push(value)?;
+            if let Some(reference) = reference {
+                self.state.track_cycle_reference(&reference);
+            }
             return Ok(());
         }
-        if let PathBase::StaticProperty { class, name, .. } = place.base()?
+        if let Some((class, name)) = crate::static_places::static_base(place.base()?)
             && place.steps()?.next().is_none()
         {
-            self.validate_static_mutation(class, name, &mut value)?;
+            let change = match binding {
+                Binding::ByValue => PropertyChange::Direct,
+                Binding::ByReference => PropertyChange::Bind,
+            };
+            self.validate_static_mutation(class, name, &mut value, change)?;
             if binding == Binding::ByReference {
                 self.bind_static_property_reference(class, name, value)?;
                 return Ok(());
@@ -56,6 +68,51 @@ impl Vm {
             }
             keys
         };
+        self.write_resolved_place(place, register, keys, value, binding)
+    }
+
+    pub(crate) fn write_resolved_place(
+        &mut self,
+        place: &AccessPath,
+        register: phera_bytecode::Reg,
+        keys: crate::inline_stack::InlineStack<PathKey>,
+        mut value: Value,
+        binding: Binding,
+    ) -> Result<(), NativeError> {
+        if let Some((class, name)) = crate::static_places::static_base(place.base()?)
+            && !keys.is_empty()
+        {
+            let current = self.get(register);
+            let promote_array = matches!(&*current.deref(), Value::Null | Value::Bool(false))
+                && matches!(keys.iter().next(), Some(PathKey::Index(_)));
+            if promote_array {
+                drop(current);
+                let storage = self.prepare_static_array_promotion(class, name)?;
+                self.write_validated_place(place, register, keys, value, binding)?;
+                storage.value_initialized.set(true);
+                return Ok(());
+            }
+            if !current.is_object() {
+                self.validate_static_mutation(class, name, &mut value, PropertyChange::Indirect)?;
+            }
+        }
+        self.write_validated_place(place, register, keys, value, binding)
+    }
+
+    fn write_validated_place(
+        &mut self,
+        place: &AccessPath,
+        register: phera_bytecode::Reg,
+        keys: crate::inline_stack::InlineStack<PathKey>,
+        mut value: Value,
+        binding: Binding,
+    ) -> Result<(), NativeError> {
+        if binding == Binding::ByReference
+            && matches!(keys.iter().last(), Some(PathKey::Index(_)))
+            && let Value::Reference(reference) = &value
+        {
+            self.state.track_cycle_reference(reference);
+        }
         let mut root = self
             .current_slot_mut(register)
             .and_then(Option::take)
@@ -95,7 +152,7 @@ impl Vm {
         let updated = root;
         if let PathBase::GlobalNamed { name, .. } = place.base()? {
             let name = self.get(name);
-            if let Value::String(name) = name {
+            if let Some(name) = name.str_ref() {
                 self.publish_global(name.to_string_lossy(), updated.clone());
             }
         }
@@ -108,23 +165,33 @@ impl Vm {
 
     /// Promote a slot to a shared reference cell only when an alias is requested.
     pub(crate) fn reference(&mut self, place: &AccessPath) -> NativeResult {
-        let value = self.read_place(place, crate::access_mode::Missing::Silent)?;
         let register = self
             .base_register(place, Creation::Create, Missing::Silent)?
             .ok_or_else(|| internal_error!("reference missing"))?;
-        let mut raw = self
-            .current()
-            .and_then(|frame| frame.slots(&self.registers).get(register.0 as usize))
-            .cloned()
-            .flatten()
-            .unwrap_or_default();
-        let keys = self.property_keys(place, raw.deref().clone())?;
+        let keys = self.property_keys(place, self.raw_local(register).deref().clone())?;
+        self.reference_resolved(place, register, keys)
+    }
+
+    pub(crate) fn reference_resolved(
+        &mut self,
+        place: &AccessPath,
+        register: phera_bytecode::Reg,
+        keys: crate::inline_stack::InlineStack<PathKey>,
+    ) -> NativeResult {
+        if let Some((class, name)) = crate::static_places::static_base(place.base()?) {
+            self.validate_static_mutation(class, name, &mut Value::Null, PropertyChange::Indirect)?;
+        }
+        let mut raw = self.raw_local(register);
         let mut steps = keys.iter().cloned().peekable();
         while let Some(key) = steps.next() {
             let plain = raw.deref().clone();
             raw = match (plain, key) {
                 (Value::Array(array), PathKey::Index(Some(key))) => {
-                    array.get(&key).cloned().unwrap_or_default()
+                    if steps.peek().is_none() {
+                        array.get_for_reference_binding(&key).unwrap_or_default()
+                    } else {
+                        array.get(&key).cloned().unwrap_or_default()
+                    }
                 }
                 (Value::Object(object), PathKey::Property(key)) => {
                     if steps.peek().is_none()
@@ -136,39 +203,96 @@ impl Vm {
                             phera_extension_api::NativePropertyMutation::Reference,
                         )?
                     {
+                        let value = self
+                            .native_property_read(
+                                &object,
+                                &crate::path_update::property_name(&key),
+                                Missing::Silent,
+                            )?
+                            .unwrap_or_default();
                         return Ok(Value::Reference(Rc::new(RefCell::new(value))));
                     }
-                    crate::property_storage::read(&object, &key).unwrap_or_default()
+                    let stored = crate::property_storage::read(&object, &key);
+                    let uninitialized = stored.is_none();
+                    let value = stored.unwrap_or_default();
+                    if (steps.peek().is_none() || !value.deref().is_object())
+                        && let Some(class) = object
+                            .class
+                            .as_any()
+                            .downcast_ref::<crate::classes::Class>()
+                        && let Some(property) = class.defaults.iter().find(|item| item.key == key)
+                    {
+                        if property.is_readonly || property.set_visibility.is_some() {
+                            let access =
+                                self.check_set_visibility(property, PropertyChange::Indirect);
+                            // A detached alias can change the object without replacing the slot.
+                            if value.deref().is_object()
+                                && (property.is_readonly || access.is_err())
+                            {
+                                return Ok(Value::Reference(Rc::new(RefCell::new(
+                                    value.deref().clone(),
+                                ))));
+                            }
+                            if !property.is_readonly {
+                                access?;
+                            }
+                        }
+                        if steps.peek().is_none()
+                            && uninitialized
+                            && !property.is_readonly
+                            && property.ty.as_ref().is_some_and(|ty| {
+                                !ty.mask.intersects(phera_bytecode::TypeMask::NULL)
+                            })
+                        {
+                            return Err(crate::typed_references::uninitialized_reference_error(
+                                property,
+                            ));
+                        }
+                    }
+                    value
                 }
                 _ => Value::Null,
             };
         }
+        drop(steps);
         if matches!(raw, Value::Reference(_)) {
-            if let PathBase::StaticProperty { class, name, .. } = place.base()?
+            if let Some((class, name)) = crate::static_places::static_base(place.base()?)
                 && place.steps()?.next().is_none()
             {
-                self.track_static_property_reference(class, name)?;
+                self.acquire_static_property_reference(class, name)?;
             }
             return Ok(raw);
         }
-        let reference = Value::Reference(Rc::new(RefCell::new(value)));
-        self.write_place(
-            place,
-            reference.clone(),
-            crate::access_mode::Binding::ByReference,
-        )?;
+        let reference = Value::Reference(Rc::new(RefCell::new(raw)));
+        if keys.iter().next().is_none() {
+            self.write_place(place, reference.clone(), Binding::ByReference)?;
+        } else {
+            let current = self.read_root(register, Missing::Silent);
+            let mut pending = reference.clone();
+            if !self.validate_property_mutation(current, &keys, &mut pending, Mutation::Bind)? {
+                self.write_resolved_place(place, register, keys, pending, Binding::ByReference)?;
+            }
+        }
         Ok(reference)
     }
 
     /// Remove the slot itself without assigning null through an existing alias.
     pub(crate) fn unset_place(&mut self, place: &AccessPath) -> Result<(), NativeError> {
-        if let PathBase::StaticProperty { class, name, .. } = place.base()?
+        if let Some((class, name)) = crate::static_places::static_base(place.base()?)
             && place.steps()?.next().is_none()
         {
             let (class, name) = self.static_property_names(class, name)?;
+            let class = self
+                .classes
+                .get(&class)
+                .ok_or_else(|| Self::class_miss(&class, "Class"))?;
             return Err(NativeError::error(format!(
-                "Attempt to unset static property {class}::${name}"
+                "Attempt to unset static property {}::${name}",
+                class.name
             )));
+        }
+        if let Some((class, name)) = crate::static_places::static_base(place.base()?) {
+            self.validate_static_mutation(class, name, &mut Value::Null, PropertyChange::Indirect)?;
         }
         let Some(register) = self.base_register(place, Creation::Existing, Missing::Silent)? else {
             return Ok(());
@@ -176,16 +300,35 @@ impl Vm {
         if place.steps()?.next().is_none() {
             if let PathBase::GlobalNamed { name, .. } = place.base()? {
                 let name = self.get(name).deref().clone();
-                if let Value::String(name) = name {
+                if let Some(name) = name.str_ref() {
                     self.remove_global(&name.to_string_lossy());
                 }
             }
             self.clear_local(register)?;
             return Ok(());
         }
-        let root_value = self.read_root(register, Missing::Silent);
-        let keys = self.property_keys(place, root_value.clone())?;
-        if self.validate_property_mutation(root_value, &keys, &mut Value::Null, Mutation::Unset)? {
+        let mut current = self.read_root(register, Missing::Silent);
+        let mut keys = crate::inline_stack::InlineStack::new();
+        for step in place.steps()? {
+            let Step::Index(index) = step else {
+                return Err(internal_error!("unset dimension path"));
+            };
+            let Some(key) = self.unset_index_key(&current, index)? else {
+                return Ok(());
+            };
+            current = self.read_path_index(current, &key, Missing::Silent)?;
+            keys.push(PathKey::Index(Some(key)));
+        }
+        self.unset_resolved_place(register, &keys)
+    }
+
+    pub(crate) fn unset_resolved_place(
+        &mut self,
+        register: phera_bytecode::Reg,
+        keys: &crate::inline_stack::InlineStack<PathKey>,
+    ) -> Result<(), NativeError> {
+        let current = self.read_root(register, Missing::Silent);
+        if self.validate_property_mutation(current, keys, &mut Value::Null, Mutation::Unset)? {
             return Ok(());
         }
         let mut root = self
@@ -195,7 +338,7 @@ impl Vm {
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         let result = update(
             &mut root,
-            &keys,
+            keys,
             Value::Null,
             Mutation::Unset,
             &mut diagnostics.buffer,

@@ -12,35 +12,46 @@ use phera_lexer::{LexError, Lexer, ScanMode, ScanReport, Token, TokenKind};
 use phera_source::Span;
 
 use crate::error::ParseError;
+use crate::nesting::Nesting;
 
-/// How deeply expressions and statements may nest before the parser gives up
-/// with an error. Real code stays under a hundred; PHP itself gives up
-/// somewhere in the tens of thousands. A recursive-descent parser needs stack
-/// in proportion to this depth, so the limit and [`crate::PARSER_STACK_BYTES`]
-/// go together: at this depth the parser must still fit in that stack, in a
-/// debug build too. Long chains such as `a . b . c ...` are parsed in loops and
-/// do not count.
-const MAX_DEPTH: u32 = 1000;
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ParsePurpose {
+    Syntax,
+    Compilation,
+}
 
 pub(crate) struct Parser<'src> {
     pub(crate) source: &'src [u8],
+    pub(crate) purpose: ParsePurpose,
     tokens: Vec<Token>,
+    doc_comments: Vec<(usize, Span)>,
     pos: usize,
     /// The lexer error that stopped lexing early, if any. A synthetic `Eof`
     /// token sits at the end of `tokens` in that case.
     lex_error: Option<LexError>,
     /// End offset of the last consumed token, for building spans.
     pub(crate) prev_end: usize,
-    depth: u32,
+    pub(crate) nesting: Nesting,
+    /// A yield marks only the innermost function body.
+    pub(crate) saw_yield: bool,
     /// Set after `__halt_compiler();`: the rest of the file is raw data, so
     /// every open block is implicitly closed.
     pub(crate) halted: bool,
 }
 
 impl<'src> Parser<'src> {
-    pub(crate) fn new(source: &'src [u8], collect_diagnostics: bool) -> (Self, ScanReport) {
-        let lexer = Lexer::new_bytes(source);
-        let mut lexer = if collect_diagnostics {
+    pub(crate) fn new(
+        source: &'src [u8],
+        purpose: ParsePurpose,
+        skip_shebang: bool,
+    ) -> (Self, ScanReport) {
+        let lexer = Lexer::new_bytes(source).with_doc_comments();
+        let lexer = if skip_shebang {
+            lexer.after_shebang()
+        } else {
+            lexer
+        };
+        let mut lexer = if purpose == ParsePurpose::Compilation {
             lexer.with_diagnostics(ScanMode::Parsed)
         } else {
             lexer
@@ -70,20 +81,58 @@ impl<'src> Parser<'src> {
 
         let parser = Self {
             source,
+            purpose,
             tokens,
+            doc_comments: lexer.take_doc_comments(),
             pos: 0,
             lex_error,
             prev_end: 0,
-            depth: 0,
+            nesting: Nesting::default(),
+            saw_yield: false,
             halted: false,
         };
         (parser, lexer.into_diagnostics())
+    }
+
+    /// A nested function's yields never make its lexical parent a generator.
+    pub(crate) fn generator_body<T>(
+        &mut self,
+        parse: impl FnOnce(&mut Self) -> Result<T, ParseError>,
+    ) -> Result<(T, bool), ParseError> {
+        let enclosing = std::mem::replace(&mut self.saw_yield, false);
+        let body = parse(self);
+        let is_generator = std::mem::replace(&mut self.saw_yield, enclosing);
+        body.map(|body| (body, is_generator))
     }
 
     pub(crate) fn parse_program(mut self) -> Result<Program, ParseError> {
         let statements = self.parse_top_level(&[])?;
         if self.at(TokenKind::RightBrace) {
             return Err(self.error("unexpected '}'"));
+        }
+        if self.purpose == ParsePurpose::Syntax {
+            return Ok(Program { statements });
+        }
+        let mut body = statements
+            .iter()
+            .skip_while(|statement| matches!(statement.kind, StatementKind::Declare { .. }));
+        let first_style = body.next().and_then(|statement| match statement.kind {
+            StatementKind::Namespace { braced, .. } => Some(braced),
+            _ => None,
+        });
+        for statement in body {
+            if let StatementKind::Namespace { braced, .. } = statement.kind {
+                let message = match first_style {
+                    None => {
+                        "Namespace declaration statement has to be the very first statement or after any declare call in the script"
+                    }
+                    Some(first) if first != braced => {
+                        "Cannot mix bracketed namespace declarations with unbracketed namespace declarations"
+                    }
+                    Some(_) => continue,
+                };
+                return Err(ParseError::compile(message, statement.span));
+            }
         }
         Ok(Program { statements })
     }
@@ -151,6 +200,10 @@ impl<'src> Parser<'src> {
         &self.tokens[(self.pos + 1).min(self.tokens.len() - 1)]
     }
 
+    pub(crate) fn second_span(&self) -> Span {
+        self.second().span
+    }
+
     /// The kind of the current token.
     pub(crate) fn kind(&self) -> TokenKind {
         self.current().kind
@@ -169,6 +222,22 @@ impl<'src> Parser<'src> {
     /// The kind of the token three positions ahead.
     pub(crate) fn kind4(&self) -> TokenKind {
         self.tokens[(self.pos + 3).min(self.tokens.len() - 1)].kind
+    }
+
+    /// Doc comment immediately before this token, if the scanner saw one.
+    pub(crate) fn doc_comment(&self) -> Option<Span> {
+        if self.doc_comments.is_empty() {
+            return None;
+        }
+        self.doc_comment_before(self.peek_span().start)
+    }
+
+    pub(crate) fn doc_comment_before(&self, offset: usize) -> Option<Span> {
+        let index = self
+            .doc_comments
+            .binary_search_by_key(&offset, |(start, _)| *start)
+            .ok()?;
+        self.doc_comments.get(index).map(|(_, comment)| *comment)
     }
 
     pub(crate) fn peek_span(&self) -> Span {
@@ -283,25 +352,11 @@ impl<'src> Parser<'src> {
         }
     }
 
-    // --- Spans and recursion ---------------------------------------------------
+    // --- Spans ------------------------------------------------------------------
 
     /// A span from `start` up to the end of the last consumed token.
     pub(crate) fn span_since(&self, start: Span) -> Span {
         Span::new(start.start, self.prev_end)
-    }
-
-    /// Enters a recursive parsing routine, refusing absurd nesting depth.
-    pub(crate) fn enter(&mut self) -> Result<(), ParseError> {
-        self.depth += 1;
-        if self.depth > MAX_DEPTH {
-            self.depth -= 1;
-            return Err(self.error("expression or statement nesting is too deep"));
-        }
-        Ok(())
-    }
-
-    pub(crate) fn leave(&mut self) {
-        self.depth -= 1;
     }
 }
 

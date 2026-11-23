@@ -10,6 +10,7 @@ pub(crate) enum ArgumentOrigin {
     #[default]
     Php,
     Callback,
+    Attribute,
 }
 
 /// Explicit Closure::__invoke is an internal wrapper, even when called from PHP syntax.
@@ -17,6 +18,8 @@ pub(crate) enum ArgumentOrigin {
 pub(crate) enum ArgumentBinding {
     #[default]
     Caller,
+    /// Zend compiled an operator such as `strlen($text)`, without a call frame.
+    Frameless,
     Internal,
 }
 
@@ -24,9 +27,13 @@ impl ArgumentBinding {
     /// Closure wrappers apply internal binding even when entered from PHP.
     pub(crate) fn origin(self, caller: ArgumentOrigin) -> ArgumentOrigin {
         match self {
-            Self::Caller => caller,
+            Self::Caller | Self::Frameless => caller,
             Self::Internal => ArgumentOrigin::Callback,
         }
+    }
+
+    pub(crate) fn has_native_frame(self) -> bool {
+        !matches!(self, Self::Frameless)
     }
 }
 
@@ -34,7 +41,7 @@ impl ArgumentOrigin {
     /// Internal callback TypeErrors omit a PHP call-site suffix.
     pub(crate) fn location_suffix(self, file: &str, line: usize) -> String {
         match self {
-            Self::Php => format!(", called in {file} on line {line}"),
+            Self::Php | Self::Attribute => format!(", called in {file} on line {line}"),
             Self::Callback => String::new(),
         }
     }

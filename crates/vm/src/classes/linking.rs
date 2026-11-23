@@ -4,112 +4,281 @@ use std::{rc::Rc, sync::Arc};
 
 use phera_bytecode::{ClassId, ClassKind, CompiledUnit, Visibility};
 use phera_extension_api::NativeError;
-use phera_value::{ArrayKey, Object};
 
-use super::class::PropertyDefault;
 use super::{Class, Method, MethodBody};
-use crate::Vm;
+use crate::{Vm, code_table::FunctionIndex};
 
 impl Vm {
     /// Hoist only declarations whose dependencies are available; deferred ones execute normally.
-    pub(crate) fn hoist_classes(&mut self, unit: &Arc<CompiledUnit>) -> Result<(), NativeError> {
-        let mut pending = unit.hoisted_classes.clone();
-        loop {
-            let before = pending.len();
-            let mut deferred = Vec::new();
-            for index in pending {
-                let declaration = &unit.classes[index.index()];
-                if declaration
-                    .parent
-                    .iter()
-                    .chain(&declaration.interfaces)
-                    .all(|symbol| {
-                        self.classes
-                            .get(&unit.symbols[symbol.index()].name)
-                            .is_some()
-                    })
+    pub(crate) fn hoist_classes(
+        &mut self,
+        unit: &Arc<CompiledUnit>,
+        unit_first: FunctionIndex,
+    ) -> Result<(), NativeError> {
+        for &index in &unit.hoisted_classes {
+            let declaration = &unit.classes[index.index()];
+            if declaration.interfaces.is_empty()
+                && declaration.parent.is_none_or(|parent| {
+                    self.classes
+                        .get(&unit.symbols[parent.index()].written)
+                        .is_some()
+                })
+            {
+                if self
+                    .classes
+                    .by_key(self.code.unit_class_key(unit_first, index))
+                    .is_some()
                 {
-                    self.link_class(unit.clone(), index)?;
-                    self.prelinked_classes
-                        .insert((Arc::as_ptr(unit) as usize, index.index()));
-                } else {
-                    deferred.push(index);
+                    continue;
                 }
+                if let Err(error) = self.link_new_class(unit, unit_first, index) {
+                    if crate::autoload::ClassMiss::is(&error) {
+                        continue;
+                    }
+                    return Err(error);
+                }
+                self.prelinked_classes
+                    .insert((Arc::as_ptr(unit) as usize, index.index()));
             }
-            if deferred.len() == before || deferred.is_empty() {
-                return Ok(());
-            }
-            pending = deferred;
         }
+        Ok(())
     }
 
     /// Runtime declarations are not idempotent; only the exact prelinked instruction is skipped.
     pub(crate) fn declare_class(&mut self, index: ClassId) -> Result<(), NativeError> {
-        let unit = self
+        let frame = self
             .current()
-            .ok_or_else(|| internal_error!("class frame"))?
-            .unit()
-            .clone();
+            .ok_or_else(|| internal_error!("class frame"))?;
+        let unit_first = self.code.facts(frame.frame.function).unit_first;
+        let unit = frame.unit().clone();
         if self
             .prelinked_classes
             .remove(&(Arc::as_ptr(&unit) as usize, index.index()))
         {
             return Ok(());
         }
-        self.link_class(unit, index)
+        let declaration = &unit.classes[index.index()];
+        if let Some(existing) = self
+            .classes
+            .by_key(self.code.unit_class_key(unit_first, index))
+        {
+            if declaration.kind == ClassKind::Anonymous {
+                return Ok(());
+            }
+            return Err(super::declaration_errors::link_failure(
+                &unit,
+                index,
+                NativeError::error(self.class_redeclaration_message(existing, &existing.name)),
+            ));
+        }
+        self.link_new_class(&unit, unit_first, index)
+            .map_err(|error| crate::autoload::ClassMiss::during_declaration(error, &unit, index))
     }
 
-    /// Copy inherited tables and validate structural dependencies before publishing a class.
-    fn link_class(&mut self, unit: Arc<CompiledUnit>, index: ClassId) -> Result<(), NativeError> {
-        self.link_class_body(unit.clone(), index)
-            .map_err(|error| super::declaration_errors::link_failure(&unit, index, error))
+    /// The caller has checked that the declaration's name is available.
+    pub(crate) fn link_new_class(
+        &mut self,
+        unit: &Arc<CompiledUnit>,
+        unit_first: FunctionIndex,
+        index: ClassId,
+    ) -> Result<(), NativeError> {
+        match self.reusable_entry(unit, unit_first, index) {
+            Reuse::Entry(entry) => {
+                self.declare_linked(&entry, unit, unit_first, index);
+                return Ok(());
+            }
+            Reuse::Missing(error) => {
+                return Err(super::declaration_errors::link_failure(unit, index, error));
+            }
+            Reuse::Link => {}
+        }
+        self.classes.begin_link();
+        self.code.begin_imports();
+        let raised = self.diagnostic_reporter.raised;
+        let linked = self.link_class_body(unit, unit_first, index);
+        let (dependencies, position) = self.classes.end_link();
+        let imports = self.code.end_imports();
+        if let Err(mut error) = linked {
+            if dependencies.is_none() || self.diagnostic_reporter.raised != raised {
+                crate::autoload::ClassMiss::keep_pending_shape(&mut error);
+            }
+            if let Some(position) = position {
+                self.classes.lease_position(position);
+            }
+            return Err(super::declaration_errors::link_failure(unit, index, error));
+        }
+        let declaration = &unit.classes[index.index()];
+        let key = declaration.name.to_ascii_lowercase();
+        // A class whose linking raised a diagnostic is linked by each request
+        // that declares it, so that each sees the diagnostic (and runs its
+        // handler); an anonymous class is the request's. An enum is shared
+        // like any class: its case objects are the request's, made on first
+        // use (`EnumCases`). Only a file revision from the code cache has a
+        // number to key the entry by: `eval`'d code's classes are the request's.
+        let shared = raised == self.diagnostic_reporter.raised
+            && unit.metadata.is_some()
+            && declaration.kind != ClassKind::Anonymous;
+        if shared
+            && let Some(dependencies) = dependencies
+            && let Some(position) = position
+            && let Some(class) = self.classes.at_position(position)
+        {
+            for (number, _, _) in &imports {
+                self.code.keep_import(*number);
+            }
+            self.classes.worker().add(
+                unit,
+                index.index() as u32,
+                position,
+                super::worker_classes::EntryFacts {
+                    class,
+                    lowercase_name: key,
+                    dependencies,
+                    imports,
+                },
+            );
+        } else if let Some(position) = position {
+            self.classes.lease_position(position);
+            self.classes.own_name(&key, position);
+        }
+        Ok(())
+    }
+
+    /// A class another request of the worker linked from this declaration,
+    /// usable here: every class name its linking looked up is the same class
+    /// (or no class) in this request.
+    ///
+    /// An entry whose lookups match up to a parent, interface or trait of the
+    /// declaration that is not declared yet in this request is the common
+    /// case of a class the request declares before what it extends (an
+    /// autoloader loads `Manager` before its trait). Linking it again would
+    /// make the same lookups and miss at that name, so the miss is raised
+    /// here, as linking raises it: the autoloader declares the name, and the
+    /// declaration then finds the entry usable.
+    fn reusable_entry(
+        &self,
+        unit: &Arc<CompiledUnit>,
+        unit_first: FunctionIndex,
+        index: ClassId,
+    ) -> Reuse {
+        let declaration = &unit.classes[index.index()];
+        let missing = std::cell::Cell::new(None);
+        let found = self
+            .classes
+            .worker()
+            .find_entry(unit, index.index() as u32, |entry| {
+                for (key, number) in &entry.dependencies {
+                    let now = self.classes.resolve_number(*key);
+                    if now == *number {
+                        continue;
+                    }
+                    if now.is_none() && number.is_some() && missing.get().is_none() {
+                        missing.set(self.inherited_dependency(unit, unit_first, declaration, *key));
+                    }
+                    return false;
+                }
+                !self.inherits_from_pending_type(&entry.dependencies)
+            });
+        match (found, missing.take()) {
+            (Some(entry), _) => Reuse::Entry(entry),
+            (None, Some((written, kind))) => Reuse::Missing(Self::class_miss(written, kind)),
+            (None, None) => Reuse::Link,
+        }
+    }
+
+    /// Declares a class another request linked: what linking records in the
+    /// request (its methods' class scope, its composed trait methods) is
+    /// written again, and the class is declared under its name.
+    fn declare_linked(
+        &mut self,
+        entry: &super::worker_classes::EntryFacts,
+        unit: &Arc<CompiledUnit>,
+        unit_first: FunctionIndex,
+        index: ClassId,
+    ) {
+        let class = entry.class.clone();
+        let declaration = &unit.classes[index.index()];
+        for method in &declaration.methods {
+            let function = self.code.declared(unit_first, method.function.index());
+            self.code.set_declaring_class(function, class.index);
+        }
+        for property in &declaration.properties {
+            if let Some(hooks) = &property.hooks {
+                for hook in hooks.get.iter().chain(&hooks.set) {
+                    let function = self.code.declared(unit_first, hook.function.index());
+                    self.code.set_declaring_class(function, class.index);
+                }
+            }
+        }
+        for import in &entry.imports {
+            self.code.write_import(import, class.index);
+        }
+        self.classes.declare_entry(class);
     }
 
     /// Structural declaration failures are fatal; missing dependencies remain catchable Errors.
     fn link_class_body(
         &mut self,
-        unit: Arc<CompiledUnit>,
-        index: ClassId,
+        unit: &Arc<CompiledUnit>,
+        unit_first: FunctionIndex,
+        declaration_index: ClassId,
     ) -> Result<(), NativeError> {
-        let declaration = &unit.classes[index.index()];
+        let declaration = &unit.classes[declaration_index.index()];
         let name = &declaration.name;
-        if let Some(existing) = self.classes.get(name) {
-            return Err(NativeError::error(format!(
-                "Cannot redeclare class {}",
-                existing.name
-            )));
-        }
         let parent = declaration
             .parent
             .map(|symbol| {
                 let parent_name = &unit.symbols[symbol.index()].written;
-                self.classes
-                    .get(parent_name)
-                    .ok_or_else(|| NativeError::error(format!("Class \"{parent_name}\" not found")))
+                self.class_for_inheritance(parent_name)
+                    .ok_or_else(|| Self::class_miss(parent_name, "Class"))
             })
             .transpose()?;
         if let Some(parent) = &parent {
+            let display = name.split('\0').next().unwrap_or(name);
+            if parent.kind == ClassKind::Enum {
+                return Err(NativeError::error(format!(
+                    "Class {display} cannot extend enum {}",
+                    parent.name
+                )));
+            }
             if parent.is_final {
                 return Err(NativeError::error(format!(
-                    "Class {name} cannot extend final class {}",
+                    "Class {display} cannot extend final class {}",
                     parent.name
                 )));
             }
             if parent.kind == ClassKind::Interface {
                 return Err(NativeError::error(format!(
-                    "Class {name} cannot extend interface {}",
+                    "Class {display} cannot extend interface {}",
+                    parent.name
+                )));
+            }
+            if parent.kind == ClassKind::Trait {
+                return Err(NativeError::error(format!(
+                    "Class {display} cannot extend trait {}",
+                    parent.name
+                )));
+            }
+            if declaration.is_readonly != parent.is_readonly {
+                let (child, inherited) = if declaration.is_readonly {
+                    ("Readonly", "non-readonly")
+                } else {
+                    ("Non-readonly", "readonly")
+                };
+                return Err(NativeError::error(format!(
+                    "{child} class {display} cannot extend {inherited} class {}",
                     parent.name
                 )));
             }
         }
-        let interfaces = declaration
+        let mut interfaces = declaration
             .interfaces
             .iter()
             .map(|symbol| {
                 let interface_name = &unit.symbols[symbol.index()].written;
-                let interface = self.classes.get(interface_name).ok_or_else(|| {
-                    NativeError::error(format!("Interface \"{interface_name}\" not found"))
-                })?;
+                let interface = self
+                    .class_for_inheritance(interface_name)
+                    .ok_or_else(|| Self::class_miss(interface_name, "Interface"))?;
                 if interface.kind != ClassKind::Interface {
                     return Err(NativeError::error(format!(
                         "{name} cannot implement {interface_name} - it is not an interface"
@@ -118,6 +287,18 @@ impl Vm {
                 Ok(interface)
             })
             .collect::<Result<Vec<_>, NativeError>>()?;
+        let mut seen = std::collections::HashSet::new();
+        if let Some(duplicate) = interfaces
+            .iter()
+            .find(|interface| !seen.insert(interface.index))
+        {
+            let kind = declaration.kind.description();
+            return Err(NativeError::error(format!(
+                "{kind} {name} cannot implement previously implemented interface {}",
+                duplicate.name
+            )));
+        }
+        self.link_enum_interfaces(declaration, &mut interfaces)?;
         if declaration.kind != ClassKind::Interface
             && interfaces
                 .iter()
@@ -126,15 +307,52 @@ impl Vm {
                 .as_ref()
                 .is_none_or(|parent| !parent.is_a("Throwable"))
         {
+            if declaration.kind == ClassKind::Enum {
+                return Err(NativeError::error(format!(
+                    "Enum {name} cannot implement interface Throwable"
+                )));
+            }
             return Err(NativeError::error(format!(
                 "Class {name} cannot implement interface Throwable, extend Exception or \
                  Error instead"
             )));
         }
+        use super::operations::ClassOperations;
+        let operations = ClassOperations::link(name, parent.as_deref(), &interfaces);
+        if !matches!(declaration.kind, ClassKind::Trait | ClassKind::Interface) {
+            let name = super::trait_methods::display(name);
+            let iterator = operations.has(ClassOperations::ITERATOR);
+            let aggregate = operations.has(ClassOperations::AGGREGATE);
+            if iterator && aggregate {
+                return Err(NativeError::error(format!(
+                    "Class {name} cannot implement both Iterator and IteratorAggregate at the same time"
+                )));
+            }
+            if operations.has(ClassOperations::TRAVERSABLE)
+                && !iterator
+                && !aggregate
+                && !declaration.is_abstract
+                && parent.as_ref().is_none_or(|parent| {
+                    !parent.operations.has(ClassOperations::TRAVERSABLE) || parent.is_abstract
+                })
+            {
+                let kind = declaration.kind.description();
+                return Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
+                    crate::error_traces::DeclarationFailure {
+                        message: format!(
+                            "{kind} {name} must implement interface Traversable as part of either Iterator or IteratorAggregate"
+                        ),
+                        file: "Unknown".into(),
+                        line: 0,
+                    },
+                ))));
+            }
+        }
         let mut methods = parent
             .as_ref()
             .map(|class| class.methods.clone())
             .unwrap_or_default();
+        let mut pending = Vec::new();
         for method in &declaration.methods {
             let method_name = &unit.names[method.name.index()];
             let linked = Rc::new(Method {
@@ -145,21 +363,153 @@ impl Vm {
                 is_static: method.is_static,
                 is_final: method.is_final,
                 is_abstract: method.is_abstract,
-                body: MethodBody::User(self.code.index_in(&unit, Some(method.function.index()))),
+                body: MethodBody::User(self.code.declared(unit_first, method.function.index())),
             });
-            if let Some(inherited) = methods.get(&method_name.to_ascii_lowercase()) {
-                super::inheritance_checks::check_override(name, inherited, &linked)?;
-                self.check_method_contract(inherited, &linked, &unit)?;
+            let key = method_name.to_ascii_lowercase();
+            if unit.has_link_attributes
+                && unit
+                    .function_metadata
+                    .get(method.function.index())
+                    .is_some_and(|metadata| {
+                        crate::attribute_diagnostics::attribute(
+                            &metadata.declaration.attributes,
+                            "Override",
+                        )
+                        .is_some()
+                    })
+                && methods
+                    .get(&key)
+                    .is_none_or(|method| method.visibility == Visibility::Private)
+                && !interfaces
+                    .iter()
+                    .any(|interface| interface.methods.contains_key(&key))
+            {
+                return Err(super::declaration_errors::method_failure(
+                    &self.code,
+                    &linked,
+                    NativeError::error(format!(
+                        "{name}::{method_name}() has #[\\Override] attribute, but no matching parent method exists"
+                    )),
+                ));
             }
-            methods.insert(method_name.to_ascii_lowercase(), linked);
+            if let Some(inherited) = methods.get(&key) {
+                super::inheritance_checks::check_override(name, inherited, &linked)
+                    .map_err(|error| self.magic_override_error(&linked, error))?;
+                let prototype = if key == "__construct" && !inherited.is_abstract {
+                    abstract_constructor(parent.as_deref()).unwrap_or(inherited)
+                } else {
+                    inherited
+                };
+                if let Some(miss) = self.check_method_contract(prototype, &linked, unit)?
+                    && let Some(parent) = &parent
+                {
+                    pending.push((
+                        (0, Some(self.method_listing_order(parent, inherited))),
+                        miss,
+                    ));
+                }
+            }
+            methods.insert(key, linked);
         }
-        for interface in &interfaces {
-            for (name, method) in &interface.methods {
-                if let Some(implementation) = methods.get(name) {
-                    self.check_method_contract(method, implementation, &unit)?;
+        let mut enum_info = self.install_enum_methods(declaration, &mut methods)?;
+        let traits = self.resolve_traits(declaration)?;
+        if !traits.is_empty() {
+            let trait_variance =
+                self.compose_trait_methods(declaration, unit, &traits, &mut methods)?;
+            // PHP checks concrete trait imports in the same parent-method order
+            // as methods written on the class, then checks the trait requirements.
+            if let Some(parent) = &parent {
+                pending.extend(
+                    trait_variance
+                        .overrides
+                        .into_iter()
+                        .map(|(inherited, miss)| {
+                            (
+                                (0, Some(self.method_listing_order(parent, &inherited))),
+                                miss,
+                            )
+                        }),
+                );
+            }
+            pending.extend(
+                trait_variance
+                    .requirements
+                    .into_iter()
+                    .map(|miss| ((1, None), miss)),
+            );
+        }
+        if enum_info.is_some() {
+            super::enums::check_magic_methods(name, &methods)?;
+        }
+        if declaration.kind != ClassKind::Trait
+            && let Some(method) = methods.get("__tostring")
+        {
+            if method.visibility != Visibility::Public
+                && let MethodBody::User(function) = method.body
+            {
+                let file = self.code.unit(function).file.clone();
+                let line = self.code.function(function).definition_line as usize;
+                let message = format!(
+                    "Access level to {}::{}() must be public (as in class Stringable)",
+                    phera_value::class_display_name(&method.declaring),
+                    method.name
+                );
+                return Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
+                    crate::error_traces::DeclarationFailure {
+                        message,
+                        file,
+                        line,
+                    },
+                ))));
+            }
+            if !interfaces
+                .iter()
+                .any(|interface| interface.is_a("Stringable"))
+                && !parent
+                    .as_ref()
+                    .is_some_and(|parent| parent.is_a("Stringable"))
+                && let Some(stringable) = self.classes.get("Stringable")
+            {
+                interfaces.push(stringable);
+            }
+        }
+        for (index, interface) in interfaces.iter().enumerate() {
+            for (method_name, method) in &interface.methods {
+                if let Some(implementation) = methods.get(method_name) {
+                    let native = matches!(method.body, MethodBody::Native(entry) if entry.return_type.is_some());
+                    if native
+                        || matches!(declaration.kind, ClassKind::Enum | ClassKind::Anonymous)
+                        || !traits.is_empty()
+                    {
+                        super::inheritance_checks::check_override(
+                            super::trait_methods::display(name),
+                            method,
+                            implementation,
+                        )
+                        .map_err(|error| {
+                            if native {
+                                super::declaration_errors::method_failure(
+                                    &self.code,
+                                    implementation,
+                                    error,
+                                )
+                            } else {
+                                error
+                            }
+                        })?;
+                    }
+                    if let Some(miss) = self.check_method_contract(method, implementation, unit)? {
+                        pending.push((
+                            (
+                                index + 2,
+                                Some(self.method_listing_order(interface, method)),
+                            ),
+                            miss,
+                        ));
+                    }
                 }
                 methods
-                    .entry(name.clone())
+                    .entry(method_name.clone())
                     .or_insert_with(|| method.clone());
             }
         }
@@ -167,208 +517,214 @@ impl Vm {
             name,
             declaration.kind,
             declaration.is_abstract,
+            declaration.is_final,
             &methods,
-            &interfaces,
+            &self.registry,
         )?;
-        let mut defaults = parent
-            .as_ref()
-            .map(|class| class.defaults.clone())
-            .unwrap_or_default();
-        let mut constants = parent
-            .as_ref()
-            .map(|class| class.constants.clone())
-            .unwrap_or_default();
-        super::declaration_errors::merge_interface_constants(
+        let hooks = super::operations::user_hooks(&methods, parent.as_deref(), operations);
+        let mut constants =
+            self.link_class_constants(declaration, unit, unit_first, parent.as_ref(), &interfaces)?;
+        let (mut defaults, mut static_properties) = self.link_class_properties(
             declaration,
-            &unit,
+            unit,
+            unit_first,
+            parent.as_ref(),
             &interfaces,
-            &mut constants,
         )?;
-        for constant in &declaration.constants {
-            let constant_name = unit.names[constant.name.index()].clone();
-            if let Some(inherited) = constants.get(&constant_name) {
-                let narrower = match inherited.visibility {
-                    Visibility::Public => constant.visibility != Visibility::Public,
-                    Visibility::Protected => constant.visibility == Visibility::Private,
-                    Visibility::Private => false,
-                };
-                if narrower {
-                    let visibility = match inherited.visibility {
-                        Visibility::Public => "public",
-                        Visibility::Protected => "protected",
-                        Visibility::Private => unreachable!(),
-                    };
-                    return Err(NativeError::error(format!(
-                        "Access level to {name}::{constant_name} must be {visibility} \
-                         (as in class {})",
-                        inherited.declaring
-                    )));
-                }
-            }
-            if constants
-                .get(&constant_name)
-                .is_some_and(|constant| constant.is_final)
-            {
-                let declaring = constants[&constant_name].declaring.clone();
-                return Err(NativeError::error(format!(
-                    "{name}::{constant_name} cannot override final constant \
-                     {declaring}::{constant_name}"
-                )));
-            }
-            if let Some(inherited) = constants.get(&constant_name)
-                && inherited.visibility != Visibility::Private
-                && let Some(expected) = &inherited.ty
-            {
-                let declared = constant.ty.map(|index| &unit.types[index.index()]);
-                let compatible = self.type_subset(
-                    declared.map(|declared| declared.display.as_str()),
-                    name,
-                    Some(&expected.display),
-                    &inherited.declaring,
-                    &unit,
-                );
-                if !compatible {
-                    return Err(NativeError::error(format!(
-                        "Type of {name}::{constant_name} must be compatible with \
-                         {}::{constant_name} of type {}",
-                        inherited.declaring, expected.display
-                    )));
-                }
-            }
-            constants.insert(
-                constant_name,
-                Rc::new(super::LinkedConstant {
-                    deprecated: None,
-                    declaring: name.clone(),
-                    visibility: constant.visibility,
-                    is_final: constant.is_final,
-                    initializer: super::class::ConstantInitializer::Compiled {
-                        function: self
-                            .code
-                            .index_in(&unit, Some(constant.initializer.index())),
-                        state: std::cell::RefCell::new(super::ConstantState::Uninitialized),
-                    },
-                    ty: constant.ty.map(|index| unit.types[index.index()].clone()),
-                }),
-            );
-        }
-        let mut static_properties = parent
-            .as_ref()
-            .map(|class| class.static_properties.clone())
-            .unwrap_or_default();
-        for property in &declaration.properties {
-            let property_name = &unit.names[property.name.index()];
-            let key = match property.visibility {
-                Visibility::Public => ArrayKey::str(property_name.as_bytes()),
-                Visibility::Protected => Object::protected_key(property_name),
-                Visibility::Private => Object::private_key(name, property_name),
-            };
-            let value = match property.default {
-                Some(phera_bytecode::Initializer::Literal(index)) => {
-                    crate::unit_caches::value(&unit.constants[index.index()])
-                }
-                _ => phera_value::Value::Null,
-            };
-            let mut linked = PropertyDefault {
-                key: key.clone(),
-                static_storage: property
-                    .is_static
-                    .then(|| crate::reference_holders::StaticProperty::new(value.clone())),
-                value,
-                name: property_name.clone(),
-                declaring: name.clone(),
-                visibility: property.visibility,
-                initialized: property.default.is_some() || property.ty.is_none(),
-                initializer: match property.default {
-                    Some(phera_bytecode::Initializer::Function(index)) => {
-                        Some(self.code.index_in(&unit, Some(index.index())))
-                    }
-                    _ => None,
-                },
-                ty: property.ty.map(|index| unit.types[index.index()].clone()),
-                is_readonly: property.is_readonly,
-                static_initialized: Rc::new(std::cell::Cell::new(false)),
-                value_initialized: Rc::new(std::cell::Cell::new(
-                    property.default.is_some() || property.ty.is_none(),
-                )),
-            };
-            if let Some(value) = linked
-                .initializer
-                .as_ref()
-                .and_then(|reference| super::class::literal_initializer(&self.code, reference))
-            {
-                if property.is_static {
-                    if let Some(storage) = &linked.static_storage {
-                        *storage.reference.borrow().borrow_mut() = value;
-                    }
-                } else {
-                    linked.value = value;
-                }
-                linked.initializer = None;
-            }
-            let inherited = if property.is_static {
-                &static_properties
-            } else {
-                &defaults
-            };
-            super::declaration_errors::check_property_visibility(
-                name,
-                property,
-                property_name,
-                inherited,
+        if !traits.is_empty() {
+            self.compose_trait_members(
+                declaration,
+                unit,
+                &traits,
+                &mut defaults,
+                &mut static_properties,
+                &mut constants,
             )?;
-            let target = if property.is_static {
-                &mut static_properties
-            } else {
-                &mut defaults
-            };
-            if let Some(inherited) = target.iter_mut().find(|entry| entry.key == key) {
-                *inherited = linked;
-            } else {
-                target.push(linked);
+        }
+        if declaration.kind != ClassKind::Trait {
+            self.check_trait_property_overrides(
+                declaration,
+                unit,
+                &traits,
+                parent.as_deref(),
+                &interfaces,
+            )?;
+            for property in defaults
+                .iter()
+                .filter(|property| property.declaring == *name)
+            {
+                self.check_hook_overrides(property, parent.as_deref(), &interfaces)?;
             }
+        }
+        self.link_property_contracts(declaration, unit, &interfaces, &mut defaults)?;
+        if let Some(enum_info) = &mut enum_info {
+            self.link_enum_members(
+                declaration,
+                unit,
+                enum_info,
+                &mut defaults,
+                &static_properties,
+                &mut constants,
+            )?;
         }
         let allows_dynamic_properties = declaration.allows_dynamic_properties
             || parent
                 .as_ref()
                 .is_some_and(|parent| parent.allows_dynamic_properties);
-        let property_access = parent.as_ref().and_then(|parent| parent.property_access);
         let is_throwable = parent.as_ref().is_some_and(|parent| parent.is_throwable)
             || interfaces.iter().any(|interface| interface.is_throwable);
-        self.classes.order.push(name.clone());
         let index = self.classes.next_index();
         for method in &declaration.methods {
-            let function = self.code.index_in(&unit, Some(method.function.index()));
+            let function = self.code.declared(unit_first, method.function.index());
             self.code.set_declaring_class(function, index);
         }
-        self.classes.insert(
-            name.to_ascii_lowercase(),
-            Rc::new_cyclic(|identity| Class {
-                index,
-                origin: super::class::ClassOrigin::User,
-                identity: identity.clone(),
-                declaration_matches: std::cell::RefCell::new(std::collections::HashMap::new()),
-                ancestors: super::class::ancestor_names(&parent, &interfaces),
-                name_value: phera_value::Value::from(name.as_str()),
-                name: name.clone(),
-                parent,
-                interfaces,
-                kind: declaration.kind,
-                is_abstract: declaration.is_abstract,
-                is_throwable,
-                is_final: declaration.is_final,
-                is_readonly: declaration.is_readonly,
-                allows_dynamic_properties,
-                property_access,
-                constructor: methods.get("__construct").cloned(),
-                methods,
-                method_table: std::cell::OnceCell::new(),
-                property_template: super::class::property_template(&defaults),
-                defaults,
-                static_properties,
-                constants,
-            }),
-        );
+        for property in &declaration.properties {
+            if let Some(hooks) = &property.hooks {
+                for hook in hooks.get.iter().chain(&hooks.set) {
+                    let function = self.code.declared(unit_first, hook.function.index());
+                    self.code.set_declaring_class(function, index);
+                }
+            }
+        }
+        let declaration_location = Some((unit_first, declaration_index));
+        let operations = operations.with_native_dimensions(hooks.as_deref(), &methods);
+        let layout = super::class::property_layout(&defaults);
+        let property_template = super::class::property_template(&defaults, layout.as_ref());
+        let class = Rc::new_cyclic(|identity| Class {
+            index,
+            property_access: hooks.as_ref().and_then(|hooks| hooks.property_access),
+            hooks,
+            operations,
+            origin: super::class::ClassOrigin::User,
+            identity: identity.clone(),
+            declaration_matches: std::cell::RefCell::new(std::collections::HashMap::new()),
+            ancestors: super::class::ancestor_names(&parent, &interfaces),
+            name_value: phera_value::Value::interned(name.as_bytes()),
+            name: name.clone(),
+            has_native_layout: parent.as_ref().is_some_and(|class| class.has_native_layout),
+            parent,
+            interfaces,
+            traits: traits
+                .into_iter()
+                .map(|used_trait| used_trait.name.clone())
+                .collect(),
+            enum_info,
+            kind: declaration.kind,
+            is_abstract: declaration.is_abstract,
+            is_throwable,
+            is_final: declaration.is_final,
+            is_readonly: declaration.is_readonly,
+            allows_dynamic_properties,
+            property_facts: std::cell::OnceCell::new(),
+            constructor: methods.get("__construct").cloned(),
+            magic: super::magic::MagicMethods::link(&methods),
+            methods,
+            method_table: std::cell::OnceCell::new(),
+            serialized_fields: std::cell::OnceCell::new(),
+            property_template,
+            layout,
+            property_names: super::property_names::PropertyNames::new(&defaults),
+            defaults,
+            static_properties,
+            constants,
+            declaration: declaration_location,
+        });
+        self.deprecate_legacy_serializable(&class, &unit.file, declaration.line as usize);
+        if class.kind == ClassKind::Enum && class.is_a("Serializable") {
+            return Err(NativeError::error(format!(
+                "Enum {name} cannot implement the Serializable interface"
+            )));
+        }
+        if !pending.is_empty()
+            || class
+                .parent
+                .iter()
+                .chain(&class.interfaces)
+                .any(|dependency| self.is_pending_class(dependency.index))
+        {
+            pending.sort_by(|(left, _), (right, _)| left.cmp(right));
+            return Err(crate::autoload::ClassMiss::method_signatures(
+                crate::autoload::PendingClass {
+                    class,
+                    unit: unit.clone(),
+                    methods: pending.into_iter().map(|(_, miss)| miss).collect(),
+                    requested: Default::default(),
+                    publication: std::cell::Cell::new(
+                        if unit.metadata.is_some() && declaration.kind != ClassKind::Anonymous {
+                            crate::autoload::PendingPublication::RetryLink
+                        } else {
+                            crate::autoload::PendingPublication::KeepShape
+                        },
+                    ),
+                },
+            ));
+        }
+        self.classes.insert(class);
         Ok(())
+    }
+}
+
+/// A concrete constructor does not erase an ancestor's abstract signature.
+fn abstract_constructor(mut parent: Option<&Class>) -> Option<&Rc<Method>> {
+    while let Some(class) = parent {
+        if let Some(method) = class
+            .methods
+            .get("__construct")
+            .filter(|method| method.is_abstract)
+        {
+            return Some(method);
+        }
+        parent = class.parent.as_deref();
+    }
+    None
+}
+
+/// What [`Vm::reusable_entry`] found for a declaration.
+enum Reuse {
+    /// A class another request linked, usable as it is.
+    Entry(Rc<super::worker_classes::EntryFacts>),
+    /// Linking would miss this parent, interface or trait.
+    Missing(NativeError),
+    /// The class must be linked.
+    Link,
+}
+
+impl Vm {
+    /// The name as written and the kind linking reports a miss of it as,
+    /// when `key` is the declaration's parent, one of its interfaces or one
+    /// of its traits.
+    fn inherited_dependency<'a>(
+        &self,
+        unit: &'a CompiledUnit,
+        unit_first: FunctionIndex,
+        declaration: &'a phera_bytecode::ClassDeclaration,
+        key: phera_bytecode::NameKey,
+    ) -> Option<(&'a str, &'static str)> {
+        let written =
+            |symbol: &phera_bytecode::SymbolId| unit.symbols[symbol.index()].written.as_str();
+        let is_key = |symbol: &phera_bytecode::SymbolId| {
+            self.code.unit_symbol_key(unit_first, *symbol) == key
+        };
+        if let Some(parent) = declaration.parent.as_ref().filter(|parent| is_key(parent)) {
+            return Some((written(parent), "Class"));
+        }
+        if let Some(interface) = declaration
+            .interfaces
+            .iter()
+            .find(|interface| is_key(interface))
+        {
+            return Some((written(interface), "Interface"));
+        }
+        // A trait is named by its written name: its key is made here, on the
+        // way to a miss.
+        declaration
+            .traits
+            .iter()
+            .flat_map(|usage| &usage.names)
+            .find(|name| {
+                let lowercase = name.trim_start_matches('\\').to_ascii_lowercase();
+                phera_bytecode::name_keys::key(&lowercase) == key
+            })
+            .map(|name| (name.as_str(), "Trait"))
     }
 }

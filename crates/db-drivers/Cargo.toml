@@ -1,0 +1,38 @@
+[package]
+name = "phera-db-drivers"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+phera-sqlite.workspace = true
+phera-io-pool.workspace = true
+phera-extension-api.workspace = true
+tokio.workspace = true
+postgres-types.workspace = true
+mysql_async.workspace = true
+bytes.workspace = true
+rustls.workspace = true
+tokio-rustls.workspace = true
+futures-core.workspace = true
+fallible-iterator.workspace = true
+futures-util = { workspace = true, features = ["sink"] }
+postgres-protocol.workspace = true
+percent-encoding.workspace = true
+url.workspace = true
+pkcs1 = "0.8"
+sha2.workspace = true
+sha3.workspace = true
+x509-cert.workspace = true
+
+[dev-dependencies]
+base64.workspace = true
+rcgen.workspace = true
+ring = "0.17"
+tempfile.workspace = true
+rsa.workspace = true
+sha1_011.workspace = true
+
+[lints]
+workspace = true

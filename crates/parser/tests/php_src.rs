@@ -6,7 +6,7 @@
 //! (`tests/upstream` + `tests/fixtures`) run. Needs a `php` binary (override
 //! with `PHERA_PHP=/path/to/php`); skipped without one.
 //!
-//! Files Phera rejects on purpose (lexer `Unsupported`: backticks, `${...}`,
+//! Files Phera rejects on purpose (lexer `Unsupported`:
 //! `(real)`, short tags), non-UTF-8 sources and nesting beyond Phera's limit
 //! are counted as "not relevant".
 
@@ -23,6 +23,12 @@ struct Source {
     name: String,
     file: PathBuf,
     code: String,
+}
+
+enum PhpVerdict {
+    Accepted,
+    ParseError,
+    CompileError,
 }
 
 fn main() -> ExitCode {
@@ -101,7 +107,12 @@ fn main() -> ExitCode {
 
     let parsed: Vec<_> = sources
         .iter()
-        .map(|source| phera_parser::parse(&source.code).map(|_| ()))
+        .map(|source| match phera_parser::parse(&source.code) {
+            // The PHP oracle compares grammar acceptance. TOKEN_PARSE checks the
+            // exception class and text independently in the tokenizer corpus.
+            Err(error) if error.is_compile_error() => Ok(()),
+            result => result.map(|_| ()),
+        })
         .collect();
 
     let mut passed = 0;
@@ -109,12 +120,16 @@ fn main() -> ExitCode {
     let mut phera_accepts_php_rejects = 0;
     let mut failures: Vec<(String, String)> = Vec::new();
 
-    for (source, (php_ok, parse_result)) in
+    for (source, (php_verdict, parse_result)) in
         sources.iter().zip(php_verdicts.iter().zip(parsed.iter()))
     {
-        match (php_ok, parse_result) {
-            (true, Ok(())) => passed += 1,
-            (true, Err(error)) => {
+        match (php_verdict, parse_result) {
+            // CompileError can come from declarations after the grammar has accepted them.
+            (PhpVerdict::Accepted | PhpVerdict::CompileError, Ok(())) => passed += 1,
+            (PhpVerdict::CompileError, Err(error)) if error.is_compile_error() => both_reject += 1,
+            (PhpVerdict::ParseError, Err(error)) if !error.is_compile_error() => both_reject += 1,
+            (PhpVerdict::ParseError, Ok(())) => phera_accepts_php_rejects += 1,
+            (_, Err(error)) => {
                 if error.is_unsupported_lex() {
                     *not_relevant
                         .entry("lexer rejects it on purpose (Unsupported)".into())
@@ -128,8 +143,6 @@ fn main() -> ExitCode {
                     failures.push((source.name.clone(), format!("{error}")));
                 }
             }
-            (false, Err(_)) => both_reject += 1,
-            (false, Ok(())) => phera_accepts_php_rejects += 1,
         }
     }
 
@@ -171,7 +184,7 @@ fn main() -> ExitCode {
 }
 
 /// Asks PHP, in one process, which of the sources its parser accepts.
-fn check_with_php(php: &Path, sources: &[Source]) -> Result<Vec<bool>, String> {
+fn check_with_php(php: &Path, sources: &[Source]) -> Result<Vec<PhpVerdict>, String> {
     let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/parse_check.php");
 
     let mut child = Command::new(php)
@@ -204,8 +217,9 @@ fn check_with_php(php: &Path, sources: &[Source]) -> Result<Vec<bool>, String> {
     let mut verdicts = Vec::new();
     for line in stdout.lines() {
         match line {
-            "OK" => verdicts.push(true),
-            "ERR" => verdicts.push(false),
+            "OK" => verdicts.push(PhpVerdict::Accepted),
+            "ERR" => verdicts.push(PhpVerdict::ParseError),
+            "COMPILE_ERR" => verdicts.push(PhpVerdict::CompileError),
             other => return Err(format!("unexpected output from PHP: {other:?}")),
         }
     }

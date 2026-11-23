@@ -24,6 +24,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--base', required=True, type=pathlib.Path)
     parser.add_argument('--head', required=True, type=pathlib.Path)
+    parser.add_argument('--base-benchmarks', type=pathlib.Path)
     parser.add_argument('--runs', type=int, default=5)
     parser.add_argument('--base-sha', default='local base')
     parser.add_argument('--head-sha', default='local head')
@@ -55,21 +56,30 @@ def main():
                 'echo "\\nPHERA_CI_BENCH_NS:", hrtime(true) - $__phera_ci_started, "\\n";\n'
             )
             try:
-                expected = measure(binaries['base'], wrapper)[1]
-                if measure(binaries['head'], wrapper)[1] != expected:
+                # The native-call script uses APIs already available on the base.
+                has_base = script.name == 'bench-natives.php' or args.base_benchmarks is None or (
+                    args.base_benchmarks / script.name
+                ).is_file()
+                labels = ['base', 'head'] if has_base else ['head']
+                expected = measure(binaries[labels[0]], wrapper)[1]
+                if has_base and measure(binaries['head'], wrapper)[1] != expected:
                     raise RuntimeError('base/head stdout differs during warm-up')
-                samples = {'base': [], 'head': []}
+                samples = {label: [] for label in labels}
                 for round_number in range(args.runs):
                     # Alternate order too, so neither binary always runs first.
-                    order = ['base', 'head'] if round_number % 2 == 0 else ['head', 'base']
+                    order = labels if round_number % 2 == 0 else labels[::-1]
                     for label in order:
                         elapsed, output = measure(binaries[label], wrapper)
                         if output != expected:
                             raise RuntimeError(f'{label} stdout changed')
                         samples[label].append(elapsed)
-                base, head = (statistics.median(samples[label]) for label in ['base', 'head'])
-                change = (head / base - 1) * 100
-                report.append(f'| {script.name} | {base:.3f} | {head:.3f} | {change:+.1f}% |')
+                head = statistics.median(samples['head'])
+                if has_base:
+                    base = statistics.median(samples['base'])
+                    change = (head / base - 1) * 100
+                    report.append(f'| {script.name} | {base:.3f} | {head:.3f} | {change:+.1f}% |')
+                else:
+                    report.append(f'| {script.name} | new benchmark | {head:.3f} | — |')
             except (RuntimeError, subprocess.SubprocessError) as error:
                 # Keep the remaining observations visible even when one script fails.
                 report.append(f'| {script.name} | error | error | unavailable |')

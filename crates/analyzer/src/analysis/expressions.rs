@@ -18,6 +18,15 @@ impl Analyzer<'_> {
         self.depth += 1;
         let ty = self.expression_kind(expression, scope, quiet);
         self.depth -= 1;
+        if self.level >= 2
+            && !scope.facts.is_empty()
+            && ty != ValueType::Never
+            && !matches!(&expression.kind, ExpressionKind::Variable(Variable::Named(name)) if name != "this")
+            && let Some(place) = crate::scope::Place::of(expression)
+            && let Some(fact) = scope.facts.get(&place)
+        {
+            return fact.ty.clone();
+        }
         ty
     }
 
@@ -61,12 +70,10 @@ impl Analyzer<'_> {
         right: &Expression,
         scope: &mut Scope,
         quiet: bool,
+        operation: &Expression,
     ) -> ValueType {
-        if matches!(
-            operator,
-            BinaryOperator::And | BinaryOperator::Or | BinaryOperator::NullCoalesce
-        ) {
-            return self.short_circuit(operator, left, right, scope, quiet);
+        if operator == BinaryOperator::NullCoalesce {
+            return self.coalesce(left, right, scope, quiet);
         }
         let left_ty = self.expression(left, scope, quiet);
         if left_ty == ValueType::Never {
@@ -81,6 +88,29 @@ impl Analyzer<'_> {
             BinaryOperator::Divide | BinaryOperator::Modulo | BinaryOperator::Power
         ) {
             self.record_exception(scope);
+        }
+        if self.level >= 4
+            && let Some(ty) = self.constant_comparison(
+                operator,
+                (left, &left_ty),
+                (right, &right_ty),
+                scope,
+                operation.span,
+            )
+        {
+            return ty;
+        }
+        if self.level >= 4 && operator == BinaryOperator::Xor {
+            let left_truth = dead_code::truth(&left_ty);
+            let right_truth = dead_code::truth(&right_ty);
+            self.constant_logical_operand(operation, left, left_truth, dead_code::Side::Left);
+            self.constant_logical_operand(operation, right, right_truth, dead_code::Side::Right);
+            if let (Some(left), Some(right)) = (left_truth, right_truth) {
+                return ValueType::BoolLiteral(left != right);
+            }
+        }
+        if self.level >= 3 {
+            return super::operators::binary_type(operator, &left_ty, &right_ty);
         }
         match operator {
             BinaryOperator::Concat => ValueType::String,
@@ -103,34 +133,31 @@ impl Analyzer<'_> {
         otherwise: &Expression,
         scope: &mut Scope,
     ) -> ValueType {
-        let truth = self.condition_truth(condition, scope);
-        let condition_ty = self.expression(condition, scope, false);
-        if condition_ty == ValueType::Never {
-            return condition_ty;
+        let branches = self.condition(condition, std::mem::take(scope), false);
+        self.constant_condition(
+            "ternary",
+            "Ternary operator condition",
+            condition,
+            &branches,
+        );
+        let (yes, yes_ty) = self.expression_branch(branches.yes, then, branches.ty);
+        let (no, no_ty) = self.expression_branch(branches.no, Some(otherwise), ValueType::Mixed);
+        if let Some(after) = super::condition::Condition::merge(yes, no) {
+            *scope = after;
         }
-        if let Some(truth) = truth {
-            return if truth {
-                then.map_or(condition_ty, |e| self.expression(e, scope, false))
-            } else {
-                self.expression(otherwise, scope, false)
-            };
-        }
-        let mut left = scope.clone();
-        let mut right = scope.clone();
-        self.refine(condition, &mut left, true);
-        self.refine(condition, &mut right, false);
-        let left_ty = then.map_or(condition_ty, |e| self.expression(e, &mut left, false));
-        let right_ty = self.expression(otherwise, &mut right, false);
-        let mut paths = Vec::new();
-        if left_ty != ValueType::Never {
-            paths.push(left);
-        }
-        if right_ty != ValueType::Never {
-            paths.push(right);
-        }
-        if !paths.is_empty() {
-            *scope = Scope::join(&paths);
-        }
-        left_ty.join(&right_ty)
+        yes_ty.join(&no_ty)
+    }
+
+    fn expression_branch(
+        &mut self,
+        scope: Option<Scope>,
+        expression: Option<&Expression>,
+        fallback: ValueType,
+    ) -> (Option<Scope>, ValueType) {
+        let Some(mut scope) = scope else {
+            return (None, ValueType::Never);
+        };
+        let ty = expression.map_or(fallback, |e| self.expression(e, &mut scope, false));
+        ((ty != ValueType::Never).then_some(scope), ty)
     }
 }

@@ -6,13 +6,16 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+memchr.workspace = true
 phera-dotenv.workspace = true
 indexmap.workspace = true
+hickory-resolver.workspace = true
 phera-extension-api.workspace = true
+nix.workspace = true
+rustix.workspace = true
+sysinfo.workspace = true
 # Only for timers: `sleep` and `usleep` wait without blocking the thread.
 tokio.workspace = true
-# The system's monotonic clock for `hrtime()`.
-rustix.workspace = true
 
 [lints]
 workspace = true

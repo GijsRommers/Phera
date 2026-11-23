@@ -30,6 +30,7 @@ pub(crate) struct ParameterSpec {
     /// Immutable declared type lets Send test its mask without reopening the function table.
     pub(crate) ty: Option<phera_bytecode::Type>,
     pub(crate) by_reference: bool,
+    pub(crate) requires_reference: bool,
     pub(crate) variadic: bool,
 }
 
@@ -42,6 +43,7 @@ pub(crate) enum CallTarget {
         context: crate::classes::MethodContext,
     },
     Closure(Rc<phera_value::Object>),
+    Magic(Rc<super::magic_dispatch::MagicCall>),
     /// A declared PHP function.
     User(crate::code_table::FunctionIndex),
     Native(FunctionEntry),
@@ -58,6 +60,7 @@ impl ParameterSpec {
             name: unit.names[parameter.name.index()].clone(),
             ty: parameter.ty.map(|ty| unit.types[ty.index()].clone()),
             by_reference: parameter.by_reference,
+            requires_reference: parameter.by_reference,
             variadic: parameter.variadic,
         }
     }
@@ -68,6 +71,7 @@ impl ParameterSpec {
             name: parameter.name.into(),
             ty: None,
             by_reference: parameter.by_ref,
+            requires_reference: parameter.requires_ref(),
             variadic: parameter.variadic,
         }
     }

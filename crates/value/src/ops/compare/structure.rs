@@ -6,6 +6,7 @@
 //! ```
 
 use std::collections::HashSet;
+use std::ops::Deref;
 use std::rc::Rc;
 
 use crate::array::PhpArray;
@@ -13,33 +14,80 @@ use crate::error::{Diagnostics, OpError};
 use crate::object::Object;
 use crate::value::Value;
 
-use super::{ObjectEquality, cmp3, compare_leaf, identical_leaf};
+use super::casting::CastPair;
+use super::{
+    ObjectComparator, ObjectComparison, ObjectOperands, cmp3, compare_leaf, identical_leaf,
+};
 
-#[derive(Clone, Copy)]
-pub(super) enum Comparison {
+pub(super) enum Comparison<'a, 'callback> {
     Strict,
     Loose,
     PendingError,
-    NativeEquality(ObjectEquality),
+    Native(&'a mut ObjectComparator<'callback>),
 }
 
-impl Comparison {
-    /// An object pair can compare as a leaf, even inside an array.
-    pub(super) fn object_equality(self, left: &Rc<Object>, right: &Rc<Object>) -> Option<i8> {
+pub(super) enum Pair {
+    Compared(i8),
+    Tables(Table, Table),
+    Initialize,
+}
+
+impl Comparison<'_, '_> {
+    /// Native handlers can also compare objects that have different class names.
+    pub(super) fn objects(
+        &mut self,
+        left: &Rc<Object>,
+        right: &Rc<Object>,
+        diagnostics: &mut dyn Diagnostics,
+    ) -> Result<Pair, OpError> {
         if Rc::ptr_eq(left, right) {
-            return Some(0);
+            return Ok(Pair::Compared(0));
         }
-        if left.class.name() != right.class.name() || matches!(self, Self::Strict) {
-            return Some(1);
+        if matches!(self, Self::Strict) || left.class.is_enum() || right.class.is_enum() {
+            return Ok(Pair::Compared(1));
         }
-        match self {
-            Self::NativeEquality(compare) => compare(left, right).map(|equal| i8::from(!equal)),
-            _ => None,
+        if let Self::Native(compare) = self {
+            match compare(ObjectOperands::Pair(left, right), diagnostics)? {
+                ObjectComparison::Compared(result) => return Ok(Pair::Compared(result)),
+                ObjectComparison::Projected(a, b) => {
+                    return Ok(Pair::Tables(
+                        Table::Projected(left.clone(), a),
+                        Table::Projected(right.clone(), b),
+                    ));
+                }
+                ObjectComparison::InitializeLazy => return Ok(Pair::Initialize),
+                ObjectComparison::Default => {}
+            }
         }
+        if left.class.name() != right.class.name() {
+            return Ok(Pair::Compared(1));
+        }
+        Ok(Pair::Tables(
+            Table::Object(left.clone()),
+            Table::Object(right.clone()),
+        ))
+    }
+
+    /// A native object can also compare directly with a scalar operand.
+    pub(super) fn mixed(
+        &mut self,
+        left: &Value,
+        right: &Value,
+        diagnostics: &mut dyn Diagnostics,
+    ) -> Result<Option<i8>, OpError> {
+        if let Self::Native(compare) = self
+            && matches!((left, right), (Value::Object(_), _) | (_, Value::Object(_)))
+            && !matches!((left, right), (Value::Object(_), Value::Object(_)))
+            && let ObjectComparison::Compared(order) =
+                compare(ObjectOperands::Mixed(left, right), diagnostics)?
+        {
+            return Ok(Some(order));
+        }
+        Ok(None)
     }
 
     pub(super) fn leaf(
-        self,
+        &self,
         left: &Value,
         right: &Value,
         diagnostics: &mut dyn Diagnostics,
@@ -53,7 +101,25 @@ impl Comparison {
 
 pub(super) enum Table {
     Array(Rc<PhpArray>),
-    Object(Rc<Object>, PhpArray),
+    Object(Rc<Object>),
+    Projected(Rc<Object>, PhpArray),
+}
+
+enum Entries<'a> {
+    Array(&'a PhpArray),
+    /// An object's properties in PHP's order, taken when the step starts.
+    Object(PhpArray),
+}
+
+impl Deref for Entries<'_> {
+    type Target = PhpArray;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Array(entries) => entries,
+            Self::Object(entries) => entries,
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -63,42 +129,50 @@ enum TableId {
 }
 
 impl Table {
-    pub(super) fn object(object: &Rc<Object>) -> Result<Self, OpError> {
-        let properties = object.properties.try_borrow().map_err(|_| {
-            OpError::error("Cannot compare an object while its properties are being modified")
-        })?;
-        Ok(Self::Object(object.clone(), properties.clone()))
-    }
-
-    fn entries(&self) -> &PhpArray {
+    /// A cast may change a subsequently compared property. Borrow only while
+    /// advancing, so the next step observes the current table after PHP runs.
+    fn entries(&self) -> Result<Entries<'_>, OpError> {
         match self {
-            Self::Array(array) => array,
-            Self::Object(_, properties) => properties,
+            Self::Array(array) => Ok(Entries::Array(array)),
+            Self::Projected(_, properties) => Ok(Entries::Array(properties)),
+            Self::Object(object) => object
+                .properties
+                .try_borrow()
+                .map(|properties| Entries::Object(properties.to_array()))
+                .map_err(|_| {
+                    OpError::error(
+                        "Cannot compare an object while its properties are being modified",
+                    )
+                }),
         }
     }
 
     fn id(&self) -> TableId {
         match self {
             Self::Array(array) => TableId::Array(Rc::as_ptr(array)),
-            Self::Object(object, _) => TableId::Object(Rc::as_ptr(object)),
+            Self::Object(object) | Self::Projected(object, _) => {
+                TableId::Object(Rc::as_ptr(object))
+            }
         }
     }
 
     /// PHP checks the native stack before comparing each table. Charge the
     /// frame sizes observed in the default PHP 8.5 arm64 build against a
     /// fixed budget, so long acyclic chains get a separate catchable error.
-    fn stack_cost(&self, comparison: Comparison) -> usize {
+    fn stack_cost(&self, comparison: &Comparison<'_, '_>) -> usize {
         match self {
             Self::Array(_) if matches!(comparison, Comparison::Strict) => 128,
             Self::Array(_) => 256,
-            Self::Object(_, _) => 352,
+            Self::Object(_) | Self::Projected(..) => 352,
         }
     }
 
     fn stack_error(&self) -> OpError {
         OpError::error(match self {
             Self::Array(_) => "Maximum call stack size reached during comparison",
-            Self::Object(_, _) => "Maximum call stack size reached during object comparison",
+            Self::Object(_) | Self::Projected(..) => {
+                "Maximum call stack size reached during object comparison"
+            }
         })
     }
 }
@@ -112,119 +186,211 @@ struct Frame {
 }
 
 impl Frame {
-    fn new(left: Table, right: Table, comparison: Comparison) -> Self {
-        let left_position = left.entries().first_position();
+    fn new(left: Table, right: Table, comparison: &Comparison<'_, '_>) -> Result<Self, OpError> {
+        let left_position = left.entries()?.first_position();
         let right_position = match comparison {
-            Comparison::Strict => right.entries().first_position(),
+            Comparison::Strict => right.entries()?.first_position(),
             _ => None,
         };
-        Self {
+        Ok(Self {
             left,
             right,
             left_position,
             right_position,
+        })
+    }
+}
+
+pub(super) enum CompareStep {
+    Complete(i8),
+    Cast(CastPair),
+    Initialize(Rc<Object>, Rc<Object>),
+}
+
+/// PHP protects only the active left table. Parents and the active set
+/// stay empty for flat operands, and remain owned if a leaf must run PHP.
+pub(super) struct TableComparison {
+    frame: Frame,
+    parents: Vec<Frame>,
+    active: Option<HashSet<TableId>>,
+    budget: usize,
+}
+
+impl TableComparison {
+    pub(super) fn new(
+        left: Table,
+        right: Table,
+        comparison: &Comparison<'_, '_>,
+    ) -> Result<Self, OpError> {
+        let stack_budget = match comparison {
+            Comparison::Strict => 8_329_216,
+            _ => 8_329_215,
+        };
+        Ok(Self {
+            budget: stack_budget - left.stack_cost(comparison),
+            parents: Vec::new(),
+            active: None,
+            frame: Frame::new(left, right, comparison)?,
+        })
+    }
+
+    pub(super) fn enter_child(
+        &mut self,
+        left: Table,
+        right: Table,
+        comparison: &Comparison<'_, '_>,
+    ) -> Result<(), OpError> {
+        push_child(
+            &mut self.frame,
+            &mut self.parents,
+            &mut self.active,
+            &mut self.budget,
+            left,
+            right,
+            comparison,
+        )
+    }
+
+    pub(super) fn advance<const CAST_STRINGS: bool>(
+        &mut self,
+        comparison: &mut Comparison<'_, '_>,
+        diagnostics: &mut dyn Diagnostics,
+    ) -> Result<CompareStep, OpError> {
+        let Self {
+            frame,
+            parents,
+            active,
+            budget,
+        } = self;
+        loop {
+            let left = frame.left.entries()?;
+            let right = frame.right.entries()?;
+            if left.len() != right.len() {
+                return Ok(CompareStep::Complete(cmp3(left.len().cmp(&right.len()))));
+            }
+            let mut child = None;
+            while let Some(position) = frame.left_position {
+                let Some((key, left_value)) = left.entry_at(position) else {
+                    return Ok(CompareStep::Complete(1));
+                };
+                frame.left_position = left.next_position(position);
+                let right_value = match comparison {
+                    Comparison::Strict => {
+                        let Some(position) = frame.right_position else {
+                            return Ok(CompareStep::Complete(1));
+                        };
+                        let Some((right_key, value)) = right.entry_at(position) else {
+                            return Ok(CompareStep::Complete(1));
+                        };
+                        if key != right_key {
+                            return Ok(CompareStep::Complete(1));
+                        }
+                        frame.right_position = right.next_position(position);
+                        value
+                    }
+                    _ => {
+                        let Some(value) = right.get(&key) else {
+                            return Ok(CompareStep::Complete(1));
+                        };
+                        value
+                    }
+                };
+
+                let left_value = left_value.try_deref()?;
+                let right_value = right_value.try_deref()?;
+                let result = match (&*left_value, &*right_value) {
+                    (Value::Array(a), Value::Array(b)) => {
+                        if Rc::ptr_eq(a, b) {
+                            continue;
+                        }
+                        child = Some((Table::Array(a.clone()), Table::Array(b.clone())));
+                        break;
+                    }
+                    (Value::Object(a), Value::Object(b)) => {
+                        match comparison.objects(a, b, diagnostics)? {
+                            Pair::Compared(result) => result,
+                            Pair::Initialize => {
+                                return Ok(CompareStep::Initialize(a.clone(), b.clone()));
+                            }
+                            Pair::Tables(left, right) => {
+                                child = Some((left, right));
+                                break;
+                            }
+                        }
+                    }
+                    _ if let Some(order) =
+                        comparison.mixed(&left_value, &right_value, diagnostics)? =>
+                    {
+                        order
+                    }
+                    _ => {
+                        if CAST_STRINGS
+                            && let Some(pair) = CastPair::from_values(&left_value, &right_value)
+                        {
+                            return Ok(CompareStep::Cast(pair));
+                        }
+                        comparison.leaf(&left_value, &right_value, diagnostics)?
+                    }
+                };
+                if result != 0 {
+                    return Ok(CompareStep::Complete(result));
+                }
+            }
+
+            drop(left);
+            drop(right);
+            if let Some((left, right)) = child {
+                push_child(frame, parents, active, budget, left, right, comparison)?;
+            } else if let Some(parent) = parents.pop() {
+                if let Some(active) = active {
+                    active.remove(&parent.left.id());
+                }
+                *budget += frame.left.stack_cost(comparison);
+                *frame = parent;
+            } else {
+                return Ok(CompareStep::Complete(0));
+            }
         }
     }
 }
 
-/// PHP protects only the active left table. A table reused by a sibling or
-/// compared with itself is safe. Parents and the active set stay empty
-/// while comparing flat arrays.
+fn push_child(
+    frame: &mut Frame,
+    parents: &mut Vec<Frame>,
+    active: &mut Option<HashSet<TableId>>,
+    budget: &mut usize,
+    left: Table,
+    right: Table,
+    comparison: &Comparison<'_, '_>,
+) -> Result<(), OpError> {
+    *budget = budget
+        .checked_sub(left.stack_cost(comparison))
+        .ok_or_else(|| left.stack_error())?;
+    let active = active.get_or_insert_with(HashSet::new);
+    active.insert(frame.left.id());
+    if active.contains(&left.id()) {
+        return Err(OpError::error(
+            "Nesting level too deep - recursive dependency?",
+        ));
+    }
+    let parent = std::mem::replace(frame, Frame::new(left, right, comparison)?);
+    parents.push(parent);
+    Ok(())
+}
+
 #[inline(never)]
 pub(super) fn compare_tables(
     left: Table,
     right: Table,
-    comparison: Comparison,
+    comparison: &mut Comparison<'_, '_>,
     diagnostics: &mut dyn Diagnostics,
 ) -> Result<i8, OpError> {
-    let stack_budget = match comparison {
-        Comparison::Strict => 8_329_216,
-        _ => 8_329_215,
-    };
-    let mut budget = stack_budget - left.stack_cost(comparison);
-    let mut parents = Vec::new();
-    let mut active = None;
-    let mut frame = Frame::new(left, right, comparison);
-    loop {
-        let left = frame.left.entries();
-        let right = frame.right.entries();
-        if left.len() != right.len() {
-            return Ok(cmp3(left.len().cmp(&right.len())));
-        }
-        let mut child = None;
-        while let Some(position) = frame.left_position {
-            let Some((key, left_value)) = left.entry_at(position) else {
-                return Ok(1);
-            };
-            frame.left_position = left.next_position(position);
-            let right_value = match comparison {
-                Comparison::Strict => {
-                    let Some(position) = frame.right_position else {
-                        return Ok(1);
-                    };
-                    let Some((right_key, value)) = right.entry_at(position) else {
-                        return Ok(1);
-                    };
-                    if key != right_key {
-                        return Ok(1);
-                    }
-                    frame.right_position = right.next_position(position);
-                    value
-                }
-                _ => {
-                    let Some(value) = right.get(&key) else {
-                        return Ok(1);
-                    };
-                    value
-                }
-            };
-
-            let left_value = left_value.try_deref()?;
-            let right_value = right_value.try_deref()?;
-            let result = match (&*left_value, &*right_value) {
-                (Value::Array(a), Value::Array(b)) => {
-                    if Rc::ptr_eq(a, b) {
-                        continue;
-                    }
-                    child = Some((Table::Array(a.clone()), Table::Array(b.clone())));
-                    break;
-                }
-                (Value::Object(a), Value::Object(b)) => {
-                    if let Some(result) = comparison.object_equality(a, b) {
-                        result
-                    } else {
-                        child = Some((Table::object(a)?, Table::object(b)?));
-                        break;
-                    }
-                }
-                _ => comparison.leaf(&left_value, &right_value, diagnostics)?,
-            };
-            if result != 0 {
-                return Ok(result);
-            }
-        }
-
-        if let Some((left, right)) = child {
-            budget = budget
-                .checked_sub(left.stack_cost(comparison))
-                .ok_or_else(|| left.stack_error())?;
-            let active = active.get_or_insert_with(HashSet::new);
-            active.insert(frame.left.id());
-            if active.contains(&left.id()) {
-                return Err(OpError::error(
-                    "Nesting level too deep - recursive dependency?",
-                ));
-            }
-            parents.push(frame);
-            frame = Frame::new(left, right, comparison);
-        } else if let Some(parent) = parents.pop() {
-            if let Some(active) = &mut active {
-                active.remove(&parent.left.id());
-            }
-            budget += frame.left.stack_cost(comparison);
-            frame = parent;
-        } else {
-            return Ok(0);
-        }
+    match TableComparison::new(left, right, comparison)?
+        .advance::<false>(comparison, diagnostics)?
+    {
+        CompareStep::Complete(order) => Ok(order),
+        CompareStep::Cast(_) | CompareStep::Initialize(..) => Err(OpError::error(
+            "Unexpected PHP callback during value comparison",
+        )),
     }
 }

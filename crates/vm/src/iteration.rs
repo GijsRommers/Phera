@@ -13,10 +13,39 @@ impl Vm {
         iterator: IterId,
         source: Reg,
         place: Option<AccessPath>,
-    ) -> Result<(), NativeError> {
+    ) -> Result<bool, NativeError> {
         let element = self.get(source);
+        if matches!(&element, Value::Object(object) if object.lazy().is_some()) {
+            return Ok(false);
+        }
+        self.iter_start_value(iterator, element, place)
+    }
+
+    pub(crate) fn iter_start_value(
+        &mut self,
+        iterator: IterId,
+        element: Value,
+        place: Option<AccessPath>,
+    ) -> Result<bool, NativeError> {
+        if let Value::Object(object) = &element
+            && object.class.is_traversable()
+        {
+            return Ok(false);
+        }
         let object_snapshot = if let Value::Object(object) = &element {
-            Some(std::rc::Rc::new(self.visible_properties(object)))
+            if let Some(class) = self.hooked_property_class(object) {
+                self.start_hooked_property_iteration(
+                    iterator,
+                    object.clone(),
+                    class,
+                    crate::access_mode::Binding::ByValue,
+                );
+                return Ok(true);
+            }
+            Some(std::rc::Rc::new(self.visible_properties(
+                object,
+                phera_extension_api::PropertyPurpose::Foreach,
+            )?))
         } else {
             None
         };
@@ -44,13 +73,16 @@ impl Vm {
                 } else {
                     None
                 },
+                traversal: None,
+                traversal_mode: frame::TraversalMode::Value,
+                property_hooks: None,
                 source: if object_iteration { None } else { place },
                 position: None,
                 started: false,
             },
         );
 
-        Ok(())
+        Ok(true)
     }
 
     /// By-reference foreach follows a live place instead of an array snapshot.
@@ -74,6 +106,9 @@ impl Vm {
             iterator.0,
             frame::IteratorState {
                 snapshot: None,
+                traversal: None,
+                traversal_mode: frame::TraversalMode::Value,
+                property_hooks: None,
                 source: Some(place),
                 position: None,
                 started: false,
@@ -92,23 +127,31 @@ impl Vm {
     }
 
     /// Advance in insertion order and bind a live element cell for reference iteration.
-    pub(crate) fn iter_next(
+    pub(crate) fn iter_next<const TRACK_GENERATORS: bool>(
         &mut self,
         iterator: IterId,
         key: Option<Reg>,
         value: Reg,
         end: Target,
-    ) -> Result<(), NativeError> {
+    ) -> Result<bool, NativeError> {
+        if TRACK_GENERATORS && self.next_generator_element(iterator, key, value)? {
+            return Ok(true);
+        }
         let mut state = self
             .call_stack
             .current_extras_mut()
             .iterators
             .remove(&iterator.0)
             .ok_or_else(|| internal_error!("missing iterator"))?;
+        if state.snapshot.is_none() && (state.traversal.is_some() || state.property_hooks.is_some())
+        {
+            self.keep_iterator(iterator, state);
+            return Ok(false);
+        }
         if state.source.is_none() {
             self.next_snapshot(&mut state, key, value, end)?;
             self.keep_iterator(iterator, state);
-            return Ok(());
+            return Ok(true);
         }
         let array = if let Some(position) = &state.source {
             match self.read_place(position, crate::access_mode::Missing::Silent)? {
@@ -116,7 +159,7 @@ impl Vm {
                 Value::Object(object) => {
                     self.next_object_reference(&mut state, &object, key, value, end)?;
                     self.keep_iterator(iterator, state);
-                    return Ok(());
+                    return Ok(true);
                 }
                 _ => None,
             }
@@ -146,11 +189,32 @@ impl Vm {
             self.jump(end)?;
         }
         self.keep_iterator(iterator, state);
-        Ok(())
+        Ok(true)
     }
 }
 
 impl Vm {
+    /// Write one iteration entry into its destination. A destination inside
+    /// the locals prefix is a named variable, so it is assigned exactly as
+    /// `Assign` does: iterators over the old value restart, and a PHP
+    /// reference in the slot is written through.
+    pub(crate) fn set_iteration_target(
+        &mut self,
+        register: Reg,
+        value: Value,
+    ) -> Result<(), NativeError> {
+        let locals = self
+            .current()
+            .map(|frame| frame.function().locals.len())
+            .unwrap_or(usize::MAX);
+        if register.index() >= locals {
+            self.set(register, value);
+            return Ok(());
+        }
+        self.restart_subject_iterators(register);
+        self.assign_local(register, value)
+    }
+
     /// Snapshot iteration borrows its owner directly, avoiding a new array owner on every element.
     #[inline]
     fn next_snapshot(
@@ -178,16 +242,20 @@ impl Vm {
         else {
             return self.jump(end);
         };
+        // Bind first: the entry's borrow must end before a local destination
+        // is assigned through a PHP reference.
+        let element_key = match element_key {
+            ArrayKey::Int(integer) => Value::Int(integer),
+            ArrayKey::Interned(string) => Value::InternedStr(string),
+            ArrayKey::String(string) => Value::String(string.clone()),
+        };
+        let element = element.deref().clone();
+        // PHP writes the value, then the key: an old value the loop variable
+        // held is released first.
+        self.set_iteration_target(destination, element)?;
         if let Some(key) = key {
-            self.set(
-                key,
-                match element_key {
-                    ArrayKey::Int(integer) => Value::Int(integer),
-                    ArrayKey::String(string) => Value::String(string.clone()),
-                },
-            );
+            self.set_iteration_target(key, element_key)?;
         }
-        self.set(destination, element.deref().clone());
         Ok(())
     }
 
@@ -200,29 +268,36 @@ impl Vm {
         key: Option<Reg>,
         destination: Reg,
     ) -> Result<(), NativeError> {
-        if source.is_none() && key.is_none() {
-            self.set(destination, element);
+        let element_key = match element_key {
+            ArrayKey::Int(i) => Value::Int(i),
+            ArrayKey::Interned(string) => Value::InternedStr(string),
+            ArrayKey::String(string) => Value::String(string),
+        };
+        let Some(position) = source else {
+            // By value, PHP writes the value, then the key.
+            self.set_iteration_target(destination, element)?;
+            if let Some(key) = key {
+                self.set_iteration_target(key, element_key)?;
+            }
             return Ok(());
-        }
+        };
         let key_register = key.unwrap_or(destination);
-        self.set(
-            key_register,
-            match element_key {
-                ArrayKey::Int(i) => Value::Int(i),
-                ArrayKey::String(string) => Value::String(string),
-            },
-        );
-        if let Some(position) = source {
-            let position = position.clone().with_key(key_register);
-            element = self.reference(&position)?;
-        }
-        self.set(destination, element);
+        self.set_iteration_target(key_register, element_key)?;
+        let position = position.clone().with_key(key_register);
+        element = self.reference(&position)?;
+        self.set_iteration_target(destination, element)?;
         Ok(())
     }
 }
 
 /// By-value, unkeyed iteration retains the current
 /// register window and local IP. Live reference iteration uses iter_next instead.
+///
+/// The destination may be the loop's own variable (see the compiler's
+/// foreach bindings). A variable that holds a PHP reference is written
+/// through by the general handler, so the step leaves before the iterator
+/// advances; any other old value is replaced, as `Assign` replaces it.
+#[inline(always)]
 pub(crate) fn snapshot_step(
     iterator: IterId,
     destination: Reg,
@@ -231,6 +306,9 @@ pub(crate) fn snapshot_step(
     slots: &mut [Option<Value>],
     ip: &mut usize,
 ) -> bool {
+    if holds_reference(slots, destination) {
+        return false;
+    }
     let Some(state) = iterators.get_mut(iterator.0) else {
         return false;
     };
@@ -238,29 +316,131 @@ pub(crate) fn snapshot_step(
         return false;
     }
     let Some(array) = &state.snapshot else {
-        return false;
+        return state.traversal_mode == frame::TraversalMode::Value
+            && native_step(state, None, destination, slots);
     };
-    let position = if state.started {
-        state
-            .position
-            .and_then(|position| array.next_position(position))
-    } else {
-        array.first_position()
+    // Plain matches rather than `Option` combinators: this runs on every
+    // round of a `foreach`, and a closure is a separate function that the
+    // compiler need not inline.
+    let position = match (state.started, state.position) {
+        (true, Some(position)) => array.next_position(position),
+        (true, None) => None,
+        (false, _) => array.first_position(),
     };
     state.position = position;
     state.started = true;
-    let value = position
-        .and_then(|position| array.entry_at(position))
-        .map(|(_, value)| value.deref().clone());
-    match value {
-        Some(value) => {
-            if let Some(slot) = slots.get_mut(destination.index()) {
-                *slot = Some(value);
-            }
+    let entry = match position {
+        Some(position) => array.entry_at(position),
+        None => None,
+    };
+    match entry {
+        Some((_, value)) => {
+            let value = crate::fast::duplicate(&value.deref());
+            put(slots, destination, value);
         }
         None => *ip = end.index(),
     }
     true
+}
+
+/// `IterNextKeyed` of a by-value loop, as `Vm::iter_next` makes it: the
+/// next entry of the array the loop iterates over (its value, then its
+/// key, as PHP writes them), or the next of an object's own cursor; `false`
+/// with nothing changed when the general handler must run, as for
+/// [`snapshot_step`].
+#[inline(never)]
+pub(crate) fn keyed_step(
+    iterator: IterId,
+    (key, destination): (Reg, Reg),
+    end: Target,
+    iterators: &mut crate::iterators::Iterators,
+    slots: &mut [Option<Value>],
+    ip: &mut usize,
+) -> bool {
+    if holds_reference(slots, destination) || holds_reference(slots, key) {
+        return false;
+    }
+    let Some(state) = iterators.get_mut(iterator.0) else {
+        return false;
+    };
+    if state.source.is_some() {
+        return false;
+    }
+    let Some(array) = &state.snapshot else {
+        return state.traversal_mode == frame::TraversalMode::Value
+            && native_step(state, Some(key), destination, slots);
+    };
+    let position = match (state.started, state.position) {
+        (true, Some(position)) => array.next_position(position),
+        (true, None) => None,
+        (false, _) => array.first_position(),
+    };
+    state.position = position;
+    state.started = true;
+    let entry = match position {
+        Some(position) => array.entry_at(position),
+        None => None,
+    };
+    match entry {
+        Some((element_key, value)) => {
+            let element_key = match element_key {
+                ArrayKey::Int(integer) => Value::Int(integer),
+                ArrayKey::Interned(string) => Value::InternedStr(string),
+                ArrayKey::String(string) => Value::String(string.clone()),
+            };
+            let value = crate::fast::duplicate(&value.deref());
+            put(slots, destination, value);
+            put(slots, key, element_key);
+        }
+        None => *ip = end.index(),
+    }
+    true
+}
+
+/// Consume a combined entry from a by-value cursor on the ordinary path:
+/// the value, then the key.
+pub(crate) fn native_step(
+    state: &mut frame::IteratorState,
+    key: Option<Reg>,
+    destination: Reg,
+    slots: &mut [Option<Value>],
+) -> bool {
+    let Some((value, index)) = state
+        .traversal
+        .as_mut()
+        .and_then(|cursor| cursor.next_entry(key.is_some()))
+    else {
+        return false;
+    };
+    state.started = true;
+    put(slots, destination, owned_value(value));
+    if let Some((key, index)) = key.zip(index) {
+        put(slots, key, owned_value(index));
+    }
+    true
+}
+
+/// Whether `register` holds a PHP reference, which an iteration entry is
+/// written through rather than replacing it.
+#[inline(always)]
+fn holds_reference(slots: &[Option<Value>], register: Reg) -> bool {
+    matches!(slots.get(register.index()), Some(Some(Value::Reference(_))))
+}
+
+/// Store one iteration entry over whatever the register held.
+#[inline(always)]
+fn put(slots: &mut [Option<Value>], register: Reg, value: Value) {
+    if let Some(slot) = slots.get_mut(register.index()) {
+        *slot = Some(value);
+    }
+}
+
+fn owned_value(value: Value) -> Value {
+    if value.is_reference() {
+        value.deref().clone()
+    } else {
+        value
+    }
 }
 
 impl Vm {

@@ -4,12 +4,45 @@
 //! converts between the server's types and these, so the runtime can be used
 //! and tested without a socket.
 
+mod form_limits;
+mod multipart;
 mod query;
+mod request_parse_body;
 mod superglobals;
+mod uploads;
 
 use std::net::SocketAddr;
 
-pub(crate) use superglobals::define_superglobals;
+pub(crate) use multipart::Boundary;
+pub(crate) use request_parse_body::{is_urlencoded, register_request_parse_body};
+pub(crate) use superglobals::{define_boot_superglobals, define_superglobals};
+pub(crate) use uploads::Form;
+
+fn media_type(content_type: &[u8]) -> &[u8] {
+    content_type
+        .split(|byte| matches!(byte, b';' | b',' | b' '))
+        .next()
+        .unwrap_or_default()
+}
+
+pub(crate) fn is_multipart(content_type: &[u8]) -> bool {
+    media_type(content_type).eq_ignore_ascii_case(b"multipart/form-data")
+}
+
+pub(crate) async fn receive_form(body: Vec<u8>, boundary: Vec<u8>) -> Option<Form> {
+    let range = 0..body.len();
+    uploads::receive(body, range, boundary, form_limits::FormLimits::default())
+        .await
+        .ok()
+}
+
+/// Only POST fills PHP's startup form variables.
+pub(crate) fn form_boundary(request: &HttpRequest) -> Boundary {
+    request
+        .header("Content-Type")
+        .filter(|_| request.method == "POST")
+        .map_or(Boundary::OtherMediaType, multipart::boundary)
+}
 
 /// One HTTP request, already read in full.
 #[derive(Debug, Clone)]
@@ -27,6 +60,10 @@ pub struct HttpRequest {
     pub body: Vec<u8>,
     pub remote_addr: SocketAddr,
     pub local_addr: SocketAddr,
+    /// The client reached the site over HTTPS, as far as the server knows:
+    /// a trusted proxy in front said so. Scripts see it as
+    /// `$_SERVER['HTTPS'] === 'on'`.
+    pub https: bool,
 }
 
 impl HttpRequest {

@@ -50,6 +50,13 @@ pub(crate) enum PreparedCallee {
     /// `new` of a class without a constructor: the arguments are evaluated
     /// and dropped, and the call gives the new object, kept below them.
     Constructed,
+    /// A synchronous native function, by its number in the registry. The
+    /// call has no details: its parameters are the registry entry's. When
+    /// the general path has to handle such a call (a named argument, a
+    /// by-reference parameter, an argument to convert), it first turns it
+    /// into a `General` call with its full description (see
+    /// `calls::native_calls`).
+    Native(phera_extension_api::NativeId),
     /// Anything else; its [`Callee`] is in the call's details.
     General,
 }
@@ -99,6 +106,14 @@ impl CallFlags {
     /// as an internal function does (weakly typed, without the caller's
     /// location in errors), and messages name it `Closure::__invoke`.
     pub(crate) const INVOKE: Self = Self(1 << 3);
+    /// A deferred PHP argument can need an interpreter call to __toString.
+    pub(crate) const STRING_ARGUMENT: Self = Self(1 << 4);
+    /// The general callee is a trampoline for __call or __callStatic.
+    pub(crate) const MAGIC: Self = Self(1 << 5);
+    /// A native window accepts one positional mixed argument by value.
+    pub(crate) const WINDOW_ARGUMENT: Self = Self(1 << 6);
+    /// A legal simple native call may return straight from its argument window.
+    pub(crate) const DIRECT_NATIVE: Self = Self(1 << 7);
 
     pub(crate) fn contains(self, flag: Self) -> bool {
         self.0 & flag.0 != 0
@@ -106,6 +121,10 @@ impl CallFlags {
 
     pub(crate) fn insert(&mut self, flag: Self) {
         self.0 |= flag.0;
+    }
+
+    pub(crate) fn remove(&mut self, flag: Self) {
+        self.0 &= !flag.0;
     }
 }
 
@@ -141,6 +160,12 @@ impl PreparedCall {
     #[inline]
     pub(crate) fn start(&self) -> usize {
         self.base() - self.kind.prefix()
+    }
+
+    /// A suspended caller moved this prepared argument window with its own.
+    pub(crate) fn moved_to(mut self, base: usize) -> Self {
+        self.base = base as u32;
+        self
     }
 
     /// The register stack moved up by one below this call's window (a
@@ -213,6 +238,13 @@ impl<'a> Parameters<'a> {
         }
     }
 
+    pub(crate) fn requires_reference(self, index: usize) -> bool {
+        match self {
+            Self::Php { function, .. } => function.parameters[index].by_reference,
+            Self::Listed(parameters) => parameters[index].requires_reference,
+        }
+    }
+
     pub(crate) fn is_variadic(self, index: usize) -> bool {
         match self {
             Self::Php { function, .. } => function.parameters[index].variadic,
@@ -250,5 +282,15 @@ impl<'a> Parameters<'a> {
     pub(crate) fn position_of(self, name: &[u8]) -> Option<usize> {
         (0..self.len())
             .find(|&index| !self.is_variadic(index) && self.name(index).as_bytes() == name)
+    }
+}
+
+impl crate::snapshot::ForkCopy for CallDetails {
+    fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
+        CallDetails {
+            callee: self.callee.fork_copy(fork),
+            named: self.named.clone(),
+            extra_named: self.extra_named.clone(),
+        }
     }
 }

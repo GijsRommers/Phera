@@ -7,7 +7,8 @@
 //! strings, so `"\xff"` is a single byte.
 
 use phera_ast::{
-    Expression, ExpressionKind, Identifier, Literal, MemberName, StringPart, Variable,
+    Argument, Arguments, DollarCurlyForm, Expression, ExpressionKind, Identifier, Literal,
+    MemberName, Name, NameKind, StringPart, Variable,
 };
 use phera_lexer::TokenKind;
 use phera_source::Span;
@@ -26,7 +27,7 @@ impl Parser<'_> {
         let bytes = if quote == b'\'' {
             decode_single_quoted(body)
         } else {
-            decode_double_quoted(body, false, token.span)?
+            decode_double_quoted(body, Some(b'"'), token.span)?
         };
 
         Ok(Expression {
@@ -39,19 +40,54 @@ impl Parser<'_> {
     /// `DoubleQuote`. With no interpolation at all this is a plain string
     /// literal.
     pub(crate) fn parse_interpolated_string(&mut self) -> Result<Expression, ParseError> {
-        let start = self.expect(TokenKind::DoubleQuote, "double quote")?.span;
+        self.parse_delimited_string(TokenKind::DoubleQuote, b'"')
+    }
+
+    pub(crate) fn parse_shell_string(&mut self) -> Result<Expression, ParseError> {
+        let value = self.parse_delimited_string(TokenKind::Backquote, b'`')?;
+        let span = value.span;
+        let callee = Expression {
+            span,
+            kind: ExpressionKind::Name(Name {
+                kind: NameKind::FullyQualified,
+                text: "shell_exec".into(),
+                span,
+            }),
+        };
+        Ok(Expression {
+            span,
+            kind: ExpressionKind::Call {
+                callee: Box::new(callee),
+                arguments: Arguments::List(vec![Argument {
+                    span,
+                    value,
+                    name: None,
+                    spread: false,
+                }]),
+                opening: span.start,
+            },
+        })
+    }
+
+    fn parse_delimited_string(
+        &mut self,
+        kind: TokenKind,
+        delimiter: u8,
+    ) -> Result<Expression, ParseError> {
+        let start = self.bump()?.span;
         let mut parts: Vec<StringPart> = Vec::new();
 
         loop {
             match self.kind() {
-                TokenKind::DoubleQuote => {
+                closing if closing == kind => {
                     self.bump()?;
                     break;
                 }
                 TokenKind::StringPart => {
                     let token = self.bump()?;
-                    let bytes = decode_double_quoted(self.bytes_of(&token), false, token.span)?;
-                    parts.push(StringPart::Literal(bytes));
+                    let bytes =
+                        decode_double_quoted(self.bytes_of(&token), Some(delimiter), token.span)?;
+                    parts.push(StringPart::Literal(bytes, token.span));
                 }
                 TokenKind::Variable => {
                     parts.push(StringPart::Expression(self.parse_encaps_var()?));
@@ -62,6 +98,7 @@ impl Parser<'_> {
                     self.expect(TokenKind::RightBrace, "'}'")?;
                     parts.push(StringPart::Expression(expression));
                 }
+                TokenKind::DollarCurlyOpen => parts.push(self.parse_dollar_curly()?),
                 _ => {
                     return Err(
                         self.error(format!("unexpected {} in string", self.describe_current()))
@@ -92,13 +129,18 @@ impl Parser<'_> {
                     parts.push(RawPart::Literal(self.bytes_of(&token), token.span));
                 }
                 TokenKind::Variable if !nowdoc => {
-                    parts.push(RawPart::Expression(self.parse_encaps_var()?));
+                    parts.push(RawPart::Interpolation(StringPart::Expression(
+                        self.parse_encaps_var()?,
+                    )));
                 }
                 TokenKind::CurlyOpen if !nowdoc => {
                     self.bump()?;
                     let expression = self.parse_expr(0)?;
                     self.expect(TokenKind::RightBrace, "'}'")?;
-                    parts.push(RawPart::Expression(expression));
+                    parts.push(RawPart::Interpolation(StringPart::Expression(expression)));
+                }
+                TokenKind::DollarCurlyOpen if !nowdoc => {
+                    parts.push(RawPart::Interpolation(self.parse_dollar_curly()?));
                 }
                 _ => {
                     return Err(
@@ -113,6 +155,41 @@ impl Parser<'_> {
             kind: body.into_kind(),
             span: self.span_since(start_token.span),
         })
+    }
+
+    /// `${name}` (with optional index) names a variable directly. The expression
+    /// form computes the name, as `${$name}` does.
+    fn parse_dollar_curly(&mut self) -> Result<StringPart, ParseError> {
+        self.bump()?;
+        let (kind, span, form) = if self.kind() == TokenKind::StringVarname {
+            let token = self.bump()?;
+            let variable =
+                ExpressionKind::Variable(Variable::Named(self.text_of(&token).to_string()));
+            let kind = if self.eat(TokenKind::LeftBracket)? {
+                let index = self.parse_expr(0)?;
+                self.expect(TokenKind::RightBracket, "']'")?;
+                ExpressionKind::Index {
+                    target: Box::new(Expression {
+                        kind: variable,
+                        span: token.span,
+                    }),
+                    index: Some(Box::new(index)),
+                }
+            } else {
+                variable
+            };
+            (kind, token.span, DollarCurlyForm::Name)
+        } else {
+            let name = self.parse_expr(0)?;
+            let span = name.span;
+            (
+                ExpressionKind::Variable(Variable::Dynamic(Box::new(name))),
+                span,
+                DollarCurlyForm::Expression,
+            )
+        };
+        self.expect(TokenKind::RightBrace, "'}'")?;
+        Ok(StringPart::DollarCurly(Expression { kind, span }, form))
     }
 
     /// One interpolated variable inside a string: `$a`, `$a[...]`, `$a->b`,
@@ -228,11 +305,11 @@ impl Parser<'_> {
     fn finish_string_parts(&self, parts: Vec<StringPart>, start: Span) -> Expression {
         if parts
             .iter()
-            .all(|part| matches!(part, StringPart::Literal(_)))
+            .all(|part| matches!(part, StringPart::Literal(..)))
         {
             let mut bytes = Vec::new();
             for part in parts {
-                if let StringPart::Literal(literal) = part {
+                if let StringPart::Literal(literal, _) = part {
                     bytes.extend_from_slice(&literal);
                 }
             }
@@ -276,18 +353,23 @@ impl Parser<'_> {
 
         for (index, part) in parts.into_iter().enumerate() {
             match part {
-                RawPart::Expression(expression) => {
+                RawPart::Interpolation(part) => {
+                    let span = match &part {
+                        StringPart::Expression(expression)
+                        | StringPart::DollarCurly(expression, _) => expression.span,
+                        StringPart::Literal(_, span) => *span,
+                    };
                     if at_line_start && !indent.is_empty() {
                         return Err(ParseError::new(
                             format!(
                                 "invalid body indentation level (expecting an indentation level of at least {})",
                                 indent.len()
                             ),
-                            expression.span,
+                            span,
                         ));
                     }
                     at_line_start = false;
-                    result.push(StringPart::Expression(expression));
+                    result.push(part);
                 }
                 RawPart::Literal(raw, span) => {
                     let mut text =
@@ -303,9 +385,9 @@ impl Parser<'_> {
                     let bytes = if nowdoc {
                         text
                     } else {
-                        decode_double_quoted(&text, true, span)?
+                        decode_double_quoted(&text, None, span)?
                     };
-                    result.push(StringPart::Literal(bytes));
+                    result.push(StringPart::Literal(bytes, span));
                 }
             }
         }
@@ -316,7 +398,7 @@ impl Parser<'_> {
 
 enum RawPart<'a> {
     Literal(&'a [u8], Span),
-    Expression(Expression),
+    Interpolation(StringPart),
 }
 
 /// Splits a `String` token's text into its quote character and body.
@@ -445,7 +527,11 @@ fn decode_single_quoted(bytes: &[u8]) -> Vec<u8> {
 /// Resolves the escapes of a double-quoted string or heredoc body. In a
 /// heredoc `\"` stays two characters; every other double-quote escape works
 /// the same. Unknown escapes keep their backslash.
-fn decode_double_quoted(bytes: &[u8], heredoc: bool, span: Span) -> Result<Vec<u8>, ParseError> {
+fn decode_double_quoted(
+    bytes: &[u8],
+    delimiter: Option<u8>,
+    span: Span,
+) -> Result<Vec<u8>, ParseError> {
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
 
@@ -473,7 +559,7 @@ fn decode_double_quoted(bytes: &[u8], heredoc: bool, span: Span) -> Result<Vec<u
             b'f' => simple(&mut out, 0x0C, &mut i),
             b'\\' => simple(&mut out, b'\\', &mut i),
             b'$' => simple(&mut out, b'$', &mut i),
-            b'"' if !heredoc => simple(&mut out, b'"', &mut i),
+            byte if Some(byte) == delimiter => simple(&mut out, byte, &mut i),
             b'0'..=b'7' => {
                 // Octal escape: up to three digits, value taken modulo 256.
                 let mut value = 0u32;

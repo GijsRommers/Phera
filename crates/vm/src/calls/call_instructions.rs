@@ -1,4 +1,5 @@
-//! `MakeCallable`, `ReceiveDefault` and `DeclareFunction`.
+//! `MakeCallable`, `ReceiveDefault`, `DeclareFunction` and the start of a
+//! method site's written-out call.
 
 use phera_bytecode::{FunctionId, Reg, Target};
 use phera_extension_api::NativeError;
@@ -7,6 +8,28 @@ use phera_value::Value;
 use crate::Vm;
 
 impl Vm {
+    /// `CallMethod` that the loop handed over: run the `InitMethodCall` that
+    /// follows it and go on after that, with the sends.
+    pub(crate) fn start_written_out_call<const TRACK_GENERATORS: bool>(
+        &mut self,
+    ) -> Result<(), NativeError> {
+        let frame = *self
+            .call_stack
+            .current()
+            .ok_or_else(|| internal_error!("no frame"))?;
+        let ip = frame.ip();
+        let Some(&phera_bytecode::Instruction::InitMethodCall { receiver, method }) =
+            self.code.instructions(frame.function).get(ip)
+        else {
+            return Err(internal_error!("a method site without its InitMethodCall"));
+        };
+        self.jump(Target(ip as u32 + 1))?;
+        if !(TRACK_GENERATORS && self.prepare_ready_native_method(receiver, method)) {
+            self.init_method_call::<TRACK_GENERATORS>(receiver, method)?;
+        }
+        Ok(())
+    }
+
     /// Implements PHP MakeCallable semantics outside the dispatch loop.
     pub(crate) fn make_callable(&mut self, destination: Reg) -> Result<(), NativeError> {
         let callee = self.take_prepared_callee()?;
@@ -46,13 +69,7 @@ impl Vm {
                 "Cannot redeclare function {name}() (previously declared in {}:{previous_line})",
                 self.code.unit(previous).file
             );
-            return Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
-                crate::error_traces::DeclarationFailure {
-                    message,
-                    file: location.file,
-                    line: location.line,
-                },
-            ))));
+            return Err(self.fatal_error(1, message, location));
         }
         self.function_table.insert(name, index);
         Ok(())

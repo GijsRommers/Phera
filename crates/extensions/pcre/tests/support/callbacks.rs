@@ -45,8 +45,12 @@ impl Harness {
             let entry = *self.registry.get_function(name).expect("registered native");
             prepare_arguments(&entry, &mut arguments, self)?;
             match entry.handler {
-                NativeFn::Sync(function) => function(self, &arguments),
-                NativeFn::Async(function) => function(self, arguments).await,
+                NativeFn::Sync(function) | NativeFn::DeprecatedSync(function) => {
+                    function(self, &arguments)
+                }
+                NativeFn::Async(function) | NativeFn::DeprecatedAsync(function) => {
+                    function(self, arguments).await
+                }
             }
         })
     }

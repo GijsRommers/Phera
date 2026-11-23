@@ -32,11 +32,11 @@ impl Vm {
         let routed = self
             .prepare_call(callee)
             .and_then(|()| self.route_callback_array(array));
-        self.finish_callback(routed, base, depth, origin)
+        Box::pin(self.finish_callback(routed, base, depth, origin))
     }
 
     /// Integer keys follow positional order and string keys select declared or variadic slots.
-    fn route_callback_array(&mut self, array: &PhpArray) -> Result<(), NativeError> {
+    pub(crate) fn route_callback_array(&mut self, array: &PhpArray) -> Result<(), NativeError> {
         for (key, value) in array.iter() {
             match key {
                 ArrayKey::Int(_)
@@ -47,6 +47,9 @@ impl Vm {
                     ));
                 }
                 ArrayKey::Int(_) => {}
+                ArrayKey::Interned(name) => {
+                    self.call_stack.top_details_mut()?.named = Some(name.to_php_string())
+                }
                 ArrayKey::String(name) => self.call_stack.top_details_mut()?.named = Some(name),
             }
             let index = CallView::top(&self.code, &self.call_stack)?.argument_index()?;

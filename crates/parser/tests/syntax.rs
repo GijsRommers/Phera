@@ -37,9 +37,86 @@ fn expr(src: &str) -> Expression {
     }
 }
 
+#[test]
+fn anonymous_class_declaration_starts_at_class_keyword() {
+    let source = "new\nreadonly\nclass {}";
+    let expression = expr(source);
+    let ExpressionKind::New {
+        class: NewTarget::Anonymous(declaration),
+        ..
+    } = &expression.kind
+    else {
+        panic!("expected an anonymous class");
+    };
+    assert_eq!(
+        declaration.span.start - expression.span.start,
+        "new\nreadonly\n".len()
+    );
+}
+
 /// Parses a whole file, tags and all.
 fn file(src: &str) -> Program {
     parse(src).unwrap_or_else(|e| panic!("parse error in {src:?}: {e}"))
+}
+
+#[test]
+fn trait_final_modifier_does_not_become_an_alias() {
+    let statement = stmt("class C { use T { T::f as final; T::f as protected final; } }");
+    let StatementKind::Class(class) = &statement.kind else {
+        panic!("expected a class");
+    };
+    let ClassMemberKind::TraitUse { adaptations, .. } = &class.members[0].kind else {
+        panic!("expected a trait use");
+    };
+    assert!(matches!(
+        adaptations.as_slice(),
+        [
+            TraitAdaptation::Alias {
+                alias: None,
+                visibility: None,
+                is_final: true,
+                ..
+            },
+            TraitAdaptation::Alias {
+                alias: Some(alias),
+                visibility: Some(Visibility::Protected),
+                is_final: false,
+                ..
+            }
+        ] if alias.name == "final"
+    ));
+}
+
+#[test]
+fn traits_cannot_declare_interfaces() {
+    assert!(
+        err("trait T implements I {}")
+            .message
+            .contains("unexpected token \"implements\"")
+    );
+}
+
+#[test]
+fn class_modifiers_are_rejected_on_traits_and_enums() {
+    for declaration in [
+        "final trait T {}",
+        "abstract enum E {}",
+        "readonly trait R {}",
+    ] {
+        assert!(err(declaration).message.contains("expecting \"abstract\""));
+    }
+}
+
+#[test]
+fn anonymous_class_reports_illegal_modifiers_at_the_keyword() {
+    let source = "new\nabstract\nclass {}";
+    let error = err(&format!("{source};"));
+    assert!(error.is_compile_error());
+    assert_eq!(error.span.start, "<?php\nnew\n".len());
+    assert_eq!(
+        error.message,
+        "Cannot use the abstract modifier on an anonymous class"
+    );
 }
 
 /// The parse error for `<?php ...` source.
@@ -79,13 +156,26 @@ fn sexp_stmt_kind(kind: &StatementKind) -> String {
         StatementKind::If {
             condition,
             then,
+            elseifs,
             otherwise,
-        } => format!(
-            "(if {} {} {})",
-            sexp_expr(condition),
-            sexp_stmts(then),
-            otherwise.as_ref().map_or("none".into(), |b| sexp_stmts(b))
-        ),
+        } => {
+            // Printed as PHP runs it: each `elseif` an `if` inside the `else`.
+            let mut tail = otherwise.as_ref().map_or("none".into(), |b| sexp_stmts(b));
+            for elseif in elseifs.iter().rev() {
+                tail = format!(
+                    "((if {} {} {}))",
+                    sexp_expr(&elseif.condition),
+                    sexp_stmts(&elseif.body),
+                    tail
+                );
+            }
+            format!(
+                "(if {} {} {})",
+                sexp_expr(condition),
+                sexp_stmts(then),
+                tail
+            )
+        }
         StatementKind::While { condition, body } => {
             format!("(while {} {})", sexp_expr(condition), sexp_stmts(body))
         }
@@ -208,7 +298,9 @@ fn sexp_stmt_kind(kind: &StatementKind) -> String {
                 .collect::<Vec<_>>()
                 .join(" ")
         ),
-        StatementKind::Const { attributes, items } => format!(
+        StatementKind::Const {
+            attributes, items, ..
+        } => format!(
             "(const attrs={} {})",
             attributes.len(),
             items
@@ -235,9 +327,9 @@ fn sexp_expr(expression: &Expression) -> String {
             parts
                 .iter()
                 .map(|part| match part {
-                    StringPart::Literal(bytes) =>
+                    StringPart::Literal(bytes, _) =>
                         format!("lit {:?}", String::from_utf8_lossy(bytes)),
-                    StringPart::Expression(e) => sexp_expr(e),
+                    StringPart::Expression(e) | StringPart::DollarCurly(e, _) => sexp_expr(e),
                 })
                 .collect::<Vec<_>>()
                 .join(" ")
@@ -276,13 +368,15 @@ fn sexp_expr(expression: &Expression) -> String {
             sexp_expr(target),
             sexp_member(name)
         ),
-        ExpressionKind::StaticProperty { class, name } => {
+        ExpressionKind::StaticProperty { class, name, .. } => {
             format!("(staticprop {} {})", sexp_expr(class), sexp_variable(name))
         }
         ExpressionKind::ClassConstant { class, name } => {
             format!("(classconst {} {})", sexp_expr(class), sexp_member(name))
         }
-        ExpressionKind::Call { callee, arguments } => {
+        ExpressionKind::Call {
+            callee, arguments, ..
+        } => {
             format!("(call {} {})", sexp_expr(callee), sexp_arguments(arguments))
         }
         ExpressionKind::MethodCall {
@@ -680,6 +774,7 @@ fn sexp_member_kind(member: &ClassMember) -> String {
                         method,
                         alias,
                         visibility,
+                        ..
                     } => format!(
                         "(alias {}::{} as={} vis={:?})",
                         trait_name.as_ref().map_or("none".into(), sexp_name),
@@ -1838,9 +1933,9 @@ fn errors_have_sensible_spans() {
     let error = err(r#""abc"#);
     assert_eq!(error.span.start, "<?php\n".len());
 
-    // Unsupported syntax (backticks) propagates as a ParseError.
-    let error = err("`ls`;");
-    assert!(error.is_unsupported_lex(), "{}", error.message);
+    assert!(parse("<?php `printf $word`;").is_ok());
+    let error = err("`printf");
+    assert_eq!(error.message, "unterminated string");
 
     // Invalid octal.
     assert!(parse("<?php 08;").is_err());

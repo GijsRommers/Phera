@@ -1,0 +1,1 @@
+2	deprecated-php-item	strftime is deprecated since PHP 8.1, use IntlDateFormatter::format() instead.

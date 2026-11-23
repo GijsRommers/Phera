@@ -1,0 +1,27 @@
+# Deprecated in PHP 8.5.12 but found in use by a scan of the reference application's dependencies (2026-11-18). These keep PHP's behaviour, with its Deprecated message.
+function	curl_close
+function	curl_share_close
+function	imagedestroy
+function	ldap_connect
+function	libxml_disable_entity_loader
+function	openssl_pkey_free
+function	socket_set_timeout
+function	utf8_encode
+function	xml_parser_free
+constant	E_STRICT
+constant	DOM_PHP_ERR
+constant	GSLC_SSL_NO_AUTH
+constant	DATE_RFC7231
+class-constant	DateTimeInterface::RFC7231
+class-constant	NumberFormatter::TYPE_CURRENCY
+method	ReflectionMethod::setAccessible
+method	ReflectionProperty::setAccessible
+method	SplObjectStorage::attach
+method	SplObjectStorage::detach
+method	SplObjectStorage::contains
+method	ReflectionParameter::getClass
+method	ReflectionParameter::isArray
+method	ReflectionParameter::isCallable
+method	Redis::delete
+method	Redis::open
+method	Redis::popen

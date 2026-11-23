@@ -29,10 +29,13 @@ impl Vm {
         let NativeError::Unwind(payload) = error else {
             return Err(error);
         };
-        let thrown = payload
-            .0
-            .downcast::<Thrown>()
-            .map_err(|payload| NativeError::Unwind(phera_extension_api::Unwind(payload)))?;
+        let thrown = match payload.0.downcast::<Thrown>() {
+            Ok(thrown) => thrown,
+            Err(payload) if payload.is::<crate::fibers::GracefulClose>() => {
+                return self.unwind_fiber_close(stop);
+            }
+            Err(payload) => return Err(NativeError::Unwind(phera_extension_api::Unwind(payload))),
+        };
         let object = thrown.object;
         let mut skip_handlers = thrown.skip_handlers;
         while self.call_stack.depth() > stop {
@@ -55,8 +58,8 @@ impl Vm {
                 .as_ref()
                 .and_then(|handler| handler.catch.or(handler.finally));
             self.replace_finally_exceptions(&object, target.map(|target| target.index()));
-            if let Some(handler) = handler {
-                self.prepare_handler(&handler);
+            if let (Some(handler), Some(target)) = (handler, target) {
+                self.prepare_handler(&handler, target.index());
                 if let Some(target) = handler.catch {
                     self.set(handler.exception, Value::Object(object));
                     return self.jump(target);
@@ -81,12 +84,35 @@ impl Vm {
         .into_error())
     }
 
+    /// A fiber's graceful close runs finally blocks and skips PHP catches.
+    #[cold]
+    fn unwind_fiber_close(&mut self, stop: usize) -> Result<(), NativeError> {
+        while self.call_stack.depth() > stop {
+            let handler = self.current().and_then(|frame| {
+                let position = frame.ip().saturating_sub(1);
+                frame
+                    .function()
+                    .handlers
+                    .iter()
+                    .find(|handler| {
+                        handler.finally.is_some()
+                            && handler.start.index() <= position
+                            && position < handler.end.index()
+                    })
+                    .cloned()
+            });
+            let target = handler.as_ref().and_then(|handler| handler.finally);
+            if let (Some(handler), Some(target)) = (handler, target) {
+                self.prepare_handler(&handler, target.index());
+                return self.enter_finally(handler.exception, target, Continuation::FiberClose);
+            }
+            self.discard_exception_frame()?;
+        }
+        Err(crate::fibers::GracefulClose::error())
+    }
+
     /// Abandoned calls and try-local expression owners cannot survive into a catch.
-    fn prepare_handler(&mut self, handler: &Handler) {
-        let target = handler
-            .catch
-            .or(handler.finally)
-            .map_or(0, |target| target.index());
+    fn prepare_handler(&mut self, handler: &Handler, target: usize) {
         let Some(frame) = self.current() else {
             return;
         };
@@ -105,7 +131,7 @@ impl Vm {
                 (!(start <= target && target < end.index())).then_some(iterator)
             })
             .collect();
-        self.call_stack.abandon_calls_from(end);
+        self.abandon_calls_unconstructed(end);
         self.closure_captures.retain(|capture| capture.base < base);
         self.registers.truncate(end);
         for register in &handler.cleanup {
@@ -119,12 +145,23 @@ impl Vm {
                 extras.iterators.remove(&iterator.0);
             }
         }
+        self.restore_lexical_silence(Some(target));
+    }
+
+    fn restore_lexical_silence(&mut self, target: Option<usize>) {
+        if self.diagnostic_reporter.silence() == 0 {
+            return;
+        }
         let depth =
             self.frames()
                 .rev()
                 .enumerate()
                 .map(|(index, frame)| {
-                    let end = if index == 0 { target } else { frame.ip() };
+                    let end = if index == 0 {
+                        target.unwrap_or_else(|| frame.ip())
+                    } else {
+                        frame.ip()
+                    };
                     frame.function().instructions.iter().take(end).fold(
                         0usize,
                         |depth, instruction| match instruction {
@@ -135,32 +172,43 @@ impl Vm {
                     )
                 })
                 .sum();
-        self.diagnostic_reporter.restore_silence(depth);
+        self.restore_silence(depth);
     }
 
     /// Include symbol-table changes survive exceptional exit just as normal return.
     fn discard_exception_frame(&mut self) -> Result<(), NativeError> {
         self.finish_include_scope()?;
+        self.abandon_native_view();
         if let Some(frame) = self.call_stack.pop() {
+            if frame.returns_to_native_loop() {
+                self.abandon_native_loop();
+            }
             self.closure_captures
                 .retain(|capture| capture.base < frame.base());
-            self.registers.truncate(frame.start());
-            self.call_stack.abandon_calls_from(frame.start());
+            self.abandon_calls_unconstructed(frame.start());
+            self.mark_failed_constructor(&frame);
+            self.registers.release_frame(frame.start(), frame.base());
         }
+        self.restore_lexical_silence(None);
         Ok(())
     }
 
     /// A throw escaping finally appends its saved exception to the new previous chain.
     fn replace_finally_exceptions(&mut self, object: &Rc<Object>, target: Option<usize>) {
-        let Some(frame_base) = self.current().map(|frame| frame.base()) else {
+        if self.finally_stack.is_empty() {
+            return;
+        }
+        let Some(frame) = self.call_stack.current() else {
             return;
         };
+        let frame_base = frame.base();
+        let instructions = &self.code.function(frame.function).instructions;
         let mut index = self.finally_stack.len();
         while index > 0 {
             index -= 1;
             let saved = &self.finally_stack[index];
             if saved.frame_base != frame_base
-                || target.is_some_and(|target| saved.start <= target && target <= saved.end)
+                || target.is_some_and(|target| saved.contains(target, instructions))
             {
                 continue;
             }
@@ -174,7 +222,7 @@ impl Vm {
 }
 
 /// Append at the tail, avoiding self-links and cycles as Zend does on replacement throws.
-fn append_previous(object: &Rc<Object>, previous: Rc<Object>) {
+pub(crate) fn append_previous(object: &Rc<Object>, previous: Rc<Object>) {
     let mut ancestor = Some(previous.clone());
     let mut ancestors = Vec::new();
     while let Some(candidate) = ancestor {

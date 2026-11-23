@@ -15,24 +15,28 @@ impl NativeTrace {
     pub(crate) fn new(name: &str, arguments: &[Value]) -> Self {
         Self {
             name: name.into(),
-            arguments: {
-                let mut array = phera_value::PhpArray::new();
-                for value in arguments {
-                    let _ = array.push(value.deref().clone());
-                }
-                Value::Array(std::rc::Rc::new(array))
-            },
+            arguments: Self::snapshot_arguments(arguments),
         }
+    }
+
+    /// A PHP trace distinguishes `$reflector->getName()` from `Class::method()`.
+    pub(crate) fn method_name(method: &crate::classes::Method) -> String {
+        let operator = if method.is_static { "::" } else { "->" };
+        format!("{}{operator}{}", method.declaring, method.name)
+    }
+
+    fn snapshot_arguments(arguments: &[Value]) -> Value {
+        let mut array = phera_value::PhpArray::new();
+        for value in arguments {
+            let _ = array.push(value.deref().clone());
+        }
+        Value::from(array)
     }
 }
 
 /// Exception traces label arrays and objects without recursively dumping their contents.
 fn argument(value: &Value) -> String {
-    match &*value.deref() {
-        Value::Array(_) => "Array".into(),
-        Value::Object(object) => format!("Object({})", object.class.name()),
-        _ => crate::error_values::describe(value),
-    }
+    crate::error_values::trace_argument(value, 15)
 }
 
 /// Read user parameter slots after coercion, as PHP's stack traces do.
@@ -42,11 +46,22 @@ fn frame_arguments(vm: &Vm, frame: FrameView<'_>) -> String {
         let Some(Some(value)) = frame.slots(&vm.registers).get(index) else {
             continue;
         };
+        let sensitive = crate::sensitive_parameters::is_sensitive(frame, index);
+        let describe = |value: &Value| {
+            if sensitive {
+                "Object(SensitiveParameterValue)".into()
+            } else {
+                argument(value)
+            }
+        };
         if parameter.variadic {
             if let Value::Array(values) = &*value.deref() {
                 for (key, value) in values.iter() {
-                    let text = argument(value);
+                    let text = describe(value);
                     arguments.push(match key {
+                        phera_value::ArrayKey::Interned(name) => {
+                            format!("{}: {text}", name.to_string_lossy())
+                        }
                         phera_value::ArrayKey::String(name) => {
                             format!("{}: {text}", name.to_string_lossy())
                         }
@@ -55,13 +70,48 @@ fn frame_arguments(vm: &Vm, frame: FrameView<'_>) -> String {
                 }
             }
         } else {
-            arguments.push(argument(value));
+            arguments.push(describe(value));
         }
     }
     arguments.join(", ")
 }
 
 impl Vm {
+    /// Capture a function frame, replacing sensitive arguments with the PHP wrapper.
+    pub(crate) fn native_function_trace(&mut self, name: &str, arguments: &[Value]) -> NativeTrace {
+        let parameters = self
+            .registry
+            .get_function(name)
+            .map_or(&[][..], |entry| entry.params);
+        self.native_parameter_trace(name, parameters, arguments)
+    }
+
+    pub(crate) fn native_parameter_trace(
+        &mut self,
+        name: &str,
+        parameters: &[phera_extension_api::Param],
+        arguments: &[Value],
+    ) -> NativeTrace {
+        if !parameters.iter().any(|parameter| parameter.sensitive) {
+            return NativeTrace::new(name, arguments);
+        }
+        let mut values = phera_value::PhpArray::new();
+        for (index, argument) in arguments.iter().enumerate() {
+            let parameter = parameters
+                .get(index)
+                .or_else(|| parameters.last().filter(|last| last.variadic));
+            let mut value = argument.deref().clone();
+            if parameter.is_some_and(|parameter| parameter.sensitive) {
+                value = crate::sensitive_parameters::wrap_value(&mut self.classes, value);
+            }
+            let _ = values.push(value);
+        }
+        NativeTrace {
+            name: name.into(),
+            arguments: Value::from(values),
+        }
+    }
+
     /// Binding failures point at the declaration and keep the caller as trace frame zero.
     pub(crate) fn error_trace(
         &mut self,
@@ -100,9 +150,11 @@ impl Vm {
                 parent.unit().file,
                 parent.line(),
                 if child.this().is_some() {
-                    child.function().name.replacen("::", "->", 1)
+                    self.code
+                        .function_name(child.frame.function)
+                        .replacen("::", "->", 1)
                 } else {
-                    child.function().name.clone()
+                    self.code.function_name(child.frame.function).to_owned()
                 },
                 frame_arguments(self, child)
             ));
@@ -120,4 +172,71 @@ pub(crate) struct DeclarationFailure {
     pub(crate) message: String,
     pub(crate) file: String,
     pub(crate) line: usize,
+}
+
+/// Native operations that enter PHP record the caller without allocating a PHP frame.
+pub(crate) struct NativeCallbackSite {
+    pub(crate) boundary: usize,
+    pub(crate) native: NativeCaller,
+}
+
+/// `array_map($callback, $values)` already owns its arguments for the duration of the call.
+pub(crate) enum NativeCaller {
+    Saved(NativeTrace),
+    ArrayMap(Vec<Value>),
+    Method {
+        name: &'static str,
+        object: std::rc::Rc<phera_value::Object>,
+        arguments: Vec<Value>,
+        declaration: Option<std::rc::Rc<phera_extension_api::reflection::AttributeSite>>,
+    },
+    Internal(Option<crate::diagnostics::SourceLocation>),
+}
+
+impl NativeCaller {
+    pub(crate) fn name(&self) -> Option<&str> {
+        match self {
+            Self::Saved(trace) => Some(&trace.name),
+            Self::Method { name, .. } => Some(name),
+            Self::ArrayMap(_) => Some("array_map"),
+            Self::Internal(_) => None,
+        }
+    }
+
+    pub(crate) fn arguments(&self) -> Value {
+        match self {
+            Self::Saved(trace) => trace.arguments.clone(),
+            Self::ArrayMap(arguments) | Self::Method { arguments, .. } => {
+                NativeTrace::snapshot_arguments(arguments)
+            }
+            Self::Internal(_) => Value::Null,
+        }
+    }
+
+    pub(crate) fn object(&self) -> Option<&std::rc::Rc<phera_value::Object>> {
+        match self {
+            Self::Method { object, .. } => Some(object),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn child_location(&self) -> Option<(&str, usize)> {
+        match self {
+            Self::Method {
+                declaration: Some(site),
+                ..
+            } => Some((&site.file, site.line)),
+            Self::Internal(Some(location)) => Some((&location.file, location.line)),
+            _ => None,
+        }
+    }
+}
+
+impl Vm {
+    pub(crate) fn push_native_callback(&mut self, native: NativeCaller) {
+        self.native_callback_sites.push(NativeCallbackSite {
+            boundary: self.call_stack.depth(),
+            native,
+        });
+    }
 }

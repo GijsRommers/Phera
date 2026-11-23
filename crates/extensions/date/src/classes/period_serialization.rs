@@ -45,10 +45,8 @@ pub fn unserialize(_: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> 
     period.store(object);
     restored?;
     for (key, value) in data.iter() {
-        if let ArrayKey::String(name) = &key
-            && !PROPERTIES
-                .iter()
-                .any(|field| field.as_bytes() == name.as_bytes())
+        if let Some(name) = key.as_str_bytes()
+            && !PROPERTIES.iter().any(|field| field.as_bytes() == name)
             && !value.is_reference()
         {
             object.set(key, value.clone());
@@ -73,7 +71,7 @@ fn restore_into(data: &PhpArray, period: &mut Period) -> Result<(), NativeError>
         Some(Value::Object(object)) if object.class.is_instance_of(INTERFACE) && has_class => {
             Ok(Some((
                 Instant::read(object).map_err(|_| invalid())?,
-                object.class.name(),
+                object.as_ref(),
             )))
         }
         Some(Value::Null) => Ok(None),
@@ -81,7 +79,8 @@ fn restore_into(data: &PhpArray, period: &mut Period) -> Result<(), NativeError>
     };
     if let Some((start, class)) = date("start", true)? {
         period.start = Some(start);
-        period.date_class = class.into();
+        period.date_class = class.class.name().into();
+        period.iteration_class = Instant::base_class(class);
     }
     if let Some((end, _)) = date("end", !period.date_class.is_empty())? {
         period.end = Some(end);

@@ -1,5 +1,14 @@
 //! Bytecode lowering for expressions.
 
+mod builtin_calls;
+mod builtin_conditions;
+mod builtin_format;
+mod builtin_literals;
+mod builtin_search;
+mod call_results;
+mod namespaced_builtins;
+mod operand_order;
+
 use phera_ast as ast;
 use phera_bytecode::Reg;
 
@@ -12,7 +21,6 @@ impl Compiler<'_> {
         &mut self,
         expression: &ast::Expression,
     ) -> Result<Reg, CompileError> {
-        use ast::ExpressionKind;
         let line = self.lines.line(expression.span.start);
         if nullsafe::contains_nullsafe(expression) {
             return self.compile_nullsafe_chain(expression, line);
@@ -20,25 +28,39 @@ impl Compiler<'_> {
         if let Some(condition) = constant(expression) {
             return self.literal(condition, line);
         }
+        self.compile_expression_kind(expression, line)
+    }
+
+    /// Compile a node by its kind alone, without the checks of
+    /// [`Compiler::compile_expression_node`]. Steps of a long chain come here
+    /// directly; the chain was checked for `?->` as a whole.
+    pub(crate) fn compile_expression_kind(
+        &mut self,
+        expression: &ast::Expression,
+        line: usize,
+    ) -> Result<Reg, CompileError> {
+        use ast::ExpressionKind;
         match &expression.kind {
-            ExpressionKind::Yield { .. } | ExpressionKind::YieldFrom(_) => {
-                Err(self.error("Generators not supported yet", line))
+            ExpressionKind::Yield { key, value } => {
+                self.compile_yield(key.as_deref(), value.as_deref(), line)
             }
-            ExpressionKind::ArrowFunction(arrow) => {
-                self.compile_arrow(arrow, expression.span, line)
-            }
-            ExpressionKind::Closure(closure) => {
-                self.compile_closure(closure, expression.span, line)
-            }
+            ExpressionKind::YieldFrom(source) => self.compile_yield_from(source, line),
+            ExpressionKind::ArrowFunction(arrow) => self.compile_arrow(arrow, line),
+            ExpressionKind::Closure(closure) => self.compile_closure(closure, line),
             ExpressionKind::Throw(operand) => {
                 let source = self.compile_expression(operand)?;
                 self.emit(crate::ir::Instruction::Throw { source }, line);
                 self.allocate_register()
             }
-            ExpressionKind::ClassConstant { .. }
-            | ExpressionKind::New { .. }
+            ExpressionKind::New { .. }
             | ExpressionKind::MethodCall { .. }
-            | ExpressionKind::StaticCall { .. }
+            | ExpressionKind::StaticCall { .. } => {
+                let start = self.temporaries_start();
+                let result = self.compile_object_expression(expression, line)?;
+                self.release_call_operands(start, result, line);
+                Ok(result)
+            }
+            ExpressionKind::ClassConstant { .. }
             | ExpressionKind::Clone { .. }
             | ExpressionKind::InstanceOf { .. } => self.compile_object_expression(expression, line),
             ExpressionKind::Variable(ast::Variable::Named(name)) if name == "this" => {
@@ -46,10 +68,17 @@ impl Compiler<'_> {
                 self.emit(crate::ir::Instruction::This { destination }, line);
                 Ok(destination)
             }
-            ExpressionKind::Variable(_)
-            | ExpressionKind::Index { .. }
-            | ExpressionKind::Property { .. }
-            | ast::ExpressionKind::StaticProperty { .. } => self.compile_read(expression, line),
+            ExpressionKind::Index { .. } | ExpressionKind::Property { .. } => {
+                // `(new T)->n`: the temporary goes right after the read,
+                // before the value is used, as in PHP.
+                let start = self.temporaries_start();
+                let result = self.compile_read(expression)?;
+                self.release_call_operands(start, result, line);
+                Ok(result)
+            }
+            ExpressionKind::Variable(_) | ast::ExpressionKind::StaticProperty { .. } => {
+                self.compile_read(expression)
+            }
             ExpressionKind::Assign { target, value } => {
                 self.compile_assignment(target, value, line)
             }
@@ -94,12 +123,32 @@ impl Compiler<'_> {
                 then,
                 otherwise,
             } => self.compile_ternary(condition, then, otherwise, line),
+            ExpressionKind::Eval(code) => self.compile_eval(code),
             ExpressionKind::Include { kind, path } => self.compile_include(kind, path, line),
             ExpressionKind::Print(expression) => self.compile_print(expression, line),
             ExpressionKind::Exit(expression) => self.compile_exit(expression, line),
             ExpressionKind::Name(name) => self.compile_constant(name, line),
-            ExpressionKind::Call { callee, arguments } => {
-                self.compile_call(callee, arguments, line)
+            ExpressionKind::Call {
+                callee,
+                arguments,
+                opening,
+            } => {
+                let opening_line = self.lines.line(*opening);
+                if self.source.get(*opening) == Some(&b'`') {
+                    self.compile_diagnostics
+                        .borrow_mut()
+                        .push(phera_source::CompileDiagnostic {
+                            kind: phera_source::CompileDiagnosticKind::Deprecated,
+                            message:
+                                "The backtick (`) operator is deprecated, use shell_exec() instead"
+                                    .into(),
+                            line: opening_line,
+                        });
+                }
+                let start = self.temporaries_start();
+                let result = self.compile_call(callee, arguments, line, opening_line)?;
+                self.release_call_operands(start, result, line);
+                Ok(result)
             }
             ExpressionKind::Array(items) => self.compile_array(items, line),
             ExpressionKind::InterpolatedString(parts) => self.compile_interpolation(parts, line),
@@ -118,6 +167,17 @@ impl Compiler<'_> {
         match_expression: &ast::MagicConstant,
         line: usize,
     ) -> Result<Reg, CompileError> {
+        if *match_expression == ast::MagicConstant::Class && self.trait_scope.is_some() {
+            let destination = self.allocate_register()?;
+            self.emit(
+                crate::ir::Instruction::ClassName {
+                    destination,
+                    class: phera_bytecode::TRAIT_CLASS_NAME.into(),
+                },
+                line,
+            );
+            return Ok(destination);
+        }
         self.literal(
             match match_expression {
                 ast::MagicConstant::Line => Constant::Int(line as i64),
@@ -133,6 +193,11 @@ impl Compiler<'_> {
                 ast::MagicConstant::Function | ast::MagicConstant::Method => {
                     Constant::Bytes(if self.function.name == "{main}" {
                         vec![]
+                    } else if *match_expression == ast::MagicConstant::Function
+                        && let Some((_, method)) = self.function.name.split_once("::")
+                        && !self.function.name.starts_with("{closure:")
+                    {
+                        method.as_bytes().to_vec()
                     } else {
                         self.function.name.as_bytes().to_vec()
                     })
@@ -147,7 +212,20 @@ impl Compiler<'_> {
                 ast::MagicConstant::Namespace => {
                     Constant::Bytes(self.namespace.as_bytes().to_vec())
                 }
-                _ => Constant::Bytes(vec![]),
+                ast::MagicConstant::Trait => Constant::Bytes(
+                    self.trait_scope
+                        .as_deref()
+                        .unwrap_or("")
+                        .as_bytes()
+                        .to_vec(),
+                ),
+                ast::MagicConstant::Property => Constant::Bytes(
+                    self.hooked_property
+                        .as_deref()
+                        .unwrap_or("")
+                        .as_bytes()
+                        .to_vec(),
+                ),
             },
             line,
         )
@@ -155,13 +233,20 @@ impl Compiler<'_> {
 }
 
 pub(crate) mod arrays;
+pub(crate) mod assertion_text;
 pub(crate) mod assignments;
 pub(crate) mod calls;
+pub(crate) mod chains;
 pub(crate) mod conditionals;
+pub(crate) mod conditions;
+mod generators;
+mod match_constants;
 pub(crate) mod matching;
 pub(crate) mod nullsafe;
 pub(crate) mod objects;
+pub(crate) mod operand_release;
 pub(crate) mod operators;
+mod parent_hooks;
 pub(crate) mod paths;
 pub(crate) mod places;
 pub(crate) mod spine;

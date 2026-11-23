@@ -30,7 +30,9 @@ mkdir -p "$tree/upstream" "$tree/phpt" "$tree/fixtures"
 echo "exporting $ref from $source_checkout into $work"
 # shellcheck disable=SC2086  # the directories are separate arguments
 git -C "$source_checkout" archive "$ref" $directories LICENSE | tar -x -C "$tree/upstream"
-(cd "$tree/upstream" && find . -name '*.phpt' | sed 's#^\./##' | LC_ALL=C sort) >"$tree/phpt/selected.txt"
+(cd "$tree/upstream" && find . -name '*.phpt' | sed 's#^\./##' | LC_ALL=C sort) |
+  awk -F '\t' 'FILENAME == ARGV[1] { omit[$1]; next } !($0 in omit)' \
+    "$root/tests/phpt/out-of-scope.txt" - >"$tree/phpt/selected.txt"
 
 # Phera has no memory limit yet, and the runner's timeout stops only the
 # process it started. This wrapper stops a test that passes 1.5 GB or 9 s.
@@ -70,7 +72,7 @@ run_all() {
 }
 
 run_all php "$php" -n -d fatal_error_backtraces=0 -d display_errors=1
-run_all phera "$work/capped.sh" "$root/target/release/phera"
+run_all phera "$work/capped.sh" "$root/target/release/phera" -d fatal_error_backtraces=0
 LC_ALL=C comm -12 "$work/php.pass" "$work/phera.pass" >"$work/both.pass"
 
 # Copy the tests, and every small file that is not a test: tests include

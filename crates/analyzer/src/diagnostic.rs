@@ -7,6 +7,23 @@ pub struct Diagnostic {
     pub line: usize,
     pub identifier: String,
     pub message: String,
+    pub severity: Severity,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Severity {
+    #[default]
+    Error,
+    Warn,
+}
+
+impl Severity {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Error => "error",
+            Self::Warn => "warning",
+        }
+    }
 }
 
 pub fn quoted(value: &str) -> String {
@@ -46,13 +63,37 @@ pub enum Format {
     Github,
 }
 
-pub fn render(diagnostics: &[Diagnostic], format: Format) -> String {
+/// Preserve the version-one checker output, which consists only of errors.
+pub fn render(report: &crate::Report, format: Format) -> String {
+    render_report(report, format, false)
+}
+
+pub(crate) fn render_lint(report: &crate::Report, format: Format) -> String {
+    render_report(report, format, true)
+}
+
+fn render_report(report: &crate::Report, format: Format, show_severity: bool) -> String {
+    let diagnostics = &report.diagnostics;
     match format {
         Format::Json => format!(
-            "{{\"version\":1,\"diagnostics\":[{}]}}\n",
+            "{{\"version\":1,\"files\":{},\"vendor_files\":{},\"seconds\":{:.6},\"diagnostics\":[{}]}}\n",
+            report.files,
+            report.vendor_files,
+            report.elapsed.as_secs_f64(),
             diagnostics
                 .iter()
-                .map(Diagnostic::json)
+                .map(|diagnostic| {
+                    let json = diagnostic.json();
+                    if show_severity {
+                        format!(
+                            "{},\"severity\":\"{}\"}}",
+                            json.trim_end_matches('}'),
+                            diagnostic.severity.name()
+                        )
+                    } else {
+                        json
+                    }
+                })
                 .collect::<Vec<_>>()
                 .join(",")
         ),
@@ -65,8 +106,15 @@ pub fn render(diagnostics: &[Diagnostic], format: Format) -> String {
                     output.push_str(&format!("{file}\n"));
                 }
                 output.push_str(&format!(
-                    "  {}  [{}] {}\n",
-                    diagnostic.line, diagnostic.identifier, diagnostic.message
+                    "  {}  {}[{}] {}\n",
+                    diagnostic.line,
+                    if show_severity && diagnostic.severity == Severity::Warn {
+                        "warning "
+                    } else {
+                        ""
+                    },
+                    diagnostic.identifier,
+                    diagnostic.message
                 ));
             }
             output
@@ -75,7 +123,8 @@ pub fn render(diagnostics: &[Diagnostic], format: Format) -> String {
             .iter()
             .map(|d| {
                 format!(
-                    "::error file={},line={},title={}::{}\n",
+                    "::{} file={},line={},title={}::{}\n",
+                    d.severity.name(),
                     annotation(&d.file, true),
                     d.line,
                     annotation(&d.identifier, true),

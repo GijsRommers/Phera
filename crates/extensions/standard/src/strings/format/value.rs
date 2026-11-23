@@ -1,6 +1,6 @@
 //! Converting one value for its specifier, and padding it to the width.
 
-use phera_extension_api::value::{float_repr, to_float, to_int, to_php_string};
+use phera_extension_api::value::{float_repr, to_float, to_int};
 use phera_extension_api::{Context, NativeError, Value};
 
 use super::super::{decimal, reserve};
@@ -43,22 +43,8 @@ impl Specifier {
         name: &str,
         result: &mut Vec<u8>,
     ) -> Result<Option<Vec<u8>>, NativeError> {
-        let Self {
-            precision,
-            explicit,
-            conversion,
-            ..
-        } = *self;
+        let conversion = self.conversion;
         let text = match conversion {
-            b's' => {
-                let mut text = to_php_string(value, context.diagnostics())?
-                    .as_bytes()
-                    .to_vec();
-                if explicit == PrecisionSource::Explicit {
-                    text.truncate(precision.unwrap_or(0) as usize);
-                }
-                text
-            }
             b'd' => self.signed_integer(context, value)?,
             b'u' => (to_int(value, context.diagnostics())? as u64)
                 .to_string()
@@ -89,12 +75,21 @@ impl Specifier {
         Ok(Some(text))
     }
 
-    /// Numeric zero padding follows the sign; left-aligned decimal integers use spaces.
-    pub(super) fn append(
+    pub(super) fn append_string(
         &self,
         result: &mut Vec<u8>,
-        mut text: Vec<u8>,
+        bytes: &[u8],
     ) -> Result<(), NativeError> {
+        let length = if self.explicit == PrecisionSource::Explicit {
+            bytes.len().min(self.precision.unwrap_or(0) as usize)
+        } else {
+            bytes.len()
+        };
+        self.append(result, &bytes[..length])
+    }
+
+    /// Numeric zero padding follows the sign; left-aligned decimal integers use spaces.
+    pub(super) fn append(&self, result: &mut Vec<u8>, mut text: &[u8]) -> Result<(), NativeError> {
         let Self {
             explicit,
             conversion,
@@ -105,7 +100,7 @@ impl Specifier {
         } = *self;
         if explicit == PrecisionSource::Explicit && matches!(conversion, b'b' | b'o' | b'x' | b'X')
         {
-            text.clear();
+            text = &[];
         }
         if left == Alignment::Left && padding == b'0' && matches!(conversion, b'd' | b'u') {
             padding = b' ';
@@ -120,12 +115,13 @@ impl Specifier {
             )
             && text.first().is_some_and(|byte| matches!(byte, b'-' | b'+'))
         {
-            result.push(text.remove(0));
+            result.push(text[0]);
+            text = &text[1..];
         }
         if left == Alignment::Right {
             result.resize(result.len() + count, padding);
         }
-        result.extend_from_slice(&text);
+        result.extend_from_slice(text);
         if left == Alignment::Left {
             result.resize(result.len() + count, padding);
         }

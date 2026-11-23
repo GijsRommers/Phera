@@ -11,12 +11,12 @@
 use std::rc::Rc;
 
 use phera_extension_api::{
-    ClassEntry, ClassKind, Context, MethodEntry, NativeError, NativeResult, Object, Param,
-    ParamType, Value, args,
+    ClassEntry, ClassHooks, ClassKind, Context, MethodEntry, NativeClone, NativeError,
+    NativeResult, Object, Param, ParamType, Value, args,
 };
 
 use crate::engines::{self, Engine, XOSHIRO_JUMP, XOSHIRO_LONG_JUMP, fill, secure_u64};
-use crate::mt19937::{Mode, Mt19937};
+use crate::mt19937::{Mt19937, reject_legacy_mode};
 
 /// In registration order: interfaces before the classes that implement them.
 pub const CLASSES: &[ClassEntry] = &[
@@ -73,8 +73,15 @@ fn store(this: Option<&Rc<Object>>, engine: Engine) -> NativeResult {
     Ok(Value::Null)
 }
 
+const ENGINE_HOOKS: ClassHooks = ClassHooks {
+    clone: Some(NativeClone::copy::<Engine>()),
+    property_access: Some(&ENGINE_PROPERTIES),
+    ..ClassHooks::EMPTY
+};
+
 /// `final class Random\Engine\Mt19937`
 const MT19937: ClassEntry = ClassEntry {
+    hooks: Some(&ENGINE_HOOKS),
     kind: ClassKind::FinalClass,
     interfaces: &["Random\\Engine"],
     methods: &[
@@ -87,6 +94,8 @@ const MT19937: ClassEntry = ClassEntry {
             mt19937_construct,
         ),
         GENERATE,
+        crate::serialization::SERIALIZE,
+        crate::serialization::UNSERIALIZE,
     ],
     ..ClassEntry::class("Random\\Engine\\Mt19937")
 };
@@ -94,28 +103,28 @@ const MT19937: ClassEntry = ClassEntry {
 /// `__construct(?int $seed = null, int $mode = MT_RAND_MT19937)`; a null
 /// seed is random. Only the low 32 bits of the seed count.
 fn mt19937_construct(
-    context: &mut dyn Context,
+    _: &mut dyn Context,
     this: Option<&Rc<Object>>,
     arguments: &[Value],
 ) -> NativeResult {
-    let mode = Mode::from_flag(args::int(arguments, 1).unwrap_or(0)).ok_or_else(|| {
-        NativeError::value_error(
+    let mode = args::int(arguments, 1).unwrap_or_default();
+    reject_legacy_mode(mode)?;
+    if mode != crate::mt19937::MT_RAND_MT19937 {
+        return Err(NativeError::value_error(
             "Random\\Engine\\Mt19937::__construct(): Argument #2 ($mode) must be either \
              MT_RAND_MT19937 or MT_RAND_PHP",
-        )
-    })?;
-    if mode == Mode::Legacy {
-        context.deprecated("The MT_RAND_PHP variant of Mt19937 is deprecated".to_string());
+        ));
     }
     let seed = match args::int(arguments, 0) {
         Some(seed) => seed as u32,
         None => secure_u64()? as u32,
     };
-    store(this, Engine::Mt(Box::new(Mt19937::new(seed, mode))))
+    store(this, Engine::Mt(Box::new(Mt19937::new(seed))))
 }
 
 /// `final class Random\Engine\PcgOneseq128XslRr64`
 const PCG_ONESEQ_128_XSL_RR_64: ClassEntry = ClassEntry {
+    hooks: Some(&ENGINE_HOOKS),
     kind: ClassKind::FinalClass,
     interfaces: &["Random\\Engine"],
     methods: &[
@@ -127,6 +136,8 @@ const PCG_ONESEQ_128_XSL_RR_64: ClassEntry = ClassEntry {
             pcg_construct,
         ),
         GENERATE,
+        crate::serialization::SERIALIZE,
+        crate::serialization::UNSERIALIZE,
         MethodEntry::public("jump", &[Param::new("advance", ParamType::Int)], pcg_jump),
     ],
     ..ClassEntry::class("Random\\Engine\\PcgOneseq128XslRr64")
@@ -141,6 +152,15 @@ fn pcg_construct(
 ) -> NativeResult {
     let seed = match arguments.first() {
         Some(Value::Int(seed)) => u128::from(*seed as u64),
+        Some(Value::InternedStr(seed)) => {
+            let Ok(bytes) = <[u8; 16]>::try_from(seed.as_bytes()) else {
+                return Err(NativeError::value_error(
+                    "Random\\Engine\\PcgOneseq128XslRr64::__construct(): Argument #1 ($seed) \
+                     must be a 16 byte (128 bit) string",
+                ));
+            };
+            u128::from_be_bytes(bytes)
+        }
         Some(Value::String(seed)) => {
             let Ok(bytes) = <[u8; 16]>::try_from(seed.as_bytes()) else {
                 return Err(NativeError::value_error(
@@ -178,6 +198,7 @@ fn pcg_jump(_: &mut dyn Context, this: Option<&Rc<Object>>, arguments: &[Value])
 
 /// `final class Random\Engine\Xoshiro256StarStar`
 const XOSHIRO_256_STAR_STAR: ClassEntry = ClassEntry {
+    hooks: Some(&ENGINE_HOOKS),
     kind: ClassKind::FinalClass,
     interfaces: &["Random\\Engine"],
     methods: &[
@@ -189,6 +210,8 @@ const XOSHIRO_256_STAR_STAR: ClassEntry = ClassEntry {
             xoshiro_construct,
         ),
         GENERATE,
+        crate::serialization::SERIALIZE,
+        crate::serialization::UNSERIALIZE,
         MethodEntry::public("jump", &[], xoshiro_jump),
         MethodEntry::public("jumpLong", &[], xoshiro_jump_long),
     ],
@@ -207,6 +230,7 @@ fn xoshiro_construct(
     }
     let mut random = [0; 32];
     let bytes = match arguments.first() {
+        Some(Value::InternedStr(seed)) => seed.as_bytes(),
         Some(Value::String(seed)) => seed.as_bytes(),
         _ => {
             fill(&mut random)?;
@@ -254,8 +278,28 @@ fn with_xoshiro(this: Option<&Rc<Object>>, polynomial: [u64; 4]) -> NativeResult
 
 /// `final class Random\Engine\Secure`: the operating system's generator.
 const SECURE: ClassEntry = ClassEntry {
+    hooks: Some(&ClassHooks {
+        clone: Some(NativeClone::Forbidden),
+        ..ClassHooks::EMPTY
+    }),
     kind: ClassKind::FinalClass,
     interfaces: &["Random\\CryptoSafeEngine"],
     methods: &[GENERATE],
     ..ClassEntry::class("Random\\Engine\\Secure")
 };
+
+/// PHP's seeded native engines disallow dynamic properties, including clone-with updates.
+const ENGINE_PROPERTIES: phera_extension_api::NativePropertyAccess =
+    phera_extension_api::NativePropertyAccess {
+        string_property: None,
+        read: |_, _, _, _| Ok(None),
+        mutate: |_, object, name, operation| match operation {
+            phera_extension_api::NativePropertyMutation::Assign(_) => {
+                Err(NativeError::error(format!(
+                    "Cannot create dynamic property {}::${name}",
+                    object.class.name()
+                )))
+            }
+            _ => Ok(false),
+        },
+    };

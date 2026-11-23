@@ -2,7 +2,11 @@
 //! Dynamic writes keep uncertain reads silent instead of guessing variable names.
 
 use crate::types::ValueType;
+use phera_ast::Expression;
 use std::collections::{BTreeMap, BTreeSet};
+
+mod facts;
+pub use facts::{AccessStep, Place};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Definition {
@@ -26,11 +30,15 @@ pub struct Scope {
     pub dynamic: bool,
     pub aliases: BTreeMap<String, BTreeSet<String>>,
     pub external_references: BTreeSet<String>,
+    pub facts: facts::Facts,
 }
 
 impl Scope {
     pub fn define(&mut self, name: &str, ty: ValueType) {
+        let ty = ty.limit_complexity();
+        self.facts.forget_variable(name);
         self.values.remove(name);
+        self.known.retain(|symbol| !symbol.refers_to(name));
         self.variables.insert(
             name.into(),
             VariableInfo {
@@ -40,7 +48,9 @@ impl Scope {
         );
         if let Some(aliases) = self.aliases.get(name).cloned() {
             for alias in aliases {
+                self.facts.forget_variable(&alias);
                 self.values.remove(&alias);
+                self.known.retain(|symbol| !symbol.refers_to(&alias));
                 self.variables.insert(
                     alias,
                     VariableInfo {
@@ -54,7 +64,10 @@ impl Scope {
 
     pub fn unknown_writes(&mut self) {
         self.dynamic = true;
+        self.facts = facts::Facts::default();
         self.values.clear();
+        self.known
+            .retain(|symbol| !matches!(symbol, Symbol::Property(..) | Symbol::Method(..)));
         for variable in self.variables.values_mut() {
             variable.ty = ValueType::Mixed;
         }
@@ -78,17 +91,35 @@ impl Scope {
                 ty: ValueType::Array,
             };
         }
-        self.variables.get(name).cloned().unwrap_or(VariableInfo {
+        let mut variable = self.variables.get(name).cloned().unwrap_or(VariableInfo {
             definition: if self.dynamic {
                 Definition::Possible
             } else {
                 Definition::Absent
             },
             ty: ValueType::Mixed,
-        })
+        });
+        if !self.facts.is_empty()
+            && let Some(fact) = self.facts.get(&Place::variable(name))
+        {
+            variable.ty = fact.ty.clone();
+        }
+        variable
+    }
+
+    pub fn forget_member_write(&mut self, target: &Expression) {
+        let target = Place::of(target);
+        self.facts.forget_write(target.as_ref());
+        self.known.retain(|symbol| match symbol {
+            Symbol::Property(place, _) | Symbol::Method(place, _) => {
+                !facts::affected_by_write(place, target.as_ref())
+            }
+            _ => true,
+        });
     }
 
     pub fn detach(&mut self, name: &str) {
+        self.facts.forget_variable(name);
         self.aliases.remove(name);
         self.external_references.remove(name);
         for aliases in self.aliases.values_mut() {
@@ -148,6 +179,7 @@ impl Scope {
         result
             .known
             .retain(|symbol| paths.iter().all(|p| p.known.contains(symbol)));
+        result.facts.retain_common(paths);
         result
             .aliases
             .retain(|key, value| paths.iter().all(|p| p.aliases.get(key) == Some(value)));
@@ -180,9 +212,15 @@ pub enum Symbol {
     Class(String),
     Function(String),
     Constant(String),
+    Property(Place, String),
+    Method(Place, String),
 }
 
 impl Symbol {
+    fn refers_to(&self, receiver: &str) -> bool {
+        matches!(self, Self::Property(place, _) | Self::Method(place, _) if place.root == receiver)
+    }
+
     pub fn constant_name(name: &str) -> String {
         let name = name.trim_start_matches('\\');
         name.split_once("::").map_or_else(

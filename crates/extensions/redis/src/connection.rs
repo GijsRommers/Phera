@@ -49,6 +49,47 @@ pub fn session(object: &Rc<Object>) -> Rc<Session> {
     session
 }
 
+/// The fork hook of `Redis`: a fork's copy has the boot's endpoint,
+/// credentials, database and options but no socket; its first command
+/// borrows one from the pool and sends `AUTH` and `SELECT` again (see
+/// [`Session::ensure`]). The pool resets a socket before lending it again.
+///
+/// ```php
+/// $redis = new Redis();
+/// $redis->connect('127.0.0.1');
+/// $redis->select(2);
+/// Phera\snapshot();
+/// $redis->get('key');   // each request: its own socket, database 2
+/// ```
+pub fn fork_session(
+    _object: &Object,
+    state: &dyn std::any::Any,
+    fork: &mut phera_extension_api::value::Fork<'_>,
+) -> Result<Box<dyn std::any::Any>, String> {
+    const ADVICE: &str = "; finish it before Phera\\snapshot(), or connect after the call";
+    let session = state
+        .downcast_ref::<Rc<Session>>()
+        .ok_or("its built-in state is not initialized")?;
+    if session.batch.borrow().is_some() {
+        return Err(format!("a MULTI or pipeline is open on it{ADVICE}"));
+    }
+    if session.subscriptions.borrow().is_some() {
+        return Err(format!("it is subscribed to channels{ADVICE}"));
+    }
+    let copy = Session {
+        lease: RefCell::new(None),
+        enabled: Cell::new(session.enabled.get()),
+        endpoint: RefCell::new(session.endpoint.borrow().clone()),
+        database: Cell::new(session.database.get()),
+        auth: RefCell::new(fork.value(&session.auth.borrow())),
+        options: RefCell::new(session.options.borrow().clone()),
+        error: RefCell::new(session.error.borrow().clone()),
+        batch: RefCell::new(None),
+        subscriptions: RefCell::new(None),
+    };
+    Ok(Box::new(Rc::new(copy)) as Box<dyn std::any::Any>)
+}
+
 pub fn exception(message: impl Into<String>) -> NativeError {
     NativeError::throw("RedisException", message).with_code(0)
 }
@@ -224,6 +265,7 @@ pub async fn select(session: &Session, value: &Value) -> NativeResult {
 
 pub fn string(value: &Value) -> String {
     match value {
+        Value::InternedStr(s) => s.to_string_lossy(),
         Value::String(s) => s.to_string_lossy(),
         Value::Int(i) => i.to_string(),
         Value::Float(f) => f.to_string(),
@@ -236,6 +278,7 @@ pub fn number(value: Option<&Value>, default: f64) -> f64 {
     match value {
         Some(Value::Int(i)) => *i as f64,
         Some(Value::Float(f)) => *f,
+        Some(Value::InternedStr(s)) => s.to_string_lossy().parse().unwrap_or(default),
         Some(Value::String(s)) => s.to_string_lossy().parse().unwrap_or(default),
         _ => default,
     }

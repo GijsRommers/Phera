@@ -24,8 +24,9 @@ impl Compiler<'_> {
             StatementKind::If {
                 condition,
                 then,
+                elseifs,
                 otherwise,
-            } => self.compile_if(condition, then, otherwise, line)?,
+            } => self.compile_if(condition, then, elseifs, otherwise, line)?,
             StatementKind::While { condition, body } => {
                 self.compile_while(condition, body, line)?
             }
@@ -41,13 +42,17 @@ impl Compiler<'_> {
             StatementKind::Break(name) | StatementKind::Continue(name) => {
                 self.compile_loop_jump(statement, name, line)?
             }
+            StatementKind::Goto(label) => self.compile_goto(label),
+            StatementKind::Label(label) => self.compile_label(label)?,
             StatementKind::Try {
                 body,
                 catches,
                 finally,
             } => self.compile_try(body, catches, finally, line)?,
-            StatementKind::Return(expression) => self.compile_return(expression, line)?,
-            StatementKind::Class(declaration) => self.compile_class(declaration, timing, line)?,
+            StatementKind::Return(expression) => self.compile_return(expression.as_ref(), line)?,
+            StatementKind::Class(declaration) => {
+                self.compile_class(declaration, timing, line)?;
+            }
             StatementKind::Function(declaration) => {
                 self.compile_function(declaration, timing, line)?
             }
@@ -55,10 +60,29 @@ impl Compiler<'_> {
                 name, statements, ..
             } => self.compile_namespace(name, statements, timing)?,
             StatementKind::Use(items) => self.compile_use(items)?,
-            StatementKind::Const { items, .. } => self.compile_constants(items, line)?,
-            StatementKind::Declare { directives, body } => {
-                self.compile_declare(directives, body, timing, line)?
+            StatementKind::Const {
+                items,
+                attributes,
+                doc_comment,
+            } => {
+                let metadata = self.declaration_metadata(
+                    attributes,
+                    statement.span,
+                    *doc_comment,
+                    None,
+                    builtin_attributes::AttributePlacement::Declaration(
+                        phera_source::attributes::AttributeTarget::Constant,
+                    ),
+                )?;
+                self.compile_constants(items, &metadata, line)?;
             }
+            StatementKind::Declare { directives, body } => self.compile_declare(
+                directives,
+                body,
+                timing,
+                line,
+                declarations::DeclarePosition::Body,
+            )?,
             StatementKind::Global(variables) => self.compile_globals(variables, line)?,
             StatementKind::Static(variables) => self.compile_statics(variables, line)?,
             StatementKind::Unset(expressions) => self.compile_unset(expressions, line)?,
@@ -90,14 +114,27 @@ impl Compiler<'_> {
 }
 
 pub(crate) mod bindings;
+mod builtin_attributes;
 pub(crate) mod classes;
 pub(crate) mod control;
 pub(crate) mod declarations;
+mod enums;
 mod function_parameters;
 pub(crate) mod functions;
 pub(crate) mod loops;
+mod magic_methods;
+mod property_hook_bodies;
+mod property_hooks;
+mod property_visibility;
+mod reflection;
 pub(crate) mod switching;
+mod traits;
 
 pub(crate) mod exceptions;
+pub(crate) mod exits;
+pub(crate) mod gotos;
 
-pub(crate) mod class_errors;
+pub(crate) mod class_default_types;
+mod class_errors;
+mod class_functions;
+mod type_declarations;

@@ -1,4 +1,8 @@
 //! The status line and headers of the response being built.
+//!
+//! `header('Content-Type: application/json')` replaces the default MIME type.
+
+use phera_extension_api::RequestState;
 
 /// What `header()` and `http_response_code()` have decided so far.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -7,6 +11,7 @@ pub struct ResponseHead {
     /// In the order they were set. Names keep the spelling the script used;
     /// they are compared without regard to case.
     pub headers: Vec<(String, Vec<u8>)>,
+    lines: Vec<Vec<u8>>,
 }
 
 impl Default for ResponseHead {
@@ -14,11 +19,28 @@ impl Default for ResponseHead {
         ResponseHead {
             status: 200,
             headers: Vec::new(),
+            lines: Vec::new(),
         }
     }
 }
 
 impl ResponseHead {
+    /// The web SAPI adds its default content type immediately before the header callback.
+    pub fn prepare(state: &mut RequestState) {
+        let head = state.get_or_default::<Self>();
+        if head.header("Content-Type").is_none() {
+            head.apply(b"Content-type: text/html; charset=UTF-8", false);
+        }
+    }
+
+    /// PHP replaces the default status for a hidden fatal error.
+    pub fn set_error_status(state: &mut RequestState) {
+        let head = state.get_or_default::<Self>();
+        if head.status == 200 {
+            head.status = 500;
+        }
+    }
+
     /// Applies one `header()` line.
     ///
     /// Two forms are special in PHP. `HTTP/1.1 404 Not Found` sets the status
@@ -47,11 +69,38 @@ impl ResponseHead {
             self.remove(&name);
         }
         self.headers.push((name, value));
+        self.lines.push(line.to_vec());
     }
 
     pub(crate) fn remove(&mut self, name: &str) {
         self.headers
             .retain(|(existing, _)| !existing.eq_ignore_ascii_case(name));
+        self.lines.retain(|line| {
+            !line
+                .split(|&byte| byte == b':')
+                .next()
+                .is_some_and(|existing| existing.trim_ascii().eq_ignore_ascii_case(name.as_bytes()))
+        });
+    }
+
+    pub(crate) fn append_cookie(&mut self, value: &[u8]) {
+        self.headers.push(("Set-Cookie".into(), value.to_vec()));
+        self.lines.push([b"Set-Cookie: ", value].concat());
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.headers.clear();
+        self.lines.clear();
+    }
+
+    pub(crate) fn lines(&self) -> impl Iterator<Item = &[u8]> {
+        self.lines.iter().map(Vec::as_slice)
+    }
+
+    /// Set the coding applied by PHP's output handler.
+    pub fn set_content_coding(&mut self, coding: &str) {
+        self.apply(format!("Content-Encoding: {coding}").as_bytes(), true);
+        self.apply(b"Vary: Accept-Encoding", false);
     }
 
     /// The value of a header, if the script set it.

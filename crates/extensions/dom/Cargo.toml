@@ -1,0 +1,22 @@
+[package]
+name = "phera-ext-dom"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+phera-extension-api.workspace = true
+quick-xml.workspace = true
+html5ever.workspace = true
+encoding_rs.workspace = true
+cssparser.workspace = true
+precomputed-hash.workspace = true
+selectors.workspace = true
+tokio = { workspace = true, features = ["io-util"] }
+regex.workspace = true
+rustix.workspace = true
+url.workspace = true
+
+[lints]
+workspace = true

@@ -21,6 +21,9 @@ impl Instruction {
                 *name = mapping(*name);
                 *scratch = mapping(*scratch);
             }
+            if let crate::ir::PlaceScope::NamedStaticProperty { scratch, .. } = &mut target.scope {
+                *scratch = mapping(*scratch);
+            }
             for step in &mut target.path {
                 if let crate::ir::PathStep::Index(register)
                 | crate::ir::PathStep::DynamicProperty(register) = step
@@ -30,6 +33,24 @@ impl Instruction {
             }
         }
         match self {
+            Instruction::GeneratorStart => {}
+            Instruction::Yield {
+                destination,
+                key,
+                value,
+            } => {
+                *destination = map(*destination);
+                *key = key.map(&mut map);
+                *value = value.map(&mut map);
+            }
+            Instruction::YieldFrom {
+                destination,
+                source,
+            } => {
+                *destination = map(*destination);
+                *source = map(*source);
+            }
+            Instruction::AttributeDiagnostics => {}
             Instruction::ThisOrNull { destination } => *destination = map(*destination),
             Instruction::Capture { source, .. } => *source = map(*source),
             Instruction::Closure { destination, .. } => *destination = map(*destination),
@@ -40,12 +61,25 @@ impl Instruction {
             | Instruction::FinallyReturn { state }
             | Instruction::FinallyDiscard { state } => *state = map(*state),
             Instruction::Throw { source } => *source = map(*source),
+            Instruction::DynamicClassConstant {
+                destination,
+                class,
+                name,
+            } => {
+                *destination = map(*destination);
+                *class = map(*class);
+                *name = map(*name);
+            }
             Instruction::ClassConstant {
                 destination, class, ..
             } => {
                 *destination = map(*destination);
                 *class = map(*class);
             }
+            Instruction::NamedClassConstant { destination, .. } => {
+                *destination = map(*destination);
+            }
+
             Instruction::NewDynamic { class } => *class = map(*class),
             Instruction::DynamicMethodCall { receiver, method } => {
                 *receiver = map(*receiver);
@@ -74,8 +108,13 @@ impl Instruction {
             Instruction::Clone {
                 destination,
                 source,
+                with,
+            } => {
+                *destination = map(*destination);
+                *source = map(*source);
+                *with = with.map(map);
             }
-            | Instruction::InstanceOf {
+            Instruction::InstanceOf {
                 destination,
                 source,
                 ..
@@ -97,8 +136,14 @@ impl Instruction {
             Instruction::DynamicGlobal { name } => *name = map(*name),
             Instruction::Clear { register } => *register = map(*register),
             Instruction::StartCall { .. } => {}
+            Instruction::InitUserCallback { callback, .. }
+            | Instruction::SendUserCallback {
+                source: callback, ..
+            } => *callback = map(*callback),
             Instruction::StartDynamicCall { callee } => *callee = map(*callee),
-            Instruction::FinishCall { destination: dst }
+            Instruction::FinishCall {
+                destination: dst, ..
+            }
             | Instruction::FinishCallable { destination: dst } => *dst = map(*dst),
             Instruction::Send { argument } => match &mut argument.source {
                 crate::ir::ArgumentSource::Value(register) => *register = map(*register),
@@ -129,12 +174,19 @@ impl Instruction {
             | Instruction::Constant {
                 destination: dst, ..
             }
+            | Instruction::BuiltinFrame {
+                destination: dst, ..
+            }
             | Instruction::Array(dst)
             | Instruction::Echo(dst)
             | Instruction::ReturnReference(dst)
             | Instruction::Return(dst)
             | Instruction::Exit(dst) => *dst = map(*dst),
-            Instruction::Include {
+            Instruction::Eval {
+                destination: dst,
+                source: src,
+            }
+            | Instruction::Include {
                 destination: dst,
                 path: src,
                 ..
@@ -147,9 +199,33 @@ impl Instruction {
                 destination: dst,
                 source: src,
                 ..
+            }
+            | Instruction::BuiltinUnary {
+                destination: dst,
+                source: src,
+                ..
+            }
+            | Instruction::NamespacedBuiltin {
+                destination: dst,
+                source: src,
+                ..
+            }
+            | Instruction::InLiteralArray {
+                destination: dst,
+                needle: src,
+                ..
             } => {
                 *dst = map(*dst);
                 *src = map(*src)
+            }
+            Instruction::ArrayKeyExists {
+                destination,
+                key,
+                array,
+            } => {
+                *destination = map(*destination);
+                *key = map(*key);
+                *array = map(*array);
             }
             Instruction::Reference {
                 destination: dst,
@@ -174,6 +250,15 @@ impl Instruction {
                 place(target, &mut map);
                 *src = map(*src)
             }
+            Instruction::WriteFromLocal {
+                place: target,
+                source: src,
+                destination: dst,
+            } => {
+                place(target, &mut map);
+                *src = map(*src);
+                *dst = map(*dst);
+            }
             Instruction::Bind {
                 place: target,
                 source,
@@ -194,8 +279,19 @@ impl Instruction {
             }
             Instruction::Branch { value, .. }
             | Instruction::BranchNull { value, .. }
+            | Instruction::BranchNotNull { value, .. }
             | Instruction::Define { source: value, .. }
             | Instruction::Global { local: value, .. } => *value = map(*value),
+            Instruction::BranchCompare { left, right, .. } => {
+                *left = map(*left);
+                *right = map(*right)
+            }
+            Instruction::BranchCompareInt { left, .. } => *left = map(*left),
+            Instruction::BranchInstanceOf { source, .. } => *source = map(*source),
+            Instruction::BranchDynamicInstanceOf { source, class, .. } => {
+                *source = map(*source);
+                *class = map(*class)
+            }
             Instruction::Call {
                 destination: dst,
                 name,
@@ -231,6 +327,7 @@ impl Instruction {
                     place(target, &mut map)
                 }
             }
+            Instruction::IterEnd(iterator) => *iterator = map(*iterator),
             Instruction::IterNext {
                 iterator: id,
                 key,
@@ -244,7 +341,12 @@ impl Instruction {
                 *value = map(*value)
             }
             Instruction::MatchError { subject } => *subject = map(*subject),
-            Instruction::Jump(_) | Instruction::Suppress(_) | Instruction::Declare(_) => {}
+            Instruction::Nop
+            | Instruction::Jump(_)
+            | Instruction::GuardBuiltin { .. }
+            | Instruction::Suppress(_)
+            | Instruction::Declare(_)
+            | Instruction::ReturnMissing => {}
         }
     }
 }

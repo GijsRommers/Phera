@@ -10,33 +10,75 @@ use phera_bytecode::{
     Symbol, SymbolId, Type, TypeId, TypeMask,
 };
 
+use std::collections::{HashMap, HashSet};
+
 use crate::ir;
 
 /// Final table builder. No compiler-only paths escape in instructions.
 #[derive(Default)]
-pub(crate) struct Tables {
+pub(crate) struct Tables<'a> {
     unit: CompiledUnit,
     /// The file's top-level functions, which calls reach with `CallDirect`.
     callees: crate::passes::direct_calls::DirectCallees,
+    native_functions: Option<&'a crate::NativeFunctions<'a>>,
+    /// Where each name, constant and symbol already sits in its table. A
+    /// generated file has tens of thousands of each; searching the tables
+    /// would make lowering quadratic.
+    name_ids: HashMap<String, u32>,
+    constant_ids: HashMap<ConstantValue, u32>,
+    symbol_ids: HashMap<Symbol, u32>,
+    /// The registers of the function being lowered that append in place.
+    pub(crate) appending: HashSet<Reg>,
 }
 
-impl Tables {
+/// A literal as a hashable key: floats by their bits, so `-0.0` and `0.0`
+/// stay two constants and a NaN is found again.
+#[derive(PartialEq, Eq, Hash)]
+enum ConstantValue {
+    EmptyArray,
+    Null,
+    Bool(bool),
+    Int(i64),
+    Float(u64),
+    Bytes(Vec<u8>),
+}
+
+impl Tables<'_> {
+    pub(crate) fn literal_array(&mut self, values: Vec<Constant>) -> ConstId {
+        let index = ConstId(self.unit.constants.len() as u32);
+        self.unit.constants.push(Constant::Array(
+            values
+                .into_iter()
+                .map(|value| (phera_bytecode::ConstantKey::Next, value))
+                .collect(),
+        ));
+        index
+    }
+
     /// Intern names in first-use order to keep table indices deterministic.
     pub(crate) fn name(&mut self, name: &str) -> NameId {
-        let index = self
-            .unit
-            .names
-            .iter()
-            .position(|entry| entry == name)
-            .unwrap_or_else(|| {
-                self.unit.names.push(name.to_owned());
-                self.unit.names.len() - 1
-            });
-        NameId(index as u32)
+        if let Some(&index) = self.name_ids.get(name) {
+            return NameId(index);
+        }
+        let index = self.unit.names.len() as u32;
+        self.unit.names.push(name.to_owned());
+        self.name_ids.insert(name.to_owned(), index);
+        NameId(index)
     }
 
     /// Recognize literal values without evaluating arbitrary PHP expressions.
     pub(crate) fn constant(&mut self, constant: &ir::Constant) -> ConstId {
+        let key = match constant {
+            ir::Constant::EmptyArray => ConstantValue::EmptyArray,
+            ir::Constant::Null => ConstantValue::Null,
+            ir::Constant::Bool(value) => ConstantValue::Bool(*value),
+            ir::Constant::Int(value) => ConstantValue::Int(*value),
+            ir::Constant::Float(value) => ConstantValue::Float(value.to_bits()),
+            ir::Constant::Bytes(value) => ConstantValue::Bytes(value.clone()),
+        };
+        if let Some(&index) = self.constant_ids.get(&key) {
+            return ConstId(index);
+        }
         let value = match constant {
             ir::Constant::EmptyArray => Constant::Array(vec![]),
             ir::Constant::Null => Constant::Null,
@@ -45,16 +87,10 @@ impl Tables {
             ir::Constant::Float(value) => Constant::Float(*value),
             ir::Constant::Bytes(value) => Constant::String(value.clone()),
         };
-        let index = self
-            .unit
-            .constants
-            .iter()
-            .position(|entry| entry == &value)
-            .unwrap_or_else(|| {
-                self.unit.constants.push(value);
-                self.unit.constants.len() - 1
-            });
-        ConstId(index as u32)
+        let index = self.unit.constants.len() as u32;
+        self.unit.constants.push(value);
+        self.constant_ids.insert(key, index);
+        ConstId(index)
     }
 
     /// Intern a resolved symbol, folding function names but preserving constant spelling.
@@ -79,16 +115,13 @@ impl Tables {
             }),
             written: name.to_owned(),
         };
-        let index = self
-            .unit
-            .symbols
-            .iter()
-            .position(|entry| entry == &symbol)
-            .unwrap_or_else(|| {
-                self.unit.symbols.push(symbol);
-                self.unit.symbols.len() - 1
-            });
-        SymbolId(index as u32)
+        if let Some(&index) = self.symbol_ids.get(&symbol) {
+            return SymbolId(index);
+        }
+        let index = self.unit.symbols.len() as u32;
+        self.symbol_ids.insert(symbol.clone(), index);
+        self.unit.symbols.push(symbol);
+        SymbolId(index)
     }
 
     /// Translate a written type to its mask and class-name table entries.
@@ -126,7 +159,7 @@ impl Tables {
             mask,
             classes,
             intersection: display.contains('&'),
-            display: display.into(),
+            display: phera_bytecode::union_in_php_order(display),
         });
         TypeId(index as u32)
     }
@@ -161,12 +194,14 @@ impl Tables {
                 phera_bytecode::ArgumentLayout::Fixed
             },
             returns_reference: source.returns_reference,
+            is_generator: source.is_generator,
             return_type: source.return_type.as_deref().map(|ty| self.ty(ty)),
             dynamic_scope: source.dynamic_scope,
             strict_types: source.strict_types,
             ..Function::default()
         };
         let scratch = Reg(source.registers as u16);
+        self.appending = crate::passes::lowering::appending_registers(&source.instructions);
         let mut offsets = Vec::new();
         for (index, instruction) in source.instructions.into_iter().enumerate() {
             offsets.push(function.instructions.len() as u32);
@@ -188,6 +223,16 @@ impl Tables {
                 | Instruction::JumpIf { target, .. }
                 | Instruction::JumpIfNot { target, .. }
                 | Instruction::JumpIfNull { target, .. }
+                | Instruction::JumpIfNotNull { target, .. }
+                | Instruction::GuardBuiltin { call: target, .. }
+                | Instruction::BinaryIntBranch { target, .. }
+                | Instruction::BinaryIntBranchIf { target, .. }
+                | Instruction::BinaryBranch { target, .. }
+                | Instruction::BinaryBranchIf { target, .. }
+                | Instruction::InstanceOfBranch { target, .. }
+                | Instruction::InstanceOfBranchIf { target, .. }
+                | Instruction::DynamicInstanceOfBranch { target, .. }
+                | Instruction::DynamicInstanceOfBranchIf { target, .. }
                 | Instruction::IterNext { end: target, .. }
                 | Instruction::IterNextKeyed { end: target, .. } => Some(target),
                 _ => None,
@@ -216,7 +261,15 @@ impl Tables {
                 .instructions
                 .iter()
                 .any(|instruction| match instruction {
-                    Instruction::InitDynamicCall { .. } => true,
+                    Instruction::InitDynamicCall { .. } | Instruction::InitUserCallback { .. } => {
+                        true
+                    }
+                    Instruction::BuiltinFrame {
+                        op:
+                            phera_bytecode::BuiltinFrame::ArgumentCount
+                            | phera_bytecode::BuiltinFrame::ArgumentsFrom(_),
+                        ..
+                    } => true,
                     Instruction::InitCall { function } => self
                         .unit
                         .symbols
@@ -240,8 +293,12 @@ impl Tables {
                         }),
                     _ => false,
                 });
-        let areas =
-            crate::passes::direct_calls::rewrite(&mut function, &self.unit.symbols, &self.callees);
+        let areas = crate::passes::direct_calls::rewrite(
+            &mut function,
+            &self.unit.symbols,
+            &self.callees,
+            self.native_functions,
+        );
         crate::passes::optimize::optimize(&mut function);
         if let Some(areas) = areas
             && crate::passes::direct_calls::write_arguments_in_place(&mut function, areas)
@@ -249,7 +306,32 @@ impl Tables {
             // Removes the moves that became `Nop`.
             crate::passes::optimize::optimize(&mut function);
         }
+        crate::passes::clear_flow::elide(&mut function, &self.unit.constants, &self.unit.types);
+        // Last: the passes above never see `CallMethod`, whose site table
+        // reads the argument registers.
+        crate::passes::method_calls::rewrite(&mut function);
+        // Then the temporaries read once and cleared are taken.
+        crate::passes::takes::rewrite(&mut function);
+        use_immediate_literals(&mut function, &self.unit.constants);
         function
+    }
+}
+
+/// Embed scalars such as the `null` in `return null;` in their load instructions.
+/// Run after the takes pass so that readers can still absorb table-backed operands.
+fn use_immediate_literals(function: &mut Function, constants: &[Constant]) {
+    for instruction in function.instructions.iter_mut() {
+        let Instruction::LoadConst { dst, constant } = *instruction else {
+            continue;
+        };
+        *instruction = match constants[constant.index()] {
+            Constant::Null => Instruction::LoadNull { dst },
+            Constant::Bool(value) => Instruction::LoadBool { dst, value },
+            Constant::Int(value) if let Ok(value) = i32::try_from(value) => {
+                Instruction::LoadInt { dst, value }
+            }
+            _ => continue,
+        };
     }
 }
 
@@ -275,18 +357,32 @@ fn direct_callees(source: &ir::CompiledUnit) -> crate::passes::direct_calls::Dir
 }
 
 /// Intern all file tables once compilation has completed.
-pub(crate) fn lower(source: ir::CompiledUnit) -> CompiledUnit {
+pub(crate) fn lower(
+    source: ir::CompiledUnit,
+    native_functions: Option<&crate::NativeFunctions<'_>>,
+) -> CompiledUnit {
     let mut tables = Tables {
         callees: direct_callees(&source),
+        native_functions,
         ..Tables::default()
     };
     tables.unit.file = source.file;
+    tables.unit.reflection_initializers = source.reflection_initializers;
+    tables.unit.reflection_source = source.reflection_source;
+    tables.unit.constant_metadata = source.constant_metadata;
+    tables.unit.has_link_attributes = source.has_link_attributes;
     tables.unit.declaration_warnings = source.declaration_warnings;
     tables.unit.main = tables.function(source.main);
     tables.unit.functions = source
         .functions
         .into_iter()
-        .map(|function| tables.function(function))
+        .map(|mut function| {
+            tables
+                .unit
+                .function_metadata
+                .push(std::mem::take(&mut function.metadata));
+            tables.function(function)
+        })
         .collect();
     tables.unit.hoisted = source
         .hoisted
@@ -297,6 +393,8 @@ pub(crate) fn lower(source: ir::CompiledUnit) -> CompiledUnit {
         .classes
         .into_iter()
         .map(|declaration| phera_bytecode::ClassDeclaration {
+            metadata: declaration.metadata,
+            line: declaration.line,
             name: declaration.name,
             parent: declaration
                 .parent
@@ -311,10 +409,22 @@ pub(crate) fn lower(source: ir::CompiledUnit) -> CompiledUnit {
             is_final: declaration.is_final,
             is_readonly: declaration.is_readonly,
             allows_dynamic_properties: declaration.allows_dynamic_properties,
+            traits: declaration.traits,
+            enum_backing: declaration.enum_backing,
+            enum_cases: declaration
+                .enum_cases
+                .into_iter()
+                .map(|(name, backing, metadata)| phera_bytecode::EnumCase {
+                    metadata,
+                    name: tables.name(&name),
+                    backing: backing.map(|index| FunctionId(index as u32)),
+                })
+                .collect(),
             constants: declaration
                 .constants
                 .into_iter()
                 .map(|constant| phera_bytecode::ClassConstant {
+                    metadata: constant.metadata,
                     name: tables.name(&constant.name),
                     visibility: constant.visibility,
                     is_final: constant.is_final,
@@ -326,11 +436,29 @@ pub(crate) fn lower(source: ir::CompiledUnit) -> CompiledUnit {
                 .properties
                 .into_iter()
                 .map(|property| phera_bytecode::PropertyDeclaration {
+                    metadata: property.metadata,
+                    promoted: property.promoted,
+                    set_visibility: property.set_visibility,
+                    is_final: property.is_final,
                     name: tables.name(&property.name),
                     visibility: property.visibility,
                     is_static: property.is_static,
                     is_readonly: property.is_readonly,
                     ty: property.ty.map(|name| tables.ty(&name)),
+                    hooks: property.hooks.map(|hooks| {
+                        let lower_hook = |hook: phera_bytecode::PropertyHook<usize>| {
+                            phera_bytecode::PropertyHook {
+                                function: FunctionId(hook.function as u32),
+                                is_abstract: hook.is_abstract,
+                                is_final: hook.is_final,
+                            }
+                        };
+                        Box::new(phera_bytecode::PropertyHooks {
+                            get: hooks.get.map(lower_hook),
+                            set: hooks.set.map(lower_hook),
+                            is_virtual: hooks.is_virtual,
+                        })
+                    }),
                     default: property.default.map(|index| {
                         phera_bytecode::Initializer::Function(FunctionId(index as u32))
                     }),

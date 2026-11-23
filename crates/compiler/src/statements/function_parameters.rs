@@ -6,24 +6,59 @@ use crate::ir::{Instruction, Place, Target};
 use crate::{CompileError, Compiler};
 
 impl Compiler<'_> {
-    /// Unsupported declaration metadata must fail before any body is emitted.
-    pub(crate) fn validate_function_attributes(
-        &self,
-        declaration: &ast::FunctionDeclaration,
-        line: usize,
-    ) -> Result<(), CompileError> {
-        if !declaration.attributes.is_empty() {
-            return Err(self.error("Attributes not supported yet", line));
+    /// Literal null defaults on ordinary parameters also accept an explicit null argument.
+    pub(super) fn parameter_type(&self, parameter: &ast::Parameter) -> Option<String> {
+        let mut declared = self.declaration_type(parameter.ty.as_ref()?);
+        if parameter.is_promoted()
+            || !matches!(
+                parameter.default.as_ref().map(|default| &default.kind),
+                Some(ast::ExpressionKind::Literal(ast::Literal::Null))
+            )
+            || declared.starts_with('?')
+            || declared
+                .split('|')
+                .any(|member| matches!(member, "null" | "mixed" | "void" | "never"))
+        {
+            return Some(declared);
         }
-        for parameter in &declaration.parameters {
-            if !parameter.attributes.is_empty() {
-                return Err(self.error("Attributes not supported yet", line));
+        self.compile_diagnostics.borrow_mut().push(phera_source::CompileDiagnostic {
+            kind: phera_source::CompileDiagnosticKind::Deprecated,
+            message: format!(
+                "{}(): Implicitly marking parameter ${} as nullable is deprecated, the explicit nullable type must be used instead",
+                self.function.name, parameter.name
+            ),
+            line: self.lines.line(parameter.span.start),
+        });
+        if declared.contains(['|', '&']) {
+            declared.push_str("|null");
+        } else {
+            declared.insert(0, '?');
+        }
+        Some(declared)
+    }
+
+    /// Unsupported declaration metadata must fail before any body is emitted.
+    pub(crate) fn validate_parameter_features(
+        &self,
+        declaration: &super::functions::FunctionSource<'_>,
+    ) -> Result<(), CompileError> {
+        for parameter in declaration.parameters {
+            if parameter.modifiers.is_static {
+                return Err(self.error(
+                    "Cannot use the static modifier on a parameter",
+                    self.lines.line(parameter.span.start),
+                ));
             }
-            if !parameter.hooks.is_empty() {
-                return Err(self.error("Property hooks not supported yet", line));
-            }
-            if parameter.modifiers.set_visibility.is_some() {
-                return Err(self.error("Asymmetric visibility not supported yet", line));
+            if parameter.is_promoted()
+                && !declaration
+                    .name
+                    .rsplit_once("::")
+                    .is_some_and(|(_, method)| method.eq_ignore_ascii_case("__construct"))
+            {
+                return Err(self.error(
+                    "Cannot declare promoted property outside a constructor",
+                    self.lines.line(parameter.span.start),
+                ));
             }
         }
         Ok(())
@@ -36,7 +71,7 @@ impl Compiler<'_> {
         line: usize,
     ) -> Result<(), CompileError> {
         for parameter in parameters {
-            if parameter.modifiers.visibility.is_some() {
+            if parameter.is_promoted() {
                 let scratch = self.allocate_register()?;
                 let source = self.local(&parameter.name)?;
                 let place = Place {
@@ -68,7 +103,7 @@ impl Compiler<'_> {
         parameters: &[ast::Parameter],
         line: usize,
     ) -> Result<(), CompileError> {
-        for parameter in parameters {
+        for (index, parameter) in parameters.iter().enumerate() {
             if let Some(default) = &parameter.default {
                 self.validate_parameter_default(parameter, default, line)?;
                 let param = self.local(&parameter.name)?;
@@ -91,11 +126,16 @@ impl Compiler<'_> {
                     },
                     line,
                 );
-                if let Some(ty) = &parameter.ty {
+                if let Some(declaration_type) = self
+                    .function
+                    .parameters
+                    .get(index)
+                    .and_then(|parameter| parameter.declaration_type.clone())
+                {
                     self.emit(
                         Instruction::Check {
                             local: param,
-                            declaration_type: self.declaration_type(ty),
+                            declaration_type,
                         },
                         line,
                     );

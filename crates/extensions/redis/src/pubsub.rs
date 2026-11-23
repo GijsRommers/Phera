@@ -1,13 +1,15 @@
 //! Subscription sockets are dedicated and never returned to a pool.
 //! `$r->subscribe(["news"], function ($r, $channel, $message) { $r->unsubscribe(["news"]); });`
 use crate::connection::{Session, exception, string};
+use crate::pool::Socket;
 use phera_extension_api::{Context, NativeResult, Object, PhpArray, Value};
 use redis::{PushKind, Value as Reply};
 use std::collections::HashSet;
 use std::rc::Rc;
+use std::time::Duration;
 
 pub struct Subscription {
-    connection: redis::aio::MultiplexedConnection,
+    socket: Socket,
     channels: HashSet<Vec<u8>>,
 }
 
@@ -23,14 +25,13 @@ pub async fn subscribe(
         .borrow()
         .clone()
         .ok_or_else(|| exception("Redis server went away"))?;
-    let client = endpoint.client().map_err(|e| exception(e.to_string()))?;
-    let mut info = client.get_connection_info().clone();
-    let mut settings = info
-        .redis_settings()
-        .clone()
-        .set_protocol(redis::ProtocolVersion::RESP3);
+    let mut settings =
+        redis::RedisConnectionInfo::default().set_protocol(redis::ProtocolVersion::RESP3);
     let auth = s.auth.borrow().clone();
     match auth {
+        Value::InternedStr(password) => {
+            settings = settings.set_password(password.to_string_lossy())
+        }
         Value::String(password) => settings = settings.set_password(password.to_string_lossy()),
         Value::Array(values) => {
             let mut values = values.iter().map(|(_, v)| string(v));
@@ -43,13 +44,13 @@ pub async fn subscribe(
         }
         _ => (),
     }
-    info = info.set_redis_settings(settings);
     let prefix = s.options.borrow().prefix.clone();
     let channels: Vec<Vec<u8>> = crate::commands::array(a.first())
         .map(|values| {
             values
                 .iter()
                 .map(|(_, v)| match v {
+                    Value::InternedStr(s) => s.as_bytes().to_vec(),
                     Value::String(s) => s.as_bytes().to_vec(),
                     _ => string(v).into_bytes(),
                 })
@@ -64,11 +65,13 @@ pub async fn subscribe(
     let handle = crate::pool::runtime()
         .await
         .map_err(|e| exception(e.to_string()))?;
-    let mut connection = handle
+    let mut socket = handle
         .spawn(async move {
-            redis::Client::open(info)?
-                .get_multiplexed_async_connection_with_config(
-                    &redis::AsyncConnectionConfig::new().set_push_sender(sender),
+            endpoint
+                .open(
+                    settings,
+                    redis::AsyncConnectionConfig::new().set_push_sender(sender),
+                    Some(Duration::from_secs(1)),
                 )
                 .await
         })
@@ -77,19 +80,19 @@ pub async fn subscribe(
         .map_err(|e| exception(e.to_string()))?;
     let registered = channels.clone();
     let method = name.to_uppercase();
-    connection = handle
+    socket = handle
         .spawn(async move {
             redis::cmd(&method)
                 .arg(channels)
-                .query_async::<Reply>(&mut connection)
+                .query_async::<Reply>(&mut socket.connection)
                 .await?;
-            Ok::<_, redis::RedisError>(connection)
+            Ok::<_, redis::RedisError>(socket)
         })
         .await
         .map_err(|e| exception(e.to_string()))?
         .map_err(|e| exception(e.to_string()))?;
     *s.subscriptions.borrow_mut() = Some(Subscription {
-        connection,
+        socket,
         channels: registered.into_iter().collect(),
     });
     let result = async {
@@ -122,7 +125,7 @@ pub async fn subscribe(
 }
 
 pub async fn unsubscribe(name: &str, s: &Session, a: &[Value]) -> NativeResult {
-    let (mut connection, channels) = {
+    let (mut socket, channels) = {
         let mut state = s.subscriptions.borrow_mut();
         let Some(sub) = state.as_mut() else {
             return Ok(Value::Bool(false));
@@ -133,8 +136,8 @@ pub async fn unsubscribe(name: &str, s: &Session, a: &[Value]) -> NativeResult {
                     .iter()
                     .map(|(_, v)| {
                         let mut channel = s.options.borrow().prefix.clone();
-                        if let Value::String(s) = v {
-                            channel.extend_from_slice(s.as_bytes());
+                        if let Some(s) = v.as_str_bytes() {
+                            channel.extend_from_slice(s);
                         } else {
                             channel.extend_from_slice(string(v).as_bytes());
                         }
@@ -150,7 +153,7 @@ pub async fn unsubscribe(name: &str, s: &Session, a: &[Value]) -> NativeResult {
         for channel in &channels {
             sub.channels.remove(channel);
         }
-        (sub.connection.clone(), channels)
+        (sub.socket.clone(), channels)
     };
     let method = name.to_uppercase();
     let sent = channels.clone();
@@ -160,7 +163,7 @@ pub async fn unsubscribe(name: &str, s: &Session, a: &[Value]) -> NativeResult {
         .spawn(async move {
             redis::cmd(&method)
                 .arg(sent)
-                .query_async::<Reply>(&mut connection)
+                .query_async::<Reply>(&mut socket.connection)
                 .await
         })
         .await

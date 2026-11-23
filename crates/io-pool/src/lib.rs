@@ -1,5 +1,4 @@
-//! Connection pools shared by every PHP worker thread, for PDO's database
-//! connections and for Redis sockets.
+//! Redis connections pooled across workers and TLS settings shared with SQL drivers.
 //!
 //! In PHP a connection belongs to the request that opened it. In Phera many
 //! requests share a few worker threads (docs/architecture.md, section 2), so a
@@ -7,9 +6,9 @@
 //! connection is reset and lent again after the last handle is gone:
 //!
 //! ```php
-//! $pdo = new PDO($dsn, $user, $password); // borrows a pooled connection
-//! $pdo->query('SELECT 1');                // runs on an I/O thread
-//! unset($pdo);                            // reset in the background, then idle
+//! $redis->pconnect($host); // borrows a pooled connection
+//! $redis->get('cart');     // runs on an I/O thread
+//! unset($redis);           // reset in the background, then idle
 //! ```
 //!
 //! # How a query travels
@@ -21,16 +20,16 @@
 //! the two:
 //!
 //! ```text
-//!  PHP worker thread                       I/O runtime ("phera-db-io", "phera-redis-io")
+//!  PHP worker thread                       I/O runtime ("phera-redis-io")
 //!  -----------------                       ---------------------------------------------
-//!  new PDO(...) / $redis->connect(...)
+//!  $redis->pconnect(...)
 //!    find the bucket for this key
 //!    spawn ------------------------------> wait for a permit, first come first served
 //!                                          reuse an idle connection that passes its
 //!                                            check, or open a new one
 //!    await the reply, at most `wait`  <--- Lease
 //!
-//!  $pdo->query('SELECT 1')
+//!  $redis->get('cart')
 //!    owned SQL and parameters
 //!    spawn ------------------------------> lock the lease's connection
 //!    await the task; meanwhile the         send the query, await the rows
@@ -42,8 +41,7 @@
 //!                                          release the permit
 //! ```
 //!
-//! A bucket holds the connections for one key (PDO: driver, connection
-//! settings and credentials; Redis: endpoint and persistent id). Its
+//! A bucket holds the connections for one Redis endpoint and persistent id. Its
 //! semaphore has `size` permits, and a permit is held while a connection is
 //! being opened, lent, reset or closed, so the server never sees more than
 //! `size` connections for one key, from all workers together.
@@ -108,34 +106,46 @@ impl Options {
     /// `{prefix}_POOL_LIFETIME_SECONDS`, `{prefix}_POOL_WAIT_SECONDS` and
     /// `{prefix}_IO_THREADS`; a variable that is not set keeps its default.
     pub fn from_environment(prefix: &str, defaults: Options) -> Result<Options, String> {
-        let number = |suffix: &str, default: u64| -> Result<u64, String> {
-            let name = format!("{prefix}_{suffix}");
-            match std::env::var(&name) {
-                Err(std::env::VarError::NotPresent) => Ok(default),
-                value => value
-                    .ok()
-                    .and_then(|value| value.parse().ok())
-                    .filter(|value| (1..=u64::from(u32::MAX)).contains(value))
-                    .ok_or_else(|| {
-                        format!(
-                            "{name} must be a positive integer no greater than {}",
-                            u32::MAX
-                        )
-                    }),
-            }
-        };
+        let mut settings = Self::pool_limits_from_environment(prefix, defaults)?;
+        settings.io_threads = number(prefix, "IO_THREADS", defaults.io_threads as u64)? as usize;
+        Ok(settings)
+    }
+
+    /// Reads the pool limits for a caller that supplies its own event loop.
+    pub fn pool_limits_from_environment(
+        prefix: &str,
+        defaults: Options,
+    ) -> Result<Options, String> {
         let seconds = |suffix: &str, default: Duration| {
-            number(suffix, default.as_secs()).map(Duration::from_secs)
+            number(prefix, suffix, default.as_secs()).map(Duration::from_secs)
         };
         Ok(Options {
-            size: number("POOL_SIZE", defaults.size as u64)? as usize,
+            size: number(prefix, "POOL_SIZE", defaults.size as u64)? as usize,
             idle: seconds("POOL_IDLE_SECONDS", defaults.idle)?,
             lifetime: seconds("POOL_LIFETIME_SECONDS", defaults.lifetime)?,
             wait: seconds("POOL_WAIT_SECONDS", defaults.wait)?,
-            io_threads: number("IO_THREADS", defaults.io_threads as u64)? as usize,
+            io_threads: defaults.io_threads,
         })
+    }
+}
+
+fn number(prefix: &str, suffix: &str, default: u64) -> Result<u64, String> {
+    let name = format!("{prefix}_{suffix}");
+    match std::env::var(&name) {
+        Err(std::env::VarError::NotPresent) => Ok(default),
+        value => value
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .filter(|value| (1..=u64::from(u32::MAX)).contains(value))
+            .ok_or_else(|| {
+                format!(
+                    "{name} must be a positive integer no greater than {}",
+                    u32::MAX
+                )
+            }),
     }
 }
 
 #[cfg(test)]
 mod tests;
+pub mod tls;

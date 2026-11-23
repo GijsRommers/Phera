@@ -3,12 +3,20 @@
 //! An extension describes a class as data. The VM turns the description into
 //! one of its own classes at startup, so PHP code can extend it, catch it and
 //! call its methods exactly as with a class written in PHP.
+//!
+//! ```php
+//! $date->format('Y-m-d'); // a native method
+//! var_dump($date);       // a native property view
+//! ```
+//!
+//! [`ClassEntry`] declares members, [`MethodEntry`] describes call preparation,
+//! and [`ClassHooks`] groups optional object operations inherited by subclasses.
 
 use std::rc::Rc;
 
-use phera_value::{Object, Value};
+use phera_value::{Object, PhpString, Value};
 
-use crate::{ConstantValue, Context, LocalFuture, NativeError, NativeResult, Param};
+use crate::{ClassHooks, ConstantValue, Context, LocalFuture, NativeError, NativeResult, Param};
 
 /// An extension can preserve legacy parsing behavior while keeping its reflected signature.
 /// Most methods use Default; Prepared means the hook already checked and coerced arguments.
@@ -25,6 +33,15 @@ pub type PrepareMethod =
 /// is static.
 pub type SyncMethod = fn(&mut dyn Context, Option<&Rc<Object>>, &[Value]) -> NativeResult;
 
+/// Try an already typed positional call, for example `new ReflectionClass(Foo::class)`.
+/// Return `None` without changing the receiver or running PHP to use the ordinary
+/// handler. Only accept shapes for which the method's preparation is unnecessary.
+pub type ReadyMethod = fn(&mut dyn Context, &Rc<Object>, &[Value]) -> Option<NativeResult>;
+
+/// An optional no-context handler for a public method with plain positional arguments.
+/// A declined call leaves state untouched and is handled by the usual method.
+pub type DirectMethod = fn(&Object, &[Option<Value>]) -> Option<Value>;
+
 /// A method that may wait, for I/O or for a PHP callback. See
 /// [`crate::AsyncFn`] for why it must never block instead.
 pub type AsyncMethod = for<'a> fn(
@@ -33,10 +50,26 @@ pub type AsyncMethod = for<'a> fn(
     Vec<Value>,
 ) -> LocalFuture<'a, NativeResult>;
 
+/// A native instance method that can finish on its prepared register window
+/// when no PHP callback or asynchronous work is needed.
+pub struct WindowMethod {
+    pub try_ready: fn(&mut dyn Context, &Object, Option<&Value>) -> Option<NativeResult>,
+    pub run: AsyncMethod,
+}
+/// An async method that forwards names from its variadic arguments into a PHP call.
+pub type AsyncNamedMethod = for<'a> fn(
+    &'a mut dyn Context,
+    Option<Rc<Object>>,
+    Vec<Value>,
+    &'a [(usize, PhpString)],
+) -> LocalFuture<'a, NativeResult>;
+
 #[derive(Clone, Copy)]
 pub enum NativeMethod {
     Sync(SyncMethod),
     Async(AsyncMethod),
+    Window(&'static WindowMethod),
+    AsyncNamed(AsyncNamedMethod),
     /// Declared but without a body: an interface method, or an abstract one.
     Abstract,
 }
@@ -55,7 +88,18 @@ pub enum ClassKind {
     AbstractClass,
     /// A class that cannot be extended.
     FinalClass,
+    /// An immutable class that cannot be extended.
+    FinalReadonlyClass,
     Interface,
+    /// An internal, unbacked enum with its cases in declaration order.
+    UnitEnum(&'static [&'static str]),
+}
+
+/// Internal signatures can require a return type or give a tentative compatibility warning.
+#[derive(Clone, Copy)]
+pub enum MethodReturn {
+    Required(&'static str),
+    Tentative(&'static str),
 }
 
 #[derive(Clone, Copy)]
@@ -63,14 +107,32 @@ pub struct MethodEntry {
     pub name: &'static str,
     pub params: &'static [Param],
     pub handler: NativeMethod,
+    /// Optional argument handling before the ordinary native signature check.
     pub preparation: Option<PrepareMethod>,
+    pub ready: Option<ReadyMethod>,
+    pub direct: Option<DirectMethod>,
     pub visibility: Visibility,
     pub is_static: bool,
+    pub uses_instance_receiver: bool,
     /// Subclasses may not override it.
     pub is_final: bool,
+    /// PHP's compatibility contract for an internal method.
+    pub return_type: Option<MethodReturn>,
 }
 
 impl MethodEntry {
+    /// A public method with an optional register-window entry.
+    pub const fn public_window(
+        name: &'static str,
+        params: &'static [Param],
+        handler: &'static WindowMethod,
+    ) -> Self {
+        Self {
+            handler: NativeMethod::Window(handler),
+            ..Self::public_async(name, params, handler.run)
+        }
+    }
+
     /// A public instance method, by far the most common kind.
     pub const fn public(name: &'static str, params: &'static [Param], handler: SyncMethod) -> Self {
         MethodEntry {
@@ -78,9 +140,13 @@ impl MethodEntry {
             params,
             handler: NativeMethod::Sync(handler),
             preparation: None,
+            ready: None,
+            direct: None,
             visibility: Visibility::Public,
             is_static: false,
+            uses_instance_receiver: false,
             is_final: false,
+            return_type: None,
         }
     }
 
@@ -97,9 +163,33 @@ impl MethodEntry {
             params,
             handler: NativeMethod::Async(handler),
             preparation: None,
+            ready: None,
+            direct: None,
             visibility: Visibility::Public,
             is_static: false,
+            uses_instance_receiver: false,
             is_final: false,
+            return_type: None,
+        }
+    }
+
+    pub const fn public_async_named(
+        name: &'static str,
+        params: &'static [Param],
+        handler: AsyncNamedMethod,
+    ) -> Self {
+        MethodEntry {
+            name,
+            params,
+            handler: NativeMethod::AsyncNamed(handler),
+            preparation: None,
+            ready: None,
+            direct: None,
+            visibility: Visibility::Public,
+            is_static: false,
+            uses_instance_receiver: false,
+            is_final: false,
+            return_type: None,
         }
     }
 
@@ -110,14 +200,38 @@ impl MethodEntry {
             params,
             handler: NativeMethod::Abstract,
             preparation: None,
+            ready: None,
+            direct: None,
             visibility: Visibility::Public,
             is_static: false,
+            uses_instance_receiver: false,
             is_final: false,
+            return_type: None,
         }
+    }
+
+    pub const fn tentative_return(mut self, ty: &'static str) -> Self {
+        self.return_type = Some(MethodReturn::Tentative(ty));
+        self
     }
 
     pub const fn with_preparation(mut self, preparation: PrepareMethod) -> Self {
         self.preparation = Some(preparation);
+        self
+    }
+
+    pub const fn with_direct(mut self, handler: DirectMethod) -> Self {
+        self.direct = Some(handler);
+        self
+    }
+
+    pub const fn with_ready(mut self, handler: ReadyMethod) -> Self {
+        self.ready = Some(handler);
+        self
+    }
+
+    pub const fn returning(mut self, ty: &'static str) -> Self {
+        self.return_type = Some(MethodReturn::Required(ty));
         self
     }
 
@@ -131,17 +245,38 @@ impl MethodEntry {
         self
     }
 
+    /// A legacy static method can also initialize the object it is called on.
+    pub const fn with_instance_receiver(mut self) -> Self {
+        self.uses_instance_receiver = true;
+        self
+    }
+
     pub const fn with_visibility(mut self, visibility: Visibility) -> Self {
         self.visibility = visibility;
         self
     }
 }
 
+/// A type declared on a native instance property.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PropertyType {
+    Bool,
+    Int,
+    Float,
+    String,
+    Array,
+    Object,
+    Mixed,
+    NullableString,
+    NullableClass(&'static str),
+}
+
 /// A property every instance starts with.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PropertyEntry {
     pub name: &'static str,
-    pub default: ConstantValue,
+    pub default: Option<ConstantValue>,
+    pub ty: Option<PropertyType>,
     pub visibility: Visibility,
     pub is_static: bool,
     pub is_readonly: bool,
@@ -151,11 +286,29 @@ impl PropertyEntry {
     pub const fn new(name: &'static str, default: ConstantValue, visibility: Visibility) -> Self {
         PropertyEntry {
             name,
-            default,
+            default: Some(default),
+            ty: None,
             visibility,
             is_static: false,
             is_readonly: false,
         }
+    }
+
+    /// A typed property with no initial value, like PHP's `public int $id;`.
+    pub const fn typed(name: &'static str, ty: PropertyType, visibility: Visibility) -> Self {
+        Self {
+            name,
+            default: None,
+            ty: Some(ty),
+            visibility,
+            is_static: false,
+            is_readonly: false,
+        }
+    }
+
+    pub const fn with_default(mut self, default: ConstantValue) -> Self {
+        self.default = Some(default);
+        self
     }
 
     pub const fn readonly(mut self) -> Self {
@@ -167,6 +320,7 @@ impl PropertyEntry {
 /// Instance access for native properties whose values live outside ordinary storage.
 pub enum NativePropertyRead {
     Read,
+    Update,
     Quiet,
     Isset,
     Exists,
@@ -189,9 +343,26 @@ pub type ReadNativeProperty =
 pub type MutateNativeProperty =
     fn(&mut dyn Context, &Object, &str, NativePropertyMutation<'_>) -> Result<bool, NativeError>;
 
+/// The declared type of a writable virtual string property.
+pub struct NativeStringProperty {
+    pub declaring: &'static str,
+    pub nullable: bool,
+}
+
 pub struct NativePropertyAccess {
     pub read: ReadNativeProperty,
     pub mutate: MutateNativeProperty,
+    pub string_property: Option<fn(&Object, &str) -> Option<NativeStringProperty>>,
+}
+
+impl NativePropertyAccess {
+    pub const fn new(read: ReadNativeProperty, mutate: MutateNativeProperty) -> Self {
+        Self {
+            read,
+            mutate,
+            string_property: None,
+        }
+    }
 }
 
 /// A class or interface provided by an extension.
@@ -206,10 +377,12 @@ pub struct ClassEntry {
     /// Linked immediately so `PDO::FETCH_ASSOC` also works in defaults.
     /// For example, PHP may declare `function rows($mode = PDO::FETCH_ASSOC) {}`.
     pub constants: &'static [(&'static str, ConstantValue)],
+    /// Names and PHP diagnostic messages, alongside the constants' declared values.
     pub deprecated_constants: &'static [(&'static str, &'static str)],
     pub properties: &'static [PropertyEntry],
-    pub property_access: Option<&'static NativePropertyAccess>,
     pub methods: &'static [MethodEntry],
+    /// Operations for state held outside ordinary PHP properties.
+    pub hooks: Option<&'static ClassHooks>,
 }
 
 impl ClassEntry {
@@ -225,8 +398,8 @@ impl ClassEntry {
             constants: &[],
             deprecated_constants: &[],
             properties: &[],
-            property_access: None,
             methods: &[],
+            hooks: None,
         }
     }
 

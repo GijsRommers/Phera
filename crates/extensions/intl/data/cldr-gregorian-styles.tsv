@@ -1,0 +1,657 @@
+ady	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ady-JO	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ady-TR	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+af	EEEE dd MMMM y	dd MMMM y	dd MMM y	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'om' {0}	{1} 'om' {0}	{1} {0}	{1} {0}
+af-NA	EEEE dd MMMM y	dd MMMM y	dd MMM y	y-MM-dd	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'om' {0}	{1} 'om' {0}	{1} {0}	{1} {0}
+agq	EEEE d MMMM y	d MMMM y	d MMM, y	d/M/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ak	EEE, d, MMMM, y	d, MMMM, y	d, MMM, y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'wɔ' {0}	{1} 'wɔ' {0}	{1}, {0}	{1}, {0}
+am	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ar	EEEE، d MMMM y	d MMMM y	dd‏/MM‏/y	d‏/M‏/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} في {0}	{1} في {0}	{1}، {0}	{1}، {0}
+ar-AE	EEEE، d MMMM y	d MMMM y	dd‏/MM‏/y	d‏/M‏/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} في {0}	{1} في {0}	{1}، {0}	{1}، {0}
+ar-BH	EEEE، d MMMM y	d MMMM y	dd‏/MM‏/y	d‏/M‏/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} في {0}	{1} في {0}	{1}، {0}	{1}، {0}
+ar-DJ	EEEE، d MMMM y	d MMMM y	dd‏/MM‏/y	d‏/M‏/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} في {0}	{1} في {0}	{1}، {0}	{1}، {0}
+ar-DZ	EEEE، d MMMM y	d MMMM y	dd‏/MM‏/y	d‏/M‏/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} في {0}	{1} في {0}	{1}، {0}	{1}، {0}
+ar-EG	EEEE، d MMMM y	d MMMM y	dd‏/MM‏/y	d‏/M‏/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} في {0}	{1} في {0}	{1}، {0}	{1}، {0}
+ar-EH	EEEE، d MMMM y	d MMMM y	dd‏/MM‏/y	d‏/M‏/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} في {0}	{1} في {0}	{1}، {0}	{1}، {0}
+ar-ER	EEEE، d MMMM y	d MMMM y	dd‏/MM‏/y	d‏/M‏/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} في {0}	{1} في {0}	{1}، {0}	{1}، {0}
+ar-IL	EEEE، d MMMM y	d MMMM y	dd‏/MM‏/y	d‏/M‏/y	H:mm:ss zzzz	H:mm:ss z	H:mm:ss	H:mm	{1} في {0}	{1} في {0}	{1}، {0}	{1}، {0}
+ar-IQ	EEEE، d MMMM y	d MMMM y	dd‏/MM‏/y	d‏/M‏/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} في {0}	{1} في {0}	{1}، {0}	{1}، {0}
+ar-JO	EEEE، d MMMM y	d MMMM y	dd‏/MM‏/y	d‏/M‏/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} في {0}	{1} في {0}	{1}، {0}	{1}، {0}
+ar-KM	EEEE، d MMMM y	d MMMM y	dd‏/MM‏/y	d‏/M‏/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} في {0}	{1} في {0}	{1}، {0}	{1}، {0}
+ar-KW	EEEE، d MMMM y	d MMMM y	dd‏/MM‏/y	d‏/M‏/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} في {0}	{1} في {0}	{1}، {0}	{1}، {0}
+ar-LB	EEEE، d MMMM y	d MMMM y	dd‏/MM‏/y	d‏/M‏/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} في {0}	{1} في {0}	{1}، {0}	{1}، {0}
+ar-LY	EEEE، d MMMM y	d MMMM y	dd‏/MM‏/y	d‏/M‏/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} في {0}	{1} في {0}	{1}، {0}	{1}، {0}
+ar-MA	EEEE، d MMMM y	d MMMM y	dd‏/MM‏/y	d‏/M‏/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} في {0}	{1} في {0}	{1}، {0}	{1}، {0}
+ar-MR	EEEE، d MMMM y	d MMMM y	dd‏/MM‏/y	d‏/M‏/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} في {0}	{1} في {0}	{1}، {0}	{1}، {0}
+ar-OM	EEEE، d MMMM y	d MMMM y	dd‏/MM‏/y	d‏/M‏/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} في {0}	{1} في {0}	{1}، {0}	{1}، {0}
+ar-PS	EEEE، d MMMM y	d MMMM y	dd‏/MM‏/y	d‏/M‏/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} في {0}	{1} في {0}	{1}، {0}	{1}، {0}
+ar-QA	EEEE، d MMMM y	d MMMM y	dd‏/MM‏/y	d‏/M‏/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} في {0}	{1} في {0}	{1}، {0}	{1}، {0}
+ar-SA	EEEE، d MMMM y	d MMMM y	dd‏/MM‏/y	d‏/M‏/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} في {0}	{1} في {0}	{1}، {0}	{1}، {0}
+ar-SD	EEEE، d MMMM y	d MMMM y	dd‏/MM‏/y	d‏/M‏/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} في {0}	{1} في {0}	{1}، {0}	{1}، {0}
+ar-SO	EEEE، d MMMM y	d MMMM y	dd‏/MM‏/y	d‏/M‏/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} في {0}	{1} في {0}	{1}، {0}	{1}، {0}
+ar-SS	EEEE، d MMMM y	d MMMM y	dd‏/MM‏/y	d‏/M‏/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} في {0}	{1} في {0}	{1}، {0}	{1}، {0}
+ar-SY	EEEE، d MMMM y	d MMMM y	dd‏/MM‏/y	d‏/M‏/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} في {0}	{1} في {0}	{1}، {0}	{1}، {0}
+ar-TD	EEEE، d MMMM y	d MMMM y	dd‏/MM‏/y	d‏/M‏/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} في {0}	{1} في {0}	{1}، {0}	{1}، {0}
+ar-TN	EEEE، d MMMM y	d MMMM y	dd‏/MM‏/y	d‏/M‏/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} في {0}	{1} في {0}	{1}، {0}	{1}، {0}
+ar-YE	EEEE، d MMMM y	d MMMM y	dd‏/MM‏/y	d‏/M‏/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} في {0}	{1} في {0}	{1}، {0}	{1}، {0}
+as	y MMMM d, EEEE	d MMMM, y	y MMM d	d-M-y	a h.mm.ss zzzz	a h.mm.ss z	a h.mm.ss	a h.mm	{1} {0}	{1} {0}	{1}, {0}	{1}, {0}
+asa	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ast	EEEE, d MMMM 'de' y	d MMMM 'de' y	d MMM y	d/M/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'a' 'les' {0}	{1} 'a' 'les' {0}	{1}, {0}	{1} {0}
+az	EEEE, d MMMM y	d MMMM y	d MMM y	dd.MM.yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1}/{0}	{1}/{0}	{1}, {0}	{1}, {0}
+az-Cyrl	d MMMM y, EEEE	d MMMM y	d MMM y	dd.MM.yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+az-Latn	EEEE, d MMMM y	d MMMM y	d MMM y	dd.MM.yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1}/{0}	{1}/{0}	{1}, {0}	{1}, {0}
+ba	EEEE, d MMMM y 'й'.	d MMMM, y 'й'.	d MMM, y 'й'.	dd.MM.y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}
+bal-Latn	dd,MM,y	d MMMM, y	d MMM, y	d/M/yy	hh:mm:ss a zzzz	hh:mm:ss a zzz	hh:mm:ss a	hh:mm a	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+bas	EEEE d MMMM y	d MMMM y	d MMM, y	d/M/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+be	EEEE, d MMMM y 'г'.	d MMMM y 'г'.	d MMM y 'г'.	d.MM.yy	HH:mm:ss, zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'у' {0}	{1} 'у' {0}	{1}, {0}	{1}, {0}
+be-tarask	EEEE, d MMMM y 'г'.	d MMMM y 'г'.	d MMM y 'г'.	d.MM.yy	HH:mm:ss, zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'у' {0}	{1} 'у' {0}	{1}, {0}	{1}, {0}
+bem	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	H:mm:ss zzzz	H:mm:ss z	H:mm:ss	H:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+bez	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+bg	EEEE, d MMMM y 'г'.	d MMMM y 'г'.	d.MM.y 'г'.	d.MM.yy 'г'.	H:mm:ss 'ч'. zzzz	H:mm:ss 'ч'. z	H:mm:ss	H:mm	{1} 'в' {0}	{1} 'в' {0}	{1}, {0} 'ч'.	{1}, {0} 'ч'.
+bgc	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+bho	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+blo	EEEE, MMMM d/y	MMMM d/y	MMM d/y	M/d/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}
+bm	EEEE d MMMM y	d MMMM y	d MMM, y	d/M/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+bn	EEEE, d MMMM, y	d MMMM, y	d MMM, y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} এ {0}	{1} এ {0}	{1}, {0}	{1}, {0}
+bn-IN	EEEE, d MMMM, y	d MMMM, y	d MMM, y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} এ {0}	{1} এ {0}	{1}, {0}	{1}, {0}
+bo	y MMMMའི་ཚེས་d, EEEE	སྤྱི་ལོ་y MMMMའི་ཚེས་d	y ལོའི་MMMཚེས་d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+bo-IN	y MMMMའི་ཚེས་d, EEEE	སྤྱི་ལོ་y MMMMའི་ཚེས་d	y ལོའི་MMMཚེས་d	y-MM-dd	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+br	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'da' {0}	{1} 'da' {0}	{1}, {0}	{1}, {0}
+brx	d MMMM y, EEEE	d MMMM, y	d MMM, y	dd-MM-y	a h:mm:ss zzzz	a h:mm:ss z	a h:mm:ss	a नि h:mm	{1} नि {0} याव	{1} नि {0} याव	{1}, {0}	{1}, {0}
+bs	EEEE, d. MMMM y.	d. MMMM y.	d. MMM y.	d. M. y.	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'u' {0}	{1} 'u' {0}	{1} 'u' {0}	{1} 'u' {0}
+bs-Cyrl	EEEE, dd. MMMM y.	dd. MMMM y.	dd.MM.y.	d.M.yy.	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+bs-Latn	EEEE, d. MMMM y.	d. MMMM y.	d. MMM y.	d. M. y.	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'u' {0}	{1} 'u' {0}	{1} 'u' {0}	{1} 'u' {0}
+bua	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ca	EEEE, d MMMM 'del' y	d MMMM 'del' y	d MMM y	d/M/yy	H:mm:ss (zzzz)	H:mm:ss z	H:mm:ss	H:mm	{1}, 'a' 'les' {0}	{1}, 'a' 'les' {0}	{1}, {0}	{1} {0}
+ca-AD	EEEE, d MMMM 'del' y	d MMMM 'del' y	d MMM y	d/M/yy	H:mm:ss (zzzz)	H:mm:ss z	H:mm:ss	H:mm	{1}, 'a' 'les' {0}	{1}, 'a' 'les' {0}	{1}, {0}	{1} {0}
+ca-ES-valencia	EEEE, d MMMM 'del' y	d MMMM 'del' y	d MMM y	d/M/yy	H:mm:ss (zzzz)	H:mm:ss z	H:mm:ss	H:mm	{1}, 'a' 'les' {0}	{1}, 'a' 'les' {0}	{1}, {0}	{1} {0}
+ca-FR	EEEE, d MMMM 'del' y	d MMMM 'del' y	d MMM y	d/M/yy	H:mm:ss (zzzz)	H:mm:ss z	H:mm:ss	H:mm	{1}, 'a' 'les' {0}	{1}, 'a' 'les' {0}	{1}, {0}	{1} {0}
+ca-IT	EEEE, d MMMM 'del' y	d MMMM 'del' y	d MMM y	d/M/yy	H:mm:ss (zzzz)	H:mm:ss z	H:mm:ss	H:mm	{1}, 'a' 'les' {0}	{1}, 'a' 'les' {0}	{1}, {0}	{1} {0}
+ccp	EEEE, d MMMM, y	d MMMM, y	d MMM, y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ccp-IN	EEEE, d MMMM, y	d MMMM, y	d MMM, y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ce	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ceb	EEEE, MMMM d, y	MMMM d, y	MMM d, y	M/d/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'sa' {0}	{1} 'sa' {0}	{1}, {0}	{1}, {0}
+cgg	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+chr	EEEE, MMMM d, y	MMMM d, y	MMM d, y	M/d/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} ᎤᎾᎢ {0}	{1} ᎤᎾᎢ {0}	{1}, {0}	{1}, {0}
+ckb	y MMMM d, EEEE	dی MMMMی y	y MMM d	y-MM-dd	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ckb-IR	y MMMM d, EEEE	dی MMMMی y	y MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+cop	EEEE, MMMM d, y	MMMM d, y	MMM d, y	M/d/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+cs	EEEE d. MMMM y	d. MMMM y	d. M. y	dd.MM.yy	H:mm:ss, zzzz	H:mm:ss z	H:mm:ss	H:mm	{1} 'v' {0}	{1} 'v' {0}	{1} {0}	{1} {0}
+csw	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+cv	y, MMMM, d, EEEE	y, MMMM, d	y, MMM, d	y.MM.dd	HH:mm:ss (zzzz)	HH:mm:ss (z)	HH:mm:ss	HH:mm	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}
+cy	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'am' {0}	{1} 'am' {0}	{1}, {0}	{1}, {0}
+da	EEEE 'den' d. MMMM y	d. MMMM y	d. MMM y	dd.MM.y	HH.mm.ss zzzz	HH.mm.ss z	HH.mm.ss	HH.mm	{1} 'kl'. {0}	{1} 'kl'. {0}	{1}, {0}	{1}, {0}
+da-GL	EEEE 'den' d. MMMM y	d. MMMM y	d. MMM y	dd.MM.y	HH.mm.ss zzzz	HH.mm.ss z	HH.mm.ss	HH.mm	{1} 'kl'. {0}	{1} 'kl'. {0}	{1}, {0}	{1}, {0}
+dav	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+de	EEEE, d. MMMM y	d. MMMM y	dd.MM.y	dd.MM.yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'um' {0}	{1} 'um' {0}	{1}, {0}	{1}, {0}
+de-AT	EEEE, d. MMMM y	d. MMMM y	dd.MM.y	dd.MM.yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'um' {0}	{1} 'um' {0}	{1}, {0}	{1}, {0}
+de-BE	EEEE, d. MMMM y	d. MMMM y	dd.MM.y	dd.MM.yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'um' {0}	{1} 'um' {0}	{1}, {0}	{1}, {0}
+de-CH	EEEE, d. MMMM y	d. MMMM y	dd.MM.y	dd.MM.yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'um' {0}	{1} 'um' {0}	{1}, {0}	{1}, {0}
+de-IT	EEEE, d. MMMM y	d. MMMM y	dd.MM.y	dd.MM.yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'um' {0}	{1} 'um' {0}	{1}, {0}	{1}, {0}
+de-LI	EEEE, d. MMMM y	d. MMMM y	dd.MM.y	dd.MM.yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'um' {0}	{1} 'um' {0}	{1}, {0}	{1}, {0}
+de-LU	EEEE, d. MMMM y	d. MMMM y	dd.MM.y	dd.MM.yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'um' {0}	{1} 'um' {0}	{1}, {0}	{1}, {0}
+dje	EEEE d MMMM y	d MMMM y	d MMM, y	d/M/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+doi	EEEE, d, MMMM y	d, MMMM y	d, MMM y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} गी {0}	{1} गी {0}	{1}, {0}	{1}, {0}
+dsb	EEEE, d. MMMM y	d. MMMM y	d.M.y	d.M.yy	H:mm:ss zzzz	H:mm:ss z	H:mm:ss	H:mm	{1} 'zeger' {0}	{1} 'zeger' {0}	{1} {0}	{1} {0}
+dua	EEEE d MMMM y	d MMMM y	d MMM y	d/M/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+dyo	EEEE d MMMM y	d MMMM y	d MMM y	d/M/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+dz	EEEE, སྤྱི་ལོ་y MMMM ཚེས་dd	སྤྱི་ལོ་y MMMM ཚེས་ dd	སྤྱི་ལོ་y ཟླ་MMM ཚེས་dd	y-MM-dd	ཆུ་ཚོད་ h སྐར་མ་ mm:ss a zzzz	ཆུ་ཚོད་ h སྐར་མ་ mm:ss a z	ཆུ་ཚོད་h:mm:ss a	ཆུ་ཚོད་ h སྐར་མ་ mm a	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ebu	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ee	EEEE, MMMM d 'lia' y	MMMM d 'lia' y	MMM d 'lia', y	M/d/yy	a 'ga' h:mm:ss zzzz	a 'ga' h:mm:ss z	a 'ga' h:mm:ss	a 'ga' h:mm	{0} {1}	{0} {1}	{0} {1}	{0} {1}
+ee-TG	EEEE, MMMM d 'lia' y	MMMM d 'lia' y	MMM d 'lia', y	M/d/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{0} {1}	{0} {1}	{0} {1}	{0} {1}
+el	EEEE d MMMM y	d MMMM y	d MMM y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} στις {0}	{1} στις {0}	{1}, {0}	{1}, {0}
+el-CY	EEEE d MMMM y	d MMMM y	d MMM y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} στις {0}	{1} στις {0}	{1}, {0}	{1}, {0}
+el-polyton	EEEE d MMMM y	d MMMM y	d MMM y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} στις {0}	{1} στις {0}	{1}, {0}	{1}, {0}
+en	EEEE, MMMM d, y	MMMM d, y	MMM d, y	M/d/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-001	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-150	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-AE	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-AG	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-AI	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-AS	EEEE, MMMM d, y	MMMM d, y	MMM d, y	M/d/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-AT	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-AU	EEEE, d MMMM y	d MMMM y	d MMM y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-BB	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-BE	EEEE, d MMMM y	d MMMM y	dd MMM y	dd/MM/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-BI	EEEE, MMMM d, y	MMMM d, y	MMM d, y	M/d/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-BM	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-BS	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-BW	EEEE, dd MMMM y	dd MMMM y	dd MMM y	dd/MM/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-BZ	EEEE, dd MMMM y	dd MMMM y	dd-MMM-y	dd/MM/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-CA	EEEE, MMMM d, y	MMMM d, y	MMM d, y	y-MM-dd	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-CC	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-CH	EEEE, d MMMM y	d MMMM y	d MMM y	dd.MM.y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-CK	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-CM	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-CX	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-CY	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-CZ	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-DE	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-DG	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-DK	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH.mm.ss zzzz	HH.mm.ss z	HH.mm.ss	HH.mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-DM	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-EE	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-ER	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-ES	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-FI	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	H.mm.ss zzzz	H.mm.ss z	H.mm.ss	H.mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-FJ	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-FK	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-FM	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-FR	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-GB	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-GD	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-GE	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-GG	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-GH	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-GI	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-GM	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-GS	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-GU	EEEE, MMMM d, y	MMMM d, y	MMM d, y	M/d/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-GY	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-HK	EEEE, d MMMM y	d MMMM y	d MMM y	d/M/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-HU	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-ID	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH.mm.ss zzzz	HH.mm.ss z	HH.mm.ss	HH.mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-IE	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-IL	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	H:mm:ss zzzz	H:mm:ss z	H:mm:ss	H:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-IM	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-IN	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-IO	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-IT	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-JE	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-JM	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-JP	EEEE, MMMM d, y	MMMM d, y	MMM d, y	y/MM/dd	H:mm:ss zzzz	H:mm:ss z	H:mm:ss	H:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-KE	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-KI	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-KN	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-KY	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-LC	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-LR	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-LS	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-LT	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-LV	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-MG	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-MH	EEEE, MMMM d, y	MMMM d, y	MMM d, y	M/d/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-MO	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-MP	EEEE, MMMM d, y	MMMM d, y	MMM d, y	M/d/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-MS	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-MT	EEEE, d MMMM y	dd MMMM y	dd MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-MU	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-MV	EEEE d MMMM y	d MMMM y	dd-MM-y	d-M-yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-MW	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-MY	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-NA	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-NF	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-NG	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-NL	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-NO	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-NR	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-NU	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-NZ	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-PG	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-PH	EEEE, MMMM d, y	MMMM d, y	MMM d, y	M/d/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-PK	EEEE, d MMMM y	d MMMM y	dd-MMM-y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-PL	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-PN	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-PR	EEEE, MMMM d, y	MMMM d, y	MMM d, y	M/d/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-PT	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-PW	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-RO	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-RW	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-SB	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-SC	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-SD	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-SE	EEEE, d MMMM y	d MMMM y	d MMM y	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-SG	EEEE, d MMMM y	d MMMM y	d MMM y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-SH	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-SI	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-SK	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-SL	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-SS	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-SX	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-SZ	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-TC	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-TK	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-TO	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-TT	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-TV	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-TZ	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-UA	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-UG	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-UM	EEEE, MMMM d, y	MMMM d, y	MMM d, y	M/d/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-VC	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-VG	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-VI	EEEE, MMMM d, y	MMMM d, y	MMM d, y	M/d/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-VU	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-WS	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-ZA	EEEE, dd MMMM y	dd MMMM y	dd MMM y	y/MM/dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-ZM	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+en-ZW	EEEE, dd MMMM y	dd MMMM y	dd MMM,y	d/M/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'at' {0}	{1} 'at' {0}	{1}, {0}	{1}, {0}
+eo	EEEE, 'la' d-'a' 'de' MMMM y	d MMMM y	d MMM y	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'je' {0}	{1} 'je' {0}	{1}, {0}	{1} {0}
+es	EEEE, d 'de' MMMM 'de' y	d 'de' MMMM 'de' y	d MMM y	d/M/yy	H:mm:ss (zzzz)	H:mm:ss z	H:mm:ss	H:mm	{1}, {0}	{1} 'a' 'las' {0}	{1}, {0}	{1}, {0}
+es-419	EEEE, d 'de' MMMM 'de' y	d 'de' MMMM 'de' y	d MMM y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1}, {0}	{1} 'a' 'las' {0}	{1}, {0}	{1}, {0}
+es-AR	EEEE, d 'de' MMMM 'de' y	d 'de' MMMM 'de' y	d MMM y	d/M/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1}, {0}	{1} 'a' 'las' {0}	{1}, {0}	{1}, {0}
+es-BO	EEEE, d 'de' MMMM 'de' y	d 'de' MMMM 'de' y	d MMM 'de' y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1}, {0}	{1} 'a' 'las' {0}	{1}, {0}	{1}, {0}
+es-BR	EEEE, d 'de' MMMM 'de' y	d 'de' MMMM 'de' y	d MMM y	d/M/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1}, {0}	{1} 'a' 'las' {0}	{1}, {0}	{1}, {0}
+es-BZ	EEEE, d 'de' MMMM 'de' y	d 'de' MMMM 'de' y	d MMM y	d/M/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1}, {0}	{1} 'a' 'las' {0}	{1}, {0}	{1}, {0}
+es-CL	EEEE, d 'de' MMMM 'de' y	d 'de' MMMM 'de' y	dd-MM-y	dd-MM-yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1}, {0}	{1} 'a' 'las' {0}	{1}, {0}	{1}, {0}
+es-CO	EEEE, d 'de' MMMM 'de' y	d 'de' MMMM 'de' y	d/MM/y	d/MM/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1}, {0}	{1} 'a' 'las' {0}	{1}, {0}	{1}, {0}
+es-CR	EEEE, d 'de' MMMM 'de' y	d 'de' MMMM 'de' y	d MMM y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1}, {0}	{1} 'a' 'las' {0}	{1}, {0}	{1}, {0}
+es-CU	EEEE, d 'de' MMMM 'de' y	d 'de' MMMM 'de' y	d MMM y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1}, {0}	{1} 'a' 'las' {0}	{1}, {0}	{1}, {0}
+es-DO	EEEE, d 'de' MMMM 'de' y	d 'de' MMMM 'de' y	d MMM y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1}, {0}	{1} 'a' 'las' {0}	{1}, {0}	{1}, {0}
+es-EA	EEEE, d 'de' MMMM 'de' y	d 'de' MMMM 'de' y	d MMM y	d/M/yy	H:mm:ss (zzzz)	H:mm:ss z	H:mm:ss	H:mm	{1}, {0}	{1} 'a' 'las' {0}	{1}, {0}	{1}, {0}
+es-EC	EEEE, d 'de' MMMM 'de' y	d 'de' MMMM 'de' y	d MMM y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1}, {0}	{1} 'a' 'las' {0}	{1}, {0}	{1}, {0}
+es-GQ	EEEE, d 'de' MMMM 'de' y	d 'de' MMMM 'de' y	d MMM y	d/M/yy	H:mm:ss (zzzz)	H:mm:ss z	H:mm:ss	H:mm	{1}, {0}	{1} 'a' 'las' {0}	{1}, {0}	{1}, {0}
+es-GT	EEEE, d 'de' MMMM 'de' y	d 'de' MMMM 'de' y	d/MM/y	d/MM/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1}, {0}	{1} 'a' 'las' {0}	{1}, {0}	{1}, {0}
+es-HN	EEEE dd 'de' MMMM 'de' y	dd 'de' MMMM 'de' y	d MMM y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1}, {0}	{1} 'a' 'las' {0}	{1}, {0}	{1}, {0}
+es-IC	EEEE, d 'de' MMMM 'de' y	d 'de' MMMM 'de' y	d MMM y	d/M/yy	H:mm:ss (zzzz)	H:mm:ss z	H:mm:ss	H:mm	{1}, {0}	{1} 'a' 'las' {0}	{1}, {0}	{1}, {0}
+es-MX	EEEE, d 'de' MMMM 'de' y	d 'de' MMMM 'de' y	d MMM y	dd/MM/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1}, {0}	{1} 'a' 'las' {0}	{1}, {0}	{1}, {0}
+es-NI	EEEE, d 'de' MMMM 'de' y	d 'de' MMMM 'de' y	d MMM y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1}, {0}	{1} 'a' 'las' {0}	{1}, {0}	{1}, {0}
+es-PA	EEEE, d 'de' MMMM 'de' y	d 'de' MMMM 'de' y	MM/dd/y	MM/dd/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1}, {0}	{1} 'a' 'las' {0}	{1}, {0}	{1}, {0}
+es-PE	EEEE, d 'de' MMMM 'de' y	d 'de' MMMM 'de' y	d MMM y	d/MM/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1}, {0}	{1} 'a' 'las' {0}	{1}, {0}	{1}, {0}
+es-PH	EEEE, d 'de' MMMM 'de' y	d 'de' MMMM 'de' y	d MMM y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1}, {0}	{1} 'a' 'las' {0}	{1}, {0}	{1}, {0}
+es-PR	EEEE, d 'de' MMMM 'de' y	d 'de' MMMM 'de' y	MM/dd/y	MM/dd/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1}, {0}	{1} 'a' 'las' {0}	{1}, {0}	{1}, {0}
+es-PY	EEEE, d 'de' MMMM 'de' y	d 'de' MMMM 'de' y	d MMM y	d/M/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1}, {0}	{1} 'a' 'las' {0}	{1}, {0}	{1}, {0}
+es-SV	EEEE, d 'de' MMMM 'de' y	d 'de' MMMM 'de' y	d MMM y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1}, {0}	{1} 'a' 'las' {0}	{1}, {0}	{1}, {0}
+es-US	EEEE, d 'de' MMMM 'de' y	d 'de' MMMM 'de' y	d MMM y	d/M/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1}, {0}	{1} 'a' 'las' {0}	{1}, {0}	{1}, {0}
+es-UY	EEEE, d 'de' MMMM 'de' y	d 'de' MMMM 'de' y	d MMM y	d/M/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1}, {0}	{1} 'a' 'las' {0}	{1}, {0}	{1}, {0}
+es-VE	EEEE, d 'de' MMMM 'de' y	d 'de' MMMM 'de' y	d MMM y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1}, {0}	{1} 'a' 'las' {0}	{1}, {0}	{1}, {0}
+et	EEEE, d. MMMM y	d. MMMM y	d. MMM y	dd.MM.yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1}, 'kell' {0}	{1}, 'kell' {0}	{1}, {0}	{1}, {0}
+eu	y('e')'ko' MMMM'ren' d('a'), EEEE	y('e')'ko' MMMM'ren' d('a')	y('e')'ko' MMM d('a')	yy/M/d	HH:mm:ss (zzzz)	HH:mm:ss (z)	HH:mm:ss	HH:mm	{1} ({0})	{1} ({0})	{1} ({0})	{1} ({0})
+ewo	EEEE d MMMM y	d MMMM y	d MMM y	d/M/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+fa	EEEE d MMMM y	d MMMM y	d MMM y	y/M/d	H:mm:ss (zzzz)	H:mm:ss (z)	H:mm:ss	H:mm	{1} ساعت {0}	{1} ساعت {0}	{1}، {0}	{1}, {0}
+fa-AF	EEEE d MMMM y	d MMMM y	d MMM y	y/M/d	H:mm:ss (zzzz)	H:mm:ss (z)	H:mm:ss	H:mm	{1} ساعت {0}	{1} ساعت {0}	{1}، {0}	{1}, {0}
+ff	EEEE d MMMM y	d MMMM y	d MMM, y	d/M/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ff-Adlm	EEEE d MMMM⹁ y	d MMMM⹁ y	d MMM⹁ y	d-M-y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 𞤉 {0}	{1} 𞤉 {0}	{1} {0}	{1} {0}
+ff-Adlm-BF	EEEE d MMMM⹁ y	d MMMM⹁ y	d MMM⹁ y	d-M-y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 𞤉 {0}	{1} 𞤉 {0}	{1} {0}	{1} {0}
+ff-Adlm-CM	EEEE d MMMM⹁ y	d MMMM⹁ y	d MMM⹁ y	d-M-y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 𞤉 {0}	{1} 𞤉 {0}	{1} {0}	{1} {0}
+ff-Adlm-GH	EEEE d MMMM⹁ y	d MMMM⹁ y	d MMM⹁ y	d-M-y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 𞤉 {0}	{1} 𞤉 {0}	{1} {0}	{1} {0}
+ff-Adlm-GM	EEEE d MMMM⹁ y	d MMMM⹁ y	d MMM⹁ y	d-M-y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 𞤉 {0}	{1} 𞤉 {0}	{1} {0}	{1} {0}
+ff-Adlm-GW	EEEE d MMMM⹁ y	d MMMM⹁ y	d MMM⹁ y	d-M-y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 𞤉 {0}	{1} 𞤉 {0}	{1} {0}	{1} {0}
+ff-Adlm-LR	EEEE d MMMM⹁ y	d MMMM⹁ y	d MMM⹁ y	d-M-y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 𞤉 {0}	{1} 𞤉 {0}	{1} {0}	{1} {0}
+ff-Adlm-MR	EEEE d MMMM⹁ y	d MMMM⹁ y	d MMM⹁ y	d-M-y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 𞤉 {0}	{1} 𞤉 {0}	{1} {0}	{1} {0}
+ff-Adlm-NE	EEEE d MMMM⹁ y	d MMMM⹁ y	d MMM⹁ y	d-M-y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 𞤉 {0}	{1} 𞤉 {0}	{1} {0}	{1} {0}
+ff-Adlm-NG	EEEE d MMMM⹁ y	d MMMM⹁ y	d MMM⹁ y	d-M-y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 𞤉 {0}	{1} 𞤉 {0}	{1} {0}	{1} {0}
+ff-Adlm-SL	EEEE d MMMM⹁ y	d MMMM⹁ y	d MMM⹁ y	d-M-y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 𞤉 {0}	{1} 𞤉 {0}	{1} {0}	{1} {0}
+ff-Adlm-SN	EEEE d MMMM⹁ y	d MMMM⹁ y	d MMM⹁ y	d-M-y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 𞤉 {0}	{1} 𞤉 {0}	{1} {0}	{1} {0}
+ff-Latn	EEEE d MMMM y	d MMMM y	d MMM, y	d/M/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ff-Latn-BF	EEEE d MMMM y	d MMMM y	d MMM, y	d/M/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ff-Latn-CM	EEEE d MMMM y	d MMMM y	d MMM, y	d/M/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ff-Latn-GH	EEEE d MMMM y	d MMMM y	d MMM, y	d/M/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ff-Latn-GM	EEEE d MMMM y	d MMMM y	d MMM, y	d/M/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ff-Latn-GN	EEEE d MMMM y	d MMMM y	d MMM, y	d/M/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ff-Latn-GW	EEEE d MMMM y	d MMMM y	d MMM, y	d/M/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ff-Latn-LR	EEEE d MMMM y	d MMMM y	d MMM, y	d/M/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ff-Latn-MR	EEEE d MMMM y	d MMMM y	d MMM, y	d/M/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ff-Latn-NE	EEEE d MMMM y	d MMMM y	d MMM, y	d/M/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ff-Latn-NG	EEEE d MMMM y	d MMMM y	d MMM, y	d/M/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ff-Latn-SL	EEEE d MMMM y	d MMMM y	d MMM, y	d/M/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+fi	cccc d. MMMM y	d. MMMM y	d.M.y	d.M.y	H.mm.ss zzzz	H.mm.ss z	H.mm.ss	H.mm	{1} 'klo' {0}	{1} 'klo' {0}	{1} 'klo' {0}	{1} 'klo' {0}
+fil	EEEE, MMMM d, y	MMMM d, y	MMM d, y	M/d/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'nang' {0}	{1} 'nang' {0}	{1}, {0}	{1}, {0}
+fo	EEEE, d. MMMM y	d. MMMM y	dd.MM.y	dd.MM.yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'kl'. {0}	{1} 'kl'. {0}	{1}, {0}	{1}, {0}
+fo-DK	EEEE, d. MMMM y	d. MMMM y	dd.MM.y	dd.MM.yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'kl'. {0}	{1} 'kl'. {0}	{1}, {0}	{1}, {0}
+fr	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-BE	EEEE d MMMM y	d MMMM y	d MMM y	d/MM/yy	H 'h' mm 'min' ss 's' zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-BF	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-BI	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-BJ	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-BL	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-CA	EEEE d MMMM y	d MMMM y	d MMM y	y-MM-dd	HH 'h' mm 'min' ss 's' zzzz	HH 'h' mm 'min' ss 's' z	HH 'h' mm 'min' ss 's'	HH 'h' mm	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-CD	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-CF	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-CG	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-CH	EEEE, d MMMM y	d MMMM y	d MMM y	dd.MM.yy	HH.mm:ss 'h' zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-CI	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-CM	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-DJ	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-DZ	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-GA	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-GF	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-GN	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-GP	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-GQ	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-HT	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-KM	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-LU	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-MA	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-MC	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-MF	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-MG	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-ML	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1}, {0}
+fr-MQ	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-MR	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-MU	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-NC	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-NE	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-PF	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-PM	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-RE	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-RW	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-SC	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-SN	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-SY	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-TD	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-TG	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-TN	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-VU	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-WF	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fr-YT	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1} {0}
+fur	EEEE d 'di' MMMM 'dal' y	d 'di' MMMM 'dal' y	dd/MM/y	dd/MM/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+fy	EEEE d MMMM y	d MMMM y	d MMM y	dd-MM-yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'om' {0}	{1} 'om' {0}	{1} {0}	{1} {0}
+ga	EEEE d MMMM y	d MMMM y	d MMM y	d/M/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'ag' {0}	{1} 'ag' {0}	{1}, {0}	{1}, {0}
+ga-GB	EEEE d MMMM y	d MMMM y	d MMM y	d/M/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'ag' {0}	{1} 'ag' {0}	{1}, {0}	{1}, {0}
+gaa	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+gd	EEEE, d'mh' MMMM y	d'mh' MMMM y	d'mh' MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'aig' {0}	{1} 'aig' {0}	{1}, {0}	{1}, {0}
+gl	EEEE, d 'de' MMMM 'de' y	d 'de' MMMM 'de' y	d 'de' MMM 'de' y	dd/MM/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}
+gsw	EEEE, d. MMMM y	d. MMMM y	dd.MM.y	dd.MM.yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+gsw-FR	EEEE, d. MMMM y	d. MMMM y	dd.MM.y	dd.MM.yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+gsw-LI	EEEE, d. MMMM y	d. MMMM y	dd.MM.y	dd.MM.yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+gu	EEEE, d MMMM, y	d MMMM, y	d MMM, y	d/M/yy	hh:mm:ss a zzzz	hh:mm:ss a z	hh:mm:ss a	hh:mm a	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+guz	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+gv	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ha	EEEE d MMMM, y	d MMMM, y	d MMM, y	d/M/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'da' {0}	{1} 'da' {0}	{1}, {0}	{1}, {0}
+ha-GH	EEEE d MMMM, y	d MMMM, y	d MMM, y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'da' {0}	{1} 'da' {0}	{1}, {0}	{1}, {0}
+ha-NE	EEEE d MMMM, y	d MMMM, y	d MMM, y	d/M/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'da' {0}	{1} 'da' {0}	{1}, {0}	{1}, {0}
+haw	EEEE, d MMMM y	d MMMM y	d MMM y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+he	EEEE, d בMMMM y	d בMMMM y	d בMMM y	d.M.y	H:mm:ss zzzz	H:mm:ss z	H:mm:ss	H:mm	{1} בשעה {0}	{1} בשעה {0}	{1}, {0}	{1}, {0}
+hi	EEEE, d MMMM y	d MMMM y	d MMM y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} को {0} बजे	{1} को {0} बजे	{1}, {0}	{1}, {0}
+hi-Latn	EEEE, d MMMM y	d MMMM, y	dd MMM, y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1}, {0} 'par'	{1}, {0} 'par'	{1}, {0}	{1}, {0}
+hr	EEEE, d. MMMM y.	d. MMMM y.	d. MMM y.	dd. MM. y.	HH:mm:ss (zzzz)	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'u' {0}	{1} 'u' {0}	{1} {0}	{1} {0}
+hr-BA	EEEE, d. MMMM y.	d. MMMM y.	d. MMM y.	d. M. yy.	HH:mm:ss (zzzz)	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'u' {0}	{1} 'u' {0}	{1} {0}	{1} {0}
+hsb	EEEE, d. MMMM y	d. MMMM y	d.M.y	d.M.yy	H:mm:ss zzzz	H:mm:ss z	H:mm:ss	H:mm 'hodź'.	{1} 'w' {0}	{1} 'w' {0}	{1} {0}	{1} {0}
+hu	y. MMMM d., EEEE	y. MMMM d.	y. MMM d.	y. MM. dd.	H:mm:ss zzzz	H:mm:ss z	H:mm:ss	H:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+hy	y թ. MMMM d, EEEE	y թ. MMMM d	y թ. MMM d	dd.MM.yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}
+ia	EEEE 'le' d 'de' MMMM y	d 'de' MMMM y	d MMM y	dd-MM-y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'a' {0}	{1} 'a' {0}	{1}, {0}	{1}, {0}
+id	EEEE, dd MMMM y	d MMMM y	d MMM y	d/M/yy	HH.mm.ss zzzz	HH.mm.ss z	HH.mm.ss	HH.mm	{1} 'pukul' {0}	{1} 'pukul' {0}	{1}, {0}	{1}, {0}
+ie	EEEE d MMMM y	d MMMM y	d MMM y	d.M.yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'ye' {0}	{1} 'ye' {0}	{1} {0}	{1} {0}
+ig	EEEE, d MMMM y	d MMMM y	d MMM y	d/M/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'na' {0}	{1} 'na' {0}	{1}, {0}	{1}, {0}
+ii	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+is	EEEE, d. MMMM y	d. MMMM y	d. MMM y	d.M.y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'kl'. {0}	{1} 'kl'. {0}	{1}, {0}	{1}, {0}
+it	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'alle' 'ore' {0}	{1} 'alle' 'ore' {0}	{1}, {0}	{1}, {0}
+it-CH	EEEE, d MMMM y	d MMMM y	d MMM y	dd.MM.yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'alle' 'ore' {0}	{1} 'alle' 'ore' {0}	{1}, {0}	{1}, {0}
+it-SM	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'alle' 'ore' {0}	{1} 'alle' 'ore' {0}	{1}, {0}	{1}, {0}
+it-VA	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'alle' 'ore' {0}	{1} 'alle' 'ore' {0}	{1}, {0}	{1}, {0}
+ja	y年M月d日EEEE	y年M月d日	y/MM/dd	y/MM/dd	H時mm分ss秒 zzzz	H:mm:ss z	H:mm:ss	H:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+jgo	EEEE, y MMMM dd	y MMMM d	y MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+jmc	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+jv	EEEE, d MMMM y	d MMMM y	d MMM y	dd-MM-y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'ing' {0}	{1} 'ing' {0}	{1}, {0}	{1}, {0}
+ka	EEEE, dd MMMM, y	d MMMM, y	d MMM. y	dd.MM.yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}
+kab	EEEE d MMMM y	d MMMM y	d MMM, y	d/M/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+kam	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+kbd	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+kbd-TR	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+kde	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+kea	EEEE, d 'di' MMMM 'di' y	d 'di' MMMM 'di' y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}
+kek	EEEE, d, MMMM, y	d, MMMM, y	d, MMM, y	d/M/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+kgp	EEEE, d 'ne' MMMM, y	d 'ne' MMMM, y	d 'ne' MMM, y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+khq	EEEE d MMMM y	d MMMM y	d MMM, y	d/M/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ki	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+kk	y 'ж'. d MMMM, EEEE	y 'ж'. d MMMM	y 'ж'. dd MMM	dd.MM.yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}
+kk-Arab	y، d-MMMM، EEEE	y، d-MMMM	y، d-MMM	dd-MM-y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}
+kk-Cyrl	y 'ж'. d MMMM, EEEE	y 'ж'. d MMMM	y 'ж'. dd MMM	dd.MM.yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}
+kk-KZ	y 'ж'. d MMMM, EEEE	y 'ж'. d MMMM	y 'ж'. dd MMM	dd.MM.yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}
+kkj	EEEE dd MMMM y	d MMMM y	d MMM y	dd/MM y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+kl	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	HH.mm.ss zzzz	HH.mm.ss z	HH.mm.ss	HH.mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+kln	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+km	EEEE d MMMM y	d MMMM y	d MMM y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} នៅ​ម៉ោង {0}	{1} នៅ​ម៉ោង {0}	{1}, {0}	{1}, {0}
+kn	EEEE, MMMM d, y	MMMM d, y	MMM d, y	d/M/yy	hh:mm:ss a zzzz	hh:mm:ss a z	hh:mm:ss a	hh:mm a	{1} ರಂದು {0} ಸಮಯಕ್ಕೆ	{1} ರಂದು {0} ಸಮಯಕ್ಕೆ	{1}, {0}	{1}, {0}
+ko	y년 MMMM d일 EEEE	y년 MMMM d일	y. M. d.	yy. M. d.	a h시 m분 s초 zzzz	a h시 m분 s초 z	a h:mm:ss	a h:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ko-CN	y년 MMMM d일 EEEE	y년 MMMM d일	y. M. d.	yy. M. d.	zzzz HH:mm:ss	z HH:mm:ss	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ko-KP	y년 MMMM d일 EEEE	y년 MMMM d일	y. M. d.	yy. M. d.	a h시 m분 s초 zzzz	a h시 m분 s초 z	a h:mm:ss	a h:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+kok	EEEE d MMMM y	d MMMM y	d-MMM-y	d-M-yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0} वरांचेर	{1} {0} वरांचेर	{1}, {0}	{1}, {0}
+kok-Deva	EEEE d MMMM y	d MMMM y	d-MMM-y	d-M-yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0} वरांचेर	{1} {0} वरांचेर	{1}, {0}	{1}, {0}
+kok-Latn	EEEE, d MMMM, y	d MMMM, y	d MMM, y	d-M-yy	a h:mm:ss zzzz	a h:mm:ss z	a h:mm:ss	a h:mm	{1}, {0} 'vaztam'	{1}, {0} 'vaztam'	{1}, {0}	{1}, {0}
+ks	EEEE, MMMM d, y	MMMM d, y	MMM d, y	M/d/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{0} پٮ۪ٹھؠ {1}	{0} پٮ۪ٹھؠ {1}	{1}, {0}	{1}, {0}
+ks-Arab	EEEE, MMMM d, y	MMMM d, y	MMM d, y	M/d/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{0} پٮ۪ٹھؠ {1}	{0} پٮ۪ٹھؠ {1}	{1}, {0}	{1}, {0}
+ks-Deva	EEEE, d MMMM y	d MMMM y	d MMM y	d/M/yy	a h:mm:ss zzzz	a h:mm:ss z	a h:mm:ss	a h:mm	{0} पेठ {1}	{0} पेठ {1}	{1}, {0}	{1}, {0}
+ksb	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ksf	EEEE d MMMM y	d MMMM y	d MMM y	d/M/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ksh	EEEE, 'dä' d. MMMM y	d. MMMM y	d. MMM. y	d. M. y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ku	EEEE, d'ê' MMMM'a' y'an'	d'ê' MMMM'a' y'an'	d MMM, y	dd.MM.y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ku-Latn	EEEE, d'ê' MMMM'a' y'an'	d'ê' MMMM'a' y'an'	d MMM, y	dd.MM.y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ku-Latn-IQ	EEEE, d'ê' MMMM'a' y'an'	d'ê' MMMM'a' y'an'	d MMM, y	dd.MM.y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ku-Latn-SY	EEEE, d'ê' MMMM'a' y'an'	d'ê' MMMM'a' y'an'	d MMM, y	dd.MM.y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ku-TR	EEEE, d'ê' MMMM'a' y'an'	d'ê' MMMM'a' y'an'	d MMM, y	dd.MM.y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+kw	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+kxv	EEEE, d MMMM y	d MMMM y	d MMM y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'aã' {0}	{1} 'aã' {0}	{1}, {0}	{1}, {0}
+kxv-Deva	EEEE, d MMMM y	d MMMM y	d MMM y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} आँ {0}	{1} आँ {0}	{1}, {0}	{1}, {0}
+kxv-Latn	EEEE, d MMMM y	d MMMM y	d MMM y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'aã' {0}	{1} 'aã' {0}	{1}, {0}	{1}, {0}
+kxv-Orya	EEEE, d MMMM y	d MMMM y	d MMM y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} ଆଁ {0}	{1} ଆଁ {0}	{1}, {0}	{1}, {0}
+kxv-Telu	EEEE, d MMMM y	d MMMM y	d MMM y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} త {0}	{1} త {0}	{1}, {0}	{1}, {0}
+ky	y-'ж'., d-MMMM, EEEE	y-'ж'., d-MMMM	y-'ж'., d-MMM	dd.MM.yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+lag	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+lb	EEEE, d. MMMM y	d. MMMM y	d. MMM y	dd.MM.yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+lg	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+lij	EEEE d MMMM 'do' y	d MMMM 'do' y	d MMM 'do' y	dd/MM/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'à' {0}	{1} 'à' {0}	{1}, {0}	{1}, {0}
+lkt	EEEE, MMMM d, y	MMMM d, y	MMM d, y	M/d/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+lld	EEEE, d MMMM 'dl' y	d MMMM y	d MMM y	dd.MM.yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'dales' {0}	{1} 'dales' {0}	{1}, {0}	{1}, {0}
+lmo	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ln	EEEE d MMMM y	d MMMM y	d MMM y	d/M/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ln-AO	EEEE d MMMM y	d MMMM y	d MMM y	d/M/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ln-CF	EEEE d MMMM y	d MMMM y	d MMM y	d/M/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ln-CG	EEEE d MMMM y	d MMMM y	d MMM y	d/M/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+lo	EEEE, d MMMM y	d MMMM y	d MMM y	d/M/y	H ໂມງ m ນາທີ ss ວິນາທີ zzzz	H ໂມງ m ນາທີ ss ວິນາທີ z	H:mm:ss	H:mm	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}
+lrc	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+lrc-IQ	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+lt	y 'm'. MMMM d 'd'., EEEE	y 'm'. MMMM d 'd'.	y-MM-dd	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+lu	EEEE d MMMM y	d MMMM y	d MMM y	d/M/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+luo	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+luy	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+lv	EEEE, y. 'gada' d. MMMM	y. 'gada' d. MMMM	y. 'gada' d. MMM	dd.MM.yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+mai	EEEE, d MMMM y	d MMMM y	d MMM y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} के {0}	{1} के {0}	{1}, {0}	{1}, {0}
+mas	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+mas-TZ	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+mer	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+mfe	EEEE d MMMM y	d MMMM y	d MMM, y	d/M/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+mg	EEEE d MMMM y	d MMMM y	y MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+mgh	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+mgo	EEEE, y MMMM dd	y MMMM d	y MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+mi	EEEE, d MMMM y	d MMMM y	d MMM y	dd-MM-y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0}	{1} 'i' {0}	{1} {0}	{1} {0}
+mk	EEEE, d MMMM y 'г'.	d MMMM y 'г'.	d MMM y 'г'.	d.M.y 'г'.	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1}, 'во' {0}	{1}, 'во' {0}	{1}, 'во' {0}	{1}, {0}
+ml	y MMMM d, EEEE	y MMMM d	y MMM d	d/M/yy	zzzz h:mm:ss a	z h:mm:ss a	h:mm:ss a	h:mm a	{1}, {0}-ന്	{1}, {0}-ന്	{1}, {0}	{1}, {0}
+mn	y 'оны' MMMM'ын' d, EEEE 'гараг'	y 'оны' MMMM'ын' d	y 'оны' MMM'ын' d	y.MM.dd	HH:mm:ss (zzzz)	HH:mm:ss (z)	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+mni	MMMM d, y, EEEE	MMMM d, y	MMM d, y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} গী {0} দা	{1} গী {0} দা	{1}, {0}	{1}, {0}
+mni-Beng	MMMM d, y, EEEE	MMMM d, y	MMM d, y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} গী {0} দা	{1} গী {0} দা	{1}, {0}	{1}, {0}
+mr	EEEE, d MMMM, y	d MMMM, y	d MMM, y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} रोजी {0}	{1} रोजी {0} वाजता	{1}, {0}	{1}, {0}
+ms	EEEE, d MMMM y	d MMMM y	d MMM y	d/MM/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'pada' {0}	{1} 'pada' {0}	{1}, {0}	{1}, {0}
+ms-BN	dd MMMM y	d MMMM y	d MMM y	d/MM/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'pada' {0}	{1} 'pada' {0}	{1}, {0}	{1}, {0}
+ms-ID	EEEE, dd MMMM y	d MMMM y	d MMM y	dd/MM/yy	HH.mm.ss zzzz	HH.mm.ss z	HH.mm.ss	HH.mm	{1} 'pada' {0}	{1} 'pada' {0}	{1}, {0}	{1}, {0}
+ms-SG	EEEE, d MMMM y	d MMMM y	d MMM y	d/MM/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'pada' {0}	{1} 'pada' {0}	{1}, {0}	{1}, {0}
+mt	EEEE, d 'ta'’ MMMM y	d 'ta'’ MMMM y	dd MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+mua	EEEE d MMMM y	d MMMM y	d MMM y	d/M/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+my	y MMMM d၊ EEEE	y MMMM d	y MMM d	d/M/yy	zzzz HH:mm:ss	z HH:mm:ss	H:mm:ss	H:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+mzn	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+naq	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+nb	EEEE d. MMMM y	d. MMMM y	d. MMM y	dd.MM.y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'kl'. {0}	{1} 'kl'. {0}	{1}, {0}	{1}, {0}
+nb-SJ	EEEE d. MMMM y	d. MMMM y	d. MMM y	dd.MM.y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'kl'. {0}	{1} 'kl'. {0}	{1}, {0}	{1}, {0}
+nd	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+nds	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+nds-NL	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ne	y MMMM d, EEEE	y MMMM d	y MMM d	yy/M/d	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1}: {0}	{1}: {0}	{1}, {0}	{1}, {0}
+ne-IN	y MMMM d, EEEE	y MMMM d	y MMM d	yy/M/d	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1}: {0}	{1}: {0}	{1}, {0}	{1}, {0}
+nl	EEEE d MMMM y	d MMMM y	d MMM y	dd-MM-y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'om' {0}	{1} 'om' {0}	{1}, {0}	{1}, {0}
+nl-AW	EEEE d MMMM y	d MMMM y	d MMM y	dd-MM-y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'om' {0}	{1} 'om' {0}	{1}, {0}	{1}, {0}
+nl-BE	EEEE d MMMM y	d MMMM y	d MMM y	d/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'om' {0}	{1} 'om' {0}	{1}, {0}	{1}, {0}
+nl-BQ	EEEE d MMMM y	d MMMM y	d MMM y	dd-MM-y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'om' {0}	{1} 'om' {0}	{1}, {0}	{1}, {0}
+nl-CW	EEEE d MMMM y	d MMMM y	d MMM y	dd-MM-y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'om' {0}	{1} 'om' {0}	{1}, {0}	{1}, {0}
+nl-SR	EEEE d MMMM y	d MMMM y	d MMM y	dd-MM-y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'om' {0}	{1} 'om' {0}	{1}, {0}	{1}, {0}
+nl-SX	EEEE d MMMM y	d MMMM y	d MMM y	dd-MM-y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'om' {0}	{1} 'om' {0}	{1}, {0}	{1}, {0}
+nmg	EEEE d MMMM y	d MMMM y	d MMM y	d/M/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+nn	EEEE d. MMMM y	d. MMMM y	d. MMM y	dd.MM.y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'kl'. {0}	{1} 'kl'. {0}	{1}, {0}	{1}, {0}
+nnh	EEEE , 'lyɛ'̌ʼ d 'na' MMMM, y	'lyɛ'̌ʼ d 'na' MMMM, y	d MMM, y	dd/MM/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1},{0}	{1}, {0}	{1} {0}	{1} {0}
+no	EEEE d. MMMM y	d. MMMM y	d. MMM y	dd.MM.y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'kl'. {0}	{1} 'kl'. {0}	{1}, {0}	{1}, {0}
+nqo	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+nso	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'ka' {0}	{1} 'ka' {0}	{1}, {0}	{1}, {0}
+nus	EEEE d MMMM y	d MMMM y	d MMM y	d/MM/y	zzzz h:mm:ss a	z h:mm:ss a	h:mm:ss a	h:mm a	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+nyn	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+oc	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+oc-ES	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+om	EEEE, MMMM d, y	MMMM d, y	MMM d, y	M/d/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0} 'tti'	{1} {0} 'tti'	{1}, {0}	{1}, {0}
+om-KE	EEEE, MMMM d, y	MMMM d, y	MMM d, y	M/d/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0} 'tti'	{1} {0} 'tti'	{1}, {0}	{1}, {0}
+or	EEEE, MMMM d, y	MMMM d, y	MMM d, y	M/d/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{0} ଠାରେ {1}	{0} ଠାରେ {1}	{1}, {0}	{1}, {0}
+os	EEEE, d MMMM, y 'аз'	d MMMM, y 'аз'	dd MMM y 'аз'	dd.MM.yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}
+os-RU	EEEE, d MMMM, y 'аз'	d MMMM, y 'аз'	dd MMM y 'аз'	dd.MM.yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}
+pa	EEEE, d MMMM y	d MMMM y	d MMM y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0}	{1} {0}	{1}, {0}	{1}, {0}
+pa-Arab	EEEE, dd MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+pa-Guru	EEEE, d MMMM y	d MMMM y	d MMM y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0}	{1} {0}	{1}, {0}	{1}, {0}
+pcm	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	H:mm:ss z	HH:mm:ss	HH:mm	{1} 'fọ' {0}	{1} 'fọ' {0}	{1}, {0}	{1}, {0}
+pl	EEEE, d MMMM y	d MMMM y	d MMM y	d.MM.y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1}, {0}	{1}, {0}
+pms	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+prg	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ps	EEEE d, MMMM, y	d MMMM y	d MMM y	y/M/d	H:mm:ss (zzzz)	H:mm:ss (z)	H:mm:ss	H:mm	{1} په {0}	{1} په {0}	{1} {0}	{1} {0}
+ps-PK	EEEE d, MMMM, y	d MMMM y	d MMM y	y/M/d	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} په {0}	{1} په {0}	{1} {0}	{1} {0}
+pt	EEEE, d 'de' MMMM 'de' y	d 'de' MMMM 'de' y	d 'de' MMM 'de' y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'às' {0}	{1} 'às' {0}	{1}, {0}	{1}, {0}
+pt-AO	EEEE, d 'de' MMMM 'de' y	d 'de' MMMM 'de' y	dd/MM/y	dd/MM/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'às' {0}	{1} 'às' {0}	{1}, {0}	{1}, {0}
+pt-CH	EEEE, d 'de' MMMM 'de' y	d 'de' MMMM 'de' y	dd/MM/y	dd/MM/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'às' {0}	{1} 'às' {0}	{1}, {0}	{1}, {0}
+pt-CV	EEEE, d 'de' MMMM 'de' y	d 'de' MMMM 'de' y	dd/MM/y	dd/MM/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'às' {0}	{1} 'às' {0}	{1}, {0}	{1}, {0}
+pt-GQ	EEEE, d 'de' MMMM 'de' y	d 'de' MMMM 'de' y	dd/MM/y	dd/MM/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'às' {0}	{1} 'às' {0}	{1}, {0}	{1}, {0}
+pt-GW	EEEE, d 'de' MMMM 'de' y	d 'de' MMMM 'de' y	dd/MM/y	dd/MM/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'às' {0}	{1} 'às' {0}	{1}, {0}	{1}, {0}
+pt-LU	EEEE, d 'de' MMMM 'de' y	d 'de' MMMM 'de' y	dd/MM/y	dd/MM/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'às' {0}	{1} 'às' {0}	{1}, {0}	{1}, {0}
+pt-MO	EEEE, d 'de' MMMM 'de' y	d 'de' MMMM 'de' y	dd/MM/y	dd/MM/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'às' {0}	{1} 'às' {0}	{1}, {0}	{1}, {0}
+pt-MZ	EEEE, d 'de' MMMM 'de' y	d 'de' MMMM 'de' y	dd/MM/y	dd/MM/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'às' {0}	{1} 'às' {0}	{1}, {0}	{1}, {0}
+pt-PT	EEEE, d 'de' MMMM 'de' y	d 'de' MMMM 'de' y	dd/MM/y	dd/MM/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'às' {0}	{1} 'às' {0}	{1}, {0}	{1}, {0}
+pt-ST	EEEE, d 'de' MMMM 'de' y	d 'de' MMMM 'de' y	dd/MM/y	dd/MM/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'às' {0}	{1} 'às' {0}	{1}, {0}	{1}, {0}
+pt-TL	EEEE, d 'de' MMMM 'de' y	d 'de' MMMM 'de' y	dd/MM/y	dd/MM/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'às' {0}	{1} 'às' {0}	{1}, {0}	{1}, {0}
+qu	EEEE, d MMMM, y	d MMMM y	d MMM y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0}	{1} {0}	{1}, {0}	{1}, {0}
+qu-BO	EEEE, d MMMM, y	d MMMM y	d MMM y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0}	{1} {0}	{1}, {0}	{1}, {0}
+qu-EC	EEEE, d MMMM, y	d MMMM y	d MMM y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0}	{1} {0}	{1}, {0}	{1}, {0}
+quc	y MMMM d, EEEE	y MMMM d	y MMM d	d/M/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+raj	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+rm	EEEE, 'ils' d MMMM y	d MMMM y	dd-MM-y	dd-MM-yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'a' 'las' {0}	{1} 'a' 'las' {0}	{1}, {0}	{1}, {0}
+rn	EEEE d MMMM y	d MMMM y	d MMM y	d/M/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ro	EEEE, d MMMM y	d MMMM y	d MMM y	dd.MM.y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'la' {0}	{1} 'la' {0}	{1}, {0}	{1}, {0}
+ro-MD	EEEE, d MMMM y	d MMMM y	d MMM y	dd.MM.y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'la' {0}	{1} 'la' {0}	{1}, {0}	{1}, {0}
+rof	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ru	EEEE, d MMMM y 'г'.	d MMMM y 'г'.	d MMM y 'г'.	dd.MM.y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'в' {0}	{1} 'в' {0}	{1}, {0}	{1}, {0}
+ru-BY	EEEE, d MMMM y 'г'.	d MMMM y 'г'.	d MMM y 'г'.	dd.MM.y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'в' {0}	{1} 'в' {0}	{1}, {0}	{1}, {0}
+ru-KG	EEEE, d MMMM y 'г'.	d MMMM y 'г'.	d MMM y 'г'.	dd.MM.y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'в' {0}	{1} 'в' {0}	{1}, {0}	{1}, {0}
+ru-KZ	EEEE, d MMMM y 'г'.	d MMMM y 'г'.	d MMM y 'г'.	dd.MM.y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'в' {0}	{1} 'в' {0}	{1}, {0}	{1}, {0}
+ru-MD	EEEE, d MMMM y 'г'.	d MMMM y 'г'.	d MMM y 'г'.	dd.MM.y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'в' {0}	{1} 'в' {0}	{1}, {0}	{1}, {0}
+ru-UA	EEEE, d MMMM y 'г'.	d MMMM y 'г'.	d MMM y 'г'.	dd.MM.y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'в' {0}	{1} 'в' {0}	{1}, {0}	{1}, {0}
+rw	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+rwk	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+sa	EEEE, d MMMM y	d MMMM y	d MMM y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} तदा {0}	{1} तदा {0}	{1}, {0}	{1}, {0}
+sah	y 'сыл' MMMM d 'күнэ', EEEE	y, MMMM d	y, MMM d	yy/M/d	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+saq	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+sat	EEEE, d MMMM y	d MMMM y	d MMM y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+sat-Olck	EEEE, d MMMM y	d MMMM y	d MMM y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+sbp	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+sc	EEEE d 'de' MMMM 'de' 'su' y	d 'de' MMMM 'de' 'su' y	d 'de' MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'a' 'sas' {0}	{1} 'a' 'sas' {0}	{1}, {0}	{1}, {0}
+scn	EEEE d MMMM y	d MMMM y	d MMM y	d/M/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'a' 'l'’'uri' {0}	{1} 'a' 'l'’'uri' {0}	{1} 'a' 'l'’'uri' {0}	{1} 'ê' {0}
+sd	EEEE, MMMM d, y	y MMMM d	y MMM d	y-MM-dd	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+sd-Arab	EEEE, MMMM d, y	y MMMM d	y MMM d	y-MM-dd	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+sd-Deva	EEEE, MMMM d, y	MMMM d, y	MMM d, y	M/d/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} ते {0}	{1} ते {0}	{1}, {0}	{1}, {0}
+se	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+se-FI	EEEE d MMMM y	d MMMM y	d MMM y	dd.MM.y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+se-SE	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+seh	EEEE, d 'de' MMMM 'de' y	d 'de' MMMM 'de' y	d 'de' MMM 'de' y	d/M/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ses	EEEE d MMMM y	d MMMM y	d MMM, y	d/M/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+sg	EEEE d MMMM y	d MMMM y	d MMM, y	d/M/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+shi	EEEE d MMMM y	d MMMM y	d MMM, y	d/M/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+shi-Latn	EEEE d MMMM y	d MMMM y	d MMM, y	d/M/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+shi-Tfng	EEEE d MMMM y	d MMMM y	d MMM, y	d/M/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+shn	y MMMM d - EEEE	y MMMM d	y MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+shn-TH	y MMMM d - EEEE	y MMMM d	y MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+si	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} දින {0}	{1} දින {0}	{1}, {0}	{1}, {0}
+sk	EEEE d. MMMM y	d. MMMM y	d. M. y	d. M. y	H:mm:ss zzzz	H:mm:ss z	H:mm:ss	H:mm	{1} 'o' {0}	{1} 'o' {0}	{1}, {0}	{1} {0}
+sl	EEEE, d. MMMM y	d. MMMM y	d. MMM y	d. M. y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'ob' {0}	{1} 'ob' {0}	{1}, {0}	{1}, {0}
+smn	cccc, MMMM d. y	MMMM d. y	MMM d. y	d.M.y	H.mm.ss zzzz	H.mm.ss z	H.mm.ss	H.mm	{1} 'tme' {0}	{1} 'tme' {0}	{1} 'tme' {0}	{1} {0}
+sn	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+so	EEEE, MMMM d, y	MMMM d, y	dd-MMM-y	dd/MM/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'ee' {0}	{1} 'ee' {0}	{1} 'ee' {0}	{1}, {0}
+so-DJ	EEEE, MMMM d, y	MMMM d, y	dd-MMM-y	dd/MM/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'ee' {0}	{1} 'ee' {0}	{1} 'ee' {0}	{1}, {0}
+so-ET	EEEE, MMMM d, y	MMMM d, y	dd-MMM-y	dd/MM/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} 'ee' {0}	{1} 'ee' {0}	{1} 'ee' {0}	{1}, {0}
+so-KE	EEEE, MMMM d, y	MMMM d, y	dd-MMM-y	dd/MM/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'ee' {0}	{1} 'ee' {0}	{1} 'ee' {0}	{1}, {0}
+sq	EEEE, d MMMM y	d MMMM y	d MMM y	d.M.yy	h:mm:ss a, zzzz	h:mm:ss a, z	h:mm:ss a	h:mm a	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}
+sq-MK	EEEE, d MMMM y	d MMMM y	d MMM y	d.M.yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}
+sq-XK	EEEE, d MMMM y	d MMMM y	d MMM y	d.M.yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}
+sr	EEEE, d. MMMM y.	d. MMMM y.	d. M. y.	d. M. y.	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+sr-Cyrl	EEEE, d. MMMM y.	d. MMMM y.	d. M. y.	d. M. y.	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+sr-Cyrl-BA	EEEE, d. MMMM y.	d. MMMM y.	d. M. y.	d. M. y.	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+sr-Cyrl-ME	EEEE, d. MMMM y.	d. MMMM y.	d. M. y.	d. M. y.	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+sr-Cyrl-XK	EEEE, d. MMMM y.	d. MMMM y.	d. M. y.	d. M. y.	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+sr-Latn	EEEE, d. MMMM y.	d. MMMM y.	d. M. y.	d. M. y.	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+sr-Latn-BA	EEEE, d. MMMM y.	d. MMMM y.	d. M. y.	d. M. y.	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+sr-Latn-ME	EEEE, d. MMMM y.	d. MMMM y.	d. M. y.	d. M. y.	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+sr-Latn-XK	EEEE, d. MMMM y.	d. MMMM y.	d. M. y.	d. M. y.	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+st	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+st-LS	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+su	EEEE, d MMMM y	d MMMM y	d MMM y	d/M/yy	H.mm.ss zzzz	H.mm.ss z	H.mm.ss	H.mm	{1} 'jam' {0}	{1} 'jam' {0}	{1}, {0}	{1}, {0}
+su-Latn	EEEE, d MMMM y	d MMMM y	d MMM y	d/M/yy	H.mm.ss zzzz	H.mm.ss z	H.mm.ss	H.mm	{1} 'jam' {0}	{1} 'jam' {0}	{1}, {0}	{1}, {0}
+suz-Sunu	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+sv	EEEE d MMMM y	d MMMM y	d MMM y	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'kl'. {0}	{1} 'kl'. {0}	{1} {0}	{1} {0}
+sv-AX	EEEE d MMMM y	d MMMM y	d.M.y	d.M.y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'kl'. {0}	{1} 'kl'. {0}	{1} {0}	{1} {0}
+sv-FI	EEEE d MMMM y	d MMMM y	d MMM y	d.M.y	HH.mm.ss zzzz	H.mm.ss z	H.mm.ss	H.mm	{1} 'kl'. {0}	{1} 'kl'. {0}	{1} {0}	{1} {0}
+sw	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}
+sw-CD	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}
+sw-KE	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'saa' {0}	{1} 'saa' {0}	{1}, {0}	{1}, {0}
+sw-UG	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}
+syr	EEEE، d ܒMMMM y	d ܒMMMM y	d ܒMMM y	d-MM-y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} ܒܫܥܬܐ {0}	{1} ܒܫܥܬܐ {0}	{1}، {0}	{1}، {0}
+syr-SY	EEEE، d ܒMMMM y	d ܒMMMM y	d ܒMMM y	d-MM-y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} ܒܫܥܬܐ {0}	{1} ܒܫܥܬܐ {0}	{1}، {0}	{1}، {0}
+szl	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ta	EEEE, d MMMM, y	d MMMM, y	d MMM, y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} அன்று {0}	{1} அன்று {0}	{1}, {0}	{1}, {0}
+ta-LK	EEEE, d MMMM, y	d MMMM, y	d MMM, y	d/M/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} அன்று {0}	{1} அன்று {0}	{1}, {0}	{1}, {0}
+ta-MY	EEEE, d MMMM, y	d MMMM, y	d MMM, y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} அன்று {0}	{1} அன்று {0}	{1}, {0}	{1}, {0}
+ta-SG	EEEE, d MMMM, y	d MMMM, y	d MMM, y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} அன்று {0}	{1} அன்று {0}	{1}, {0}	{1}, {0}
+te	d, MMMM y, EEEE	d MMMM, y	d MMM, y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0}కి	{1} {0}కి	{1} {0}	{1} {0}
+teo	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+teo-KE	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+tg	EEEE, dd MMMM y	dd MMMM y	dd MMM y	dd/MM/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'соати' {0}	{1} 'соати' {0}	{1}, {0}	{1}, {0}
+th	EEEEที่ d MMMM G y	d MMMM G y	d MMM y	d/M/yy	H นาฬิกา mm นาที ss วินาที zzzz	H นาฬิกา mm นาที ss วินาที z	HH:mm:ss	HH:mm น.	{1} เวลา {0}	{1} เวลา {0}	{1} {0}	{1} {0}
+ti	EEEE፣ d MMMM y	MMMM d, y	MMM d, y	M/d/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} ሰዓት {0}	{1} ሰዓት {0}	{1} {0}	{1} {0}
+ti-ER	EEEE፣ d MMMM y	MMMM d, y	MMM d, y	M/d/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} ሰዓት {0}	{1} ሰዓት {0}	{1} {0}	{1} {0}
+tk	d MMMM y, EEEE	d MMMM y	d MMM y	dd.MM.y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'sagat' {0}	{1} 'sagat' {0}	{1}, {0}	{1}, {0}
+tn	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'ka' {0}	{1} 'ka' {0}	{1}, {0}	{1}, {0}
+tn-BW	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'ka' {0}	{1} 'ka' {0}	{1}, {0}	{1}, {0}
+to	EEEE d MMMM y	d MMMM y	d MMM y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}
+tok	'sike' #y 'la' MMM 'la' 'suno' #d	'tenpo' 'sike' #y 'la' 'tenpo' MMMM 'la' 'tenpo' 'suno' #d	'sike' #y 'la' MMM 'la' 'suno' #d	y-MM-dd	zzzz 'la' HH:mm:ss	z 'la' HH:mm:ss	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+tr	d MMMM y EEEE	d MMMM y	d MMM y	d.MM.y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+tr-CY	d MMMM y EEEE	d MMMM y	d MMM y	d.MM.y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+tt	d MMMM, y 'ел', EEEE	d MMMM, y 'ел'	d MMM, y 'ел'	dd.MM.y	H:mm:ss zzzz	H:mm:ss z	H:mm:ss	H:mm	{1} {0} 'сәгатьтә'	{1} {0} 'сәгатьтә'	{1}, {0}	{1}, {0}
+twq	EEEE d MMMM y	d MMMM y	d MMM y	d/M/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+tyv	y'ч' MMMM d, EEEE	y'ч' MMMM d	y'ч' MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}
+tzm	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ug	y d-MMMM، EEEE	d-MMMM، y	d-MMM، y	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1}، {0}	{1}، {0}
+uk	EEEE, d MMMM y 'р'.	d MMMM y 'р'.	d MMM y 'р'.	dd.MM.yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'о' {0}	{1} 'о' {0}	{1}, {0}	{1}, {0}
+und	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+ur	EEEE، d MMMM، y	d MMMM، y	d MMM، y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0}	{1} {0}	{1}، {0}	{1}، {0}
+ur-IN	EEEE، d MMMM، y	d MMMM، y	d MMM، y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0}	{1} {0}	{1}، {0}	{1}، {0}
+uz	EEEE, d-MMMM, y	d-MMMM, y	d-MMM, y	dd/MM/yy	H:mm:ss (zzzz)	H:mm:ss (z)	HH:mm:ss	HH:mm	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}
+uz-Arab	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+uz-Cyrl	EEEE, dd MMMM, y	d MMMM, y	d MMM, y	dd/MM/yy	HH:mm:ss (zzzz)	HH:mm:ss (z)	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+uz-Latn	EEEE, d-MMMM, y	d-MMMM, y	d-MMM, y	dd/MM/yy	H:mm:ss (zzzz)	H:mm:ss (z)	HH:mm:ss	HH:mm	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}
+vai	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+vai-Latn	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+vai-Vaii	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+vec	EEEE d MMMM y	d MMMM y	d MMM y	dd/MM/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}
+vi	EEEE, d MMMM, y	d MMMM, y	d MMM, y	d/M/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	'lúc' {0} {1}	'lúc' {0} {1}	{0} {1}	{0} {1}
+vmw	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+vun	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+wae	EEEE, d. MMMM y	d. MMMM y	d. MMM y	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+wo	EEEE, d MMM, y	d MMMM, y	d MMM, y	dd-MM-y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'ci' {0}	{1} 'ci' {0}	{1} - {0}	{1} - {0}
+xh	EEEE, MMMM d, y	MMMM d, y	MMM d, y	M/d/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} 'ngo' {0}	{1} 'ngo' {0}	{1}, {0}	{1}, {0}
+xnr	EEEE, d MMMM y	d MMMM y	d MMM y	d/M/yy	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}
+xog	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+yav	EEEE d MMMM y	d MMMM y	d MMM y	d/M/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+yi	EEEE, dטן MMMM y	dטן MMMM y	dטן MMM y	dd/MM/yy	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1}, {0}	{1} {0}
+yo	EEEE, d MMM y	d MMM y	d MM y	d/M/y	HH:mm:ss zzzz	H:mm:ss z	H:m:s	H:m	{1} 'ní' {0}	{1} 'ní' {0}	{1}, {0}	{1}, {0}
+yo-BJ	EEEE, d MMM y	d MMM y	d MM y	d/M/y	HH:mm:ss zzzz	H:mm:ss z	H:m:s	H:m	{1} 'ní' {0}	{1} 'ní' {0}	{1}, {0}	{1}, {0}
+yrl	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+yrl-CO	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+yrl-VE	EEEE, d MMMM y	d MMMM y	d MMM y	dd/MM/y	h:mm:ss a zzzz	h:mm:ss a z	h:mm:ss a	h:mm a	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+yue	y年M月d日 EEEE	y年M月d日	y年M月d日	y/M/d	ah:mm:ss [zzzz]	ah:mm:ss [z]	ah:mm:ss	ah:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+yue-Hans	y年M月d日 EEEE	y年M月d日	y年M月d日	y/M/d	HH:mm:ss [zzzz]	HH:mm:ss [z]	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+yue-Hant	y年M月d日 EEEE	y年M月d日	y年M月d日	y/M/d	ah:mm:ss [zzzz]	ah:mm:ss [z]	ah:mm:ss	ah:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+yue-Hant-CN	y年M月d日 EEEE	y年M月d日	y年M月d日	y/M/d	HH:mm:ss [zzzz]	HH:mm:ss [z]	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+yue-Hant-MO	y年M月d日 EEEE	y年M月d日	y年M月d日	y/M/d	ah:mm:ss [zzzz]	ah:mm:ss [z]	ah:mm:ss	ah:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+za	y MMMM d, EEEE	y MMMM d	y MMM d	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+zgh	EEEE d MMMM y	d MMMM y	d MMM, y	d/M/y	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+zh	y年M月d日EEEE	y年M月d日	y年M月d日	y/M/d	zzzz HH:mm:ss	z HH:mm:ss	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+zh-Hans	y年M月d日EEEE	y年M月d日	y年M月d日	y/M/d	zzzz HH:mm:ss	z HH:mm:ss	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+zh-Hans-HK	y年M月d日EEEE	y年M月d日	y年M月d日	d/M/yy	zzzz ah:mm:ss	z ah:mm:ss	ah:mm:ss	ah:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+zh-Hans-MO	y年M月d日EEEE	y年M月d日	y年M月d日	d/M/yy	zzzz ah:mm:ss	z ah:mm:ss	ah:mm:ss	ah:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+zh-Hans-MY	y年M月d日EEEE	y年M月d日	y年M月d日	y/M/d	zzzz ah:mm:ss	z ah:mm:ss	ah:mm:ss	ah:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+zh-Hans-SG	y年M月d日EEEE	y年M月d日	y年M月d日	dd/MM/yy	zzzz ah:mm:ss	z ah:mm:ss	ah:mm:ss	ah:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+zh-Hant	y年M月d日 EEEE	y年M月d日	y年M月d日	y/M/d	Bh:mm:ss [zzzz]	Bh:mm:ss [z]	Bh:mm:ss	Bh:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+zh-Hant-HK	y年M月d日EEEE	y年M月d日	y年M月d日	d/M/y	ah:mm:ss [zzzz]	ah:mm:ss [z]	ah:mm:ss	ah:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+zh-Hant-MO	y年M月d日EEEE	y年M月d日	y年M月d日	d/M/y	ah:mm:ss [zzzz]	ah:mm:ss [z]	ah:mm:ss	ah:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+zh-Hant-MY	y年M月d日 EEEE	y年M月d日	y年M月d日	y/M/d	zzzz ah:mm:ss	z ah:mm:ss	ah:mm:ss	ah:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}
+zu	EEEE, MMMM d, y	MMMM d, y	MMM d, y	y-MM-dd	HH:mm:ss zzzz	HH:mm:ss z	HH:mm:ss	HH:mm	{1} {0}	{1} {0}	{1} {0}	{1} {0}

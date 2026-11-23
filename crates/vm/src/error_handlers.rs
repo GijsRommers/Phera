@@ -7,7 +7,7 @@
 
 use crate::{Vm, diagnostics::SourceLocation};
 use phera_extension_api::{CompileDiagnosticKind, Context, NativeError, NativeResult};
-use phera_value::Value;
+use phera_value::{PhpString, Value};
 
 /// Callable plus the error-level mask accepted by set_error_handler.
 #[derive(Clone)]
@@ -20,7 +20,7 @@ pub(crate) struct ErrorHandler {
 pub(crate) struct DiagnosticEvent {
     pub(crate) level: i64,
     pub(crate) kind: String,
-    pub(crate) message: String,
+    pub(crate) message: PhpString,
     pub(crate) location: SourceLocation,
     pub(crate) native: Option<crate::error_traces::NativeTrace>,
     pub(crate) trace_location: Option<SourceLocation>,
@@ -45,6 +45,10 @@ pub(crate) struct ErrorHandlers {
     pub(crate) warning_site: Option<crate::exception_traces::WarningSite>,
     pub(crate) pending: Vec<DiagnosticEvent>,
     pub(crate) reporting: i64,
+    pub(crate) last_error: Option<crate::last_error::LastError>,
+    pub(crate) fatal_trace: Option<Value>,
+    pub(crate) fatal_error_backtraces: bool,
+    pub(crate) trace_ignore_args: bool,
     /// PHP formats saved trace strings using the current request limit, not creation-time text.
     pub(crate) trace_string_limit: usize,
 }
@@ -61,6 +65,10 @@ impl Default for ErrorHandlers {
             warning_site: None,
             pending: Vec::new(),
             reporting: 30719,
+            last_error: None,
+            fatal_trace: None,
+            fatal_error_backtraces: true,
+            trace_ignore_args: false,
             trace_string_limit: 15,
         }
     }
@@ -73,6 +81,10 @@ pub(crate) enum HandlerFunction {
     RestoreException,
     SetError,
     RestoreError,
+    /// `get_exception_handler()`, new in PHP 8.5.
+    GetException,
+    /// `get_error_handler()`, new in PHP 8.5.
+    GetError,
     TriggerError,
 }
 
@@ -119,6 +131,9 @@ impl Vm {
         }
         match function {
             HandlerFunction::SetException | HandlerFunction::SetError => {
+                if let Some(callback) = arguments.first() {
+                    self.autoload_callable(callback).await?;
+                }
                 self.install_handler(function, &arguments)
             }
             HandlerFunction::RestoreException => {
@@ -130,6 +145,20 @@ impl Vm {
                 self.error_handlers.error = self.error_handlers.error_history.pop().flatten();
                 Ok(Value::Bool(true))
             }
+            // The callable as it was given to the set function, or null
+            // when PHP's own handler is in place.
+            HandlerFunction::GetException => Ok(self
+                .error_handlers
+                .exception
+                .as_ref()
+                .map(|handler| handler.callable.clone())
+                .unwrap_or_default()),
+            HandlerFunction::GetError => Ok(self
+                .error_handlers
+                .error
+                .as_ref()
+                .map(|handler| handler.callable.clone())
+                .unwrap_or_default()),
             HandlerFunction::TriggerError => self.trigger_error(&arguments).await,
         }
     }
@@ -137,6 +166,7 @@ impl Vm {
     /// Return false only from the user handler requests PHP's built-in diagnostic.
     pub(crate) async fn drain_error_handlers(&mut self) -> Result<(), NativeError> {
         let pending = std::mem::take(&mut self.error_handlers.pending);
+        self.refresh_pending_callbacks();
         for event in pending {
             let handler = self.error_handlers.error.clone();
             let handled = if let Some(handler) = handler.filter(|handler| {
@@ -176,11 +206,13 @@ impl Vm {
                 false
             };
             if !handled {
-                self.report_event(&event);
-                if event.level == 256 {
+                let level = event.level;
+                self.report_event(event);
+                if level == 256 {
+                    self.fiber_bailout = true;
                     self.status = 255;
                     return Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
-                        (),
+                        crate::request_end::FatalStop,
                     ))));
                 }
             }
@@ -188,8 +220,16 @@ impl Vm {
         Ok(())
     }
 
+    pub(crate) fn enqueue_diagnostic(&mut self, event: DiagnosticEvent) {
+        if event.level != 256 {
+            self.error_handlers.fatal_trace = None;
+        }
+        self.error_handlers.pending.push(event);
+        self.pending_callbacks = true;
+    }
+
     /// Queuing is required even under @ or error_reporting(0): PHP still calls handlers.
-    pub(crate) fn queue_diagnostic(&mut self, kind: &str, message: &str) -> bool {
+    pub(crate) fn queue_diagnostic(&mut self, kind: &str, message: &PhpString) -> bool {
         let level = match kind {
             "Warning" => 2,
             "Notice" => 8,
@@ -197,10 +237,10 @@ impl Vm {
             _ => 0,
         };
         if self.handles_diagnostic(level) {
-            self.error_handlers.pending.push(DiagnosticEvent {
+            self.enqueue_diagnostic(DiagnosticEvent {
                 level,
                 kind: kind.into(),
-                message: message.into(),
+                message: message.clone(),
                 location: self.location(),
                 native: self.error_handlers.native_site.clone(),
                 trace_location: None,
@@ -221,40 +261,32 @@ impl Vm {
     }
 
     /// Respect the reporting mask separately from whether a user callback was invoked.
-    pub(crate) fn report_event(&mut self, event: &DiagnosticEvent) {
-        if self.error_handlers.reporting & event.level != 0
-            && let Some(bytes) = self.diagnostic_reporter.report(
-                &event.kind,
-                event.message.clone(),
-                &event.location.file,
-                event.location.line,
-            )
-        {
-            self.out(&bytes);
-        }
+    pub(crate) fn report_event(&mut self, event: DiagnosticEvent) {
+        self.report_current_diagnostic(event.level, &event.kind, event.message, event.location);
     }
 }
 
 impl Vm {
-    /// The last-resort callback runs once after the PHP stack has unwound completely.
-    pub(crate) async fn invoke_exception_handler(&mut self, error: &NativeError) -> bool {
-        let NativeError::Unwind(payload) = error else {
-            return false;
-        };
-        let Some(thrown) = payload.0.downcast_ref::<crate::exceptions::Thrown>() else {
-            return false;
-        };
-        let Some(callable) = self.error_handlers.exception.take() else {
-            return false;
-        };
-        let object = Value::Object(thrown.object.clone());
-        if let Err(error) = self
-            .invoke_resolved_callable(callable.callee, vec![object])
-            .await
+    /// Let the active exception handler consume a throwable at a request boundary.
+    pub(crate) async fn report_uncaught(&mut self, error: NativeError) -> bool {
+        if let NativeError::Unwind(payload) = &error
+            && let Some(thrown) = payload.0.downcast_ref::<crate::exceptions::Thrown>()
+            && let Some(handler) = self.error_handlers.exception.as_ref()
         {
-            self.unwind(error);
+            let object = Value::Object(thrown.object.clone());
+            return match self
+                .invoke_resolved_callable(handler.callee.clone(), [object])
+                .await
+            {
+                Ok(_) => true,
+                Err(error) => {
+                    self.unwind(error);
+                    false
+                }
+            };
         }
-        true
+        self.unwind(error);
+        false
     }
 }
 
@@ -273,5 +305,42 @@ impl Vm {
                 }
                 error => error,
             })
+    }
+}
+
+impl crate::snapshot::ForkCopy for ErrorHandler {
+    fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
+        ErrorHandler {
+            callable: fork.value(&self.callable),
+            levels: self.levels,
+        }
+    }
+}
+
+impl crate::snapshot::ForkCopy for ExceptionHandler {
+    fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
+        ExceptionHandler {
+            callable: fork.value(&self.callable),
+            callee: self.callee.fork_copy(fork),
+        }
+    }
+}
+
+/// A fork keeps the handlers and settings; what belongs to one diagnostic
+/// in progress, and the last error (`error_get_last()`), start empty, as in
+/// a new request.
+impl crate::snapshot::ForkCopy for ErrorHandlers {
+    fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
+        ErrorHandlers {
+            exception: self.exception.fork_copy(fork),
+            exception_history: self.exception_history.fork_copy(fork),
+            error: self.error.fork_copy(fork),
+            error_history: self.error_history.fork_copy(fork),
+            reporting: self.reporting,
+            fatal_error_backtraces: self.fatal_error_backtraces,
+            trace_ignore_args: self.trace_ignore_args,
+            trace_string_limit: self.trace_string_limit,
+            ..ErrorHandlers::default()
+        }
     }
 }

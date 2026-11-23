@@ -16,7 +16,9 @@ pub fn collect(index: &mut Index, file: &str, source: &str, program: &Program) {
                 file: file.into(),
                 line: lines.line(offset),
             };
-            for block in collect_expression_declarations(index, statement, &names, &location) {
+            for block in
+                collect_expression_declarations(index, statement, &names, source, &location)
+            {
                 pending.push((block, names.clone()));
             }
             match &statement.kind {
@@ -28,7 +30,8 @@ pub fn collect(index: &mut Index, file: &str, source: &str, program: &Program) {
                 }
                 StatementKind::Class(class) => {
                     if let Some(name) = &class.name {
-                        let info = class_info(class, &names, &location);
+                        let info =
+                            class_info(class, &names, source, &location, index.read_type_docs);
                         let name = names.declaration(&name.name).to_ascii_lowercase();
                         if !index.builtin_classes.contains(&name) {
                             index.classes.insert(name, info);
@@ -43,8 +46,18 @@ pub fn collect(index: &mut Index, file: &str, source: &str, program: &Program) {
                     }
                 }
                 StatementKind::Function(function) => {
-                    let signature =
+                    let mut signature =
                         function_signature(function, &names, location(statement.span.start));
+                    signature
+                        .apply_phpdoc(crate::phpdoc::text(source, function.doc_comment), &names);
+                    if index.read_type_docs && function.doc_comment.is_some() {
+                        signature.documentation = Some(std::sync::Arc::new(crate::phpdoc::read(
+                            source,
+                            function.doc_comment,
+                            &names,
+                            &Default::default(),
+                        )));
+                    }
                     let name = names.declaration(&function.name.name).to_ascii_lowercase();
                     if !index.builtin_functions.contains(&name) {
                         index.functions.insert(name, signature);
@@ -72,9 +85,13 @@ pub fn child_blocks(statement: &Statement) -> Vec<&[Statement]> {
         | StatementKind::For { body, .. }
         | StatementKind::Foreach { body, .. } => vec![body],
         StatementKind::If {
-            then, otherwise, ..
+            then,
+            elseifs,
+            otherwise,
+            ..
         } => {
             let mut blocks = vec![then.as_slice()];
+            blocks.extend(elseifs.iter().map(|elseif| elseif.body.as_slice()));
             blocks.extend(otherwise.as_deref());
             blocks
         }
@@ -124,6 +141,7 @@ fn collect_expression_declarations<'a>(
     index: &mut Index,
     statement: &'a Statement,
     names: &Names,
+    source: &str,
     location: &impl Fn(usize) -> Location,
 ) -> Vec<&'a [Statement]> {
     let mut blocks = Vec::new();
@@ -132,6 +150,7 @@ fn collect_expression_declarations<'a>(
         if let ExpressionKind::Call {
             callee,
             arguments: Arguments::List(arguments),
+            ..
         } = &expression.kind
             && let ExpressionKind::Name(name) = &callee.kind
             && name.text.eq_ignore_ascii_case("define")
@@ -156,7 +175,7 @@ fn collect_expression_declarations<'a>(
                     blocks.push(body.as_slice());
                 }
             }
-            let mut info = class_info(class, names, location);
+            let mut info = class_info(class, names, source, location, index.read_type_docs);
             info.name = anonymous_name(&location(class.span.start).file, class.span.start);
             index.classes.insert(info.name.to_ascii_lowercase(), info);
         }
@@ -186,6 +205,7 @@ fn function_signature(
         location,
     );
     signature.accepts_extra = uses_argument_introspection(&function.body);
+    signature.returns_reference = function.by_reference;
     signature.global_effects = crate::global_effects::of(&function.body);
     signature
 }

@@ -4,21 +4,34 @@
 use super::statements::Flow;
 use super::*;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ConditionPosition {
+    BeforeBody,
+    AfterBody,
+}
+
 impl Analyzer<'_> {
     pub fn iteration(&mut self, statement: &Statement, scope: &mut Scope) -> Flow {
         match &statement.kind {
             StatementKind::While { condition, body } => {
-                let truth = self.condition_truth(condition, scope);
-                if self.expression(condition, scope, false) == ValueType::Never {
-                    return Flow::Terminal;
-                }
-                if truth == Some(false) {
-                    return Flow::Next;
-                }
-                self.loop_body(body, condition, scope, false, truth == Some(true))
+                self.widen_loop(body, [condition], scope);
+                let branches = self.condition(condition, std::mem::take(scope), false);
+                let Some(entered) = branches.yes else {
+                    self.constant_condition("while", "While loop condition", condition, &branches);
+                    return Self::finish_paths(branches.no.into_iter().collect(), scope);
+                };
+                *scope = entered;
+                self.loop_body(
+                    body,
+                    condition,
+                    scope,
+                    branches.no,
+                    ConditionPosition::BeforeBody,
+                )
             }
             StatementKind::DoWhile { body, condition } => {
-                self.loop_body(body, condition, scope, true, true)
+                self.widen_loop(body, [condition], scope);
+                self.loop_body(body, condition, scope, None, ConditionPosition::AfterBody)
             }
             StatementKind::For {
                 init,
@@ -26,24 +39,29 @@ impl Analyzer<'_> {
                 step,
                 body,
             } => {
-                for e in init.iter().chain(condition) {
-                    if self.expression(e, scope, false) == ValueType::Never {
+                let (last, earlier) = condition
+                    .split_last()
+                    .map_or((None, &[][..]), |(last, earlier)| (Some(last), earlier));
+                for expression in init.iter().chain(earlier) {
+                    if self.expression(expression, scope, false) == ValueType::Never {
                         return Flow::Terminal;
                     }
                 }
-                let entered = condition
-                    .last()
-                    .and_then(|e| self.condition_truth(e, scope));
-                if entered == Some(false) {
-                    return Flow::Next;
+                let Some(last) = last else {
+                    self.widen_loop(body, step, scope);
+                    return self.for_loop(body, step, scope, None, true);
+                };
+                let definitely_enters = self.level >= 4
+                    && crate::constants::value(last, scope).is_some_and(|value| value.truth());
+                self.widen_loop(body, condition.iter().chain(step), scope);
+                let branches = self.condition(last, std::mem::take(scope), false);
+                if let Some(entered) = branches.yes {
+                    *scope = entered;
+                    let bypass = if definitely_enters { None } else { branches.no };
+                    self.for_loop(body, step, scope, bypass, always_true(last))
+                } else {
+                    Self::finish_paths(branches.no.into_iter().collect(), scope)
                 }
-                self.for_loop(
-                    body,
-                    step,
-                    scope,
-                    condition.is_empty(),
-                    entered == Some(true),
-                )
             }
             StatementKind::Foreach {
                 subject,
@@ -65,17 +83,36 @@ impl Analyzer<'_> {
         body: &[Statement],
         scope: &mut Scope,
     ) -> Flow {
-        if self.expression(subject, scope, false) == ValueType::Never {
+        let subject_type = self.expression(subject, scope, false);
+        if subject_type == ValueType::Never {
             return Flow::Terminal;
         }
+        if self.level >= 4
+            && matches!(&subject_type, ValueType::Shape(shape) if shape.fields.is_empty()
+                && shape.remainder.is_none()
+                && shape.kind != crate::types::ShapeKind::Object)
+        {
+            self.diagnose_dead_code(
+                "foreach.emptyArray",
+                subject.span,
+                "Empty array passed to foreach.".into(),
+            );
+            return Flow::Next;
+        }
         let before = scope.clone();
+        self.widen_loop(body, [], scope);
         let nonempty = matches!(&subject.kind, ExpressionKind::Array(items)
             if items.iter().any(|item| !item.spread));
+        let (key_type, value_type) = if self.level >= 2 && !by_reference {
+            super::arrays::iteration_types(&subject_type)
+        } else {
+            (ValueType::Mixed, ValueType::Mixed)
+        };
         let key_flow = key.map_or(Evaluation::Completes, |key| {
-            self.write(key, ValueType::Mixed, scope)
+            self.write(key, key_type, scope)
         });
         if key_flow == Evaluation::Never
-            || self.write(value, ValueType::Mixed, scope) == Evaluation::Never
+            || self.write(value, value_type, scope) == Evaluation::Never
         {
             *scope = before;
             return if nonempty { Flow::Terminal } else { Flow::Next };
@@ -89,8 +126,6 @@ impl Analyzer<'_> {
         if flow == Flow::Next {
             paths.push(scope.clone());
         }
-        let nonempty = matches!(&subject.kind, ExpressionKind::Array(items)
-                    if items.iter().any(|i| !i.spread));
         if !nonempty {
             paths.push(before);
         }
@@ -102,10 +137,9 @@ impl Analyzer<'_> {
         body: &[Statement],
         step: &[Expression],
         scope: &mut Scope,
+        bypass: Option<Scope>,
         infinite: bool,
-        entered: bool,
     ) -> Flow {
-        let before = scope.clone();
         let (flow, frame) = self.control_body(body, scope);
         let mut advancing = frame.continues;
         if flow == Flow::Next {
@@ -121,9 +155,7 @@ impl Analyzer<'_> {
                 paths.push(next);
             }
         }
-        if !entered && !infinite {
-            paths.push(before);
-        }
+        paths.extend(bypass);
         Self::finish_paths(paths, scope)
     }
 
@@ -132,36 +164,77 @@ impl Analyzer<'_> {
         body: &[Statement],
         condition: &Expression,
         scope: &mut Scope,
-        post_condition: bool,
-        entered: bool,
+        bypass: Option<Scope>,
+        position: ConditionPosition,
     ) -> Flow {
-        let before = scope.clone();
-        if !post_condition {
-            self.refine(condition, scope, true);
-        }
         let (flow, frame) = self.control_body(body, scope);
         let mut advancing = frame.continues;
         if flow == Flow::Next {
             advancing.push(scope.clone());
         }
         let mut paths = frame.breaks;
+        let has_break = !paths.is_empty();
         if !advancing.is_empty() {
-            let mut next = Scope::join(&advancing);
-            let completed = self.expression(condition, &mut next, false) != ValueType::Never;
-            if completed && !always_true(condition) {
-                paths.push(next);
+            let next = Scope::join(&advancing);
+            let branches = self.condition(condition, next, false);
+            if position == ConditionPosition::AfterBody
+                && (branches.truth() != Some(true) || !has_break && !self.context.generator)
+            {
+                self.constant_condition("doWhile", "Do-while loop condition", condition, &branches);
+            }
+            if position == ConditionPosition::BeforeBody
+                && !has_break
+                && bypass.is_none()
+                && branches.truth() == Some(true)
+                && self.context.returns != ValueType::Never
+                && !has_terminal_exit(body)
+                && !super::generators::body_yields(body)
+            {
+                self.constant_condition("while", "While loop condition", condition, &branches);
+            }
+            paths.extend(branches.no);
+            if !always_true(condition) {
+                // A later iteration can revisit the condition after changing
+                // a variable that made it true on the first pass.
+                paths.extend(branches.yes);
             }
         }
-        if !entered {
-            paths.push(before);
-        }
+        paths.extend(bypass);
         Self::finish_paths(paths, scope)
     }
+}
+
+fn has_terminal_exit(body: &[Statement]) -> bool {
+    let mut statements: Vec<_> = body.iter().collect();
+    while let Some(statement) = statements.pop() {
+        if matches!(
+            statement.kind,
+            StatementKind::Return(_) | StatementKind::Continue(2..)
+        ) {
+            return true;
+        }
+        let mut expressions = crate::walk::statement_expressions(statement);
+        while let Some(expression) = expressions.pop() {
+            if matches!(
+                expression.kind,
+                ExpressionKind::Throw(_) | ExpressionKind::Exit(_)
+            ) {
+                return true;
+            }
+            expressions.extend(crate::walk::children(expression));
+        }
+        statements.extend(
+            crate::collect::child_blocks(statement)
+                .into_iter()
+                .flatten(),
+        );
+    }
+    false
 }
 
 fn always_true(expression: &Expression) -> bool {
     matches!(
         expression.kind,
-        ExpressionKind::Literal(Literal::Bool(true) | Literal::Int(1))
-    )
+        ExpressionKind::Literal(Literal::Bool(true))
+    ) || matches!(expression.kind, ExpressionKind::Literal(Literal::Int(n)) if n != 0)
 }

@@ -1,3 +1,5 @@
+//! Native errors can request a fresh PHP exception or forward an existing unwind.
+
 use std::any::Any;
 use std::fmt;
 
@@ -32,6 +34,14 @@ impl fmt::Debug for Unwind {
 }
 
 impl NativeError {
+    /// The VM still needs to create the PHP Throwable and capture its trace.
+    pub fn is_exception_request(&self) -> bool {
+        match self {
+            Self::Throw { .. } => true,
+            Self::Unwind(payload) => payload.0.is::<ExceptionPayload>(),
+        }
+    }
+
     /// Preserve a driver's code without coercion: `$e->getCode()` can return `"42P01"`.
     /// Only integers and strings are valid; other values report an extension implementation error.
     /// An exception already unwinding from PHP is passed through unchanged.
@@ -39,7 +49,10 @@ impl NativeError {
         match self.into_exception_parts() {
             Ok((class, message, _, properties)) => {
                 let code = code.into();
-                if !matches!(code, Value::Int(_) | Value::String(_)) {
+                if !matches!(
+                    code,
+                    Value::Int(_) | Value::InternedStr(_) | Value::String(_)
+                ) {
                     return Self::error(
                         "Phera internal error: native exception code must be int or string",
                     );
@@ -101,6 +114,16 @@ impl NativeError {
             class,
             message: message.into(),
             code: 0,
+        }
+    }
+
+    /// PHP messages can embed a filesystem path with bytes outside UTF-8.
+    pub fn throw_bytes(class: &'static str, message: Vec<u8>) -> Self {
+        match String::from_utf8(message) {
+            Ok(message) => Self::throw(class, message),
+            Err(error) => {
+                Self::throw(class, "").with_property("message", Value::from(error.into_bytes()))
+            }
         }
     }
 

@@ -13,38 +13,98 @@ use phera_value::{PhpArray, Value};
 
 use crate::Vm;
 use crate::arrays::ArrayWrite;
+use crate::calls::callback_binding::ArgumentBinding;
 use crate::calls::execution_loop::BatchExit;
 use crate::calls::sends::SentArgument;
 
 impl Vm {
     /// Runs one instruction. `Some` hands control back to the async shell:
     /// a native call to run, a finished callback, or an instruction to await.
-    pub(crate) fn execute(
+    #[inline]
+    pub(crate) fn execute<const TRACK_GENERATORS: bool>(
         &mut self,
         instruction: Instruction,
         stop: usize,
         work: &mut usize,
     ) -> Result<Option<BatchExit>, NativeError> {
         use Instruction as I;
+        // A simple instruction that only fell back because it overwrites
+        // an array or object (see `crate::fast`).
+        if self.object_ids.has_due() && self.release_and_store(instruction) {
+            return Ok(None);
+        }
         match instruction {
-            I::Call { dst } => return self.call(dst, work),
+            I::AssignPathFromLocal { .. }
+            | I::MakeReference { .. }
+            | I::BindReference { .. }
+            | I::SendPath { .. }
+            | I::UnsetPath { .. }
+            | I::AppendLocal { .. }
+                if self.classes.has_dimensions
+                    && self.prepare_dimension_instruction(instruction)? =>
+            {
+                return Ok(Some(BatchExit::Instruction(instruction)));
+            }
+            I::Call { dst, .. } => return self.call::<TRACK_GENERATORS>(dst, work),
+            // The loop makes a method site's call at once where it can;
+            // the `InitMethodCall`, sends and `Call` that follow make it
+            // otherwise.
+            // The loop hands a method site here when the VM must prepare
+            // the call (`__call`, a closure, a generator): the following
+            // `InitMethodCall` runs here, by its handler, not through
+            // `execute` again (a recursive `execute` would no longer be
+            // inlined into the batch loop).
+            I::CallMethod { .. } => self.start_written_out_call::<TRACK_GENERATORS>()?,
             I::CallDirect {
                 function,
                 args,
                 count,
                 dst,
+                ..
             } => return self.call_direct_general(function, args, count, dst, work),
+            I::CallNativeDirect {
+                function,
+                args,
+                count,
+                dst,
+                ..
+            } => {
+                *work += 1;
+                return self.call_native_direct(function, args, count, dst);
+            }
+            I::GeneratorStart
+            | I::Yield { .. }
+            | I::YieldFrom { .. }
+            | I::GeneratorReturn { .. } => {
+                return self.execute_generator(instruction, stop);
+            }
             I::Return { src } => return self.return_local(src, instruction, stop),
             I::ReturnNull => return self.return_null(stop),
+            I::ReturnMissing => return Err(self.missing_magic_return()),
             I::ReturnChecked { .. } | I::ReturnReference { .. } => {
                 return Ok(Some(BatchExit::Instruction(instruction)));
             }
-            I::Exit { .. } | I::Include { .. } => {
+            I::Exit { .. } | I::Include { .. } | I::Eval { .. } => {
                 return Ok(Some(BatchExit::Instruction(instruction)));
             }
             I::InitCall { function } => self.init_call(function)?,
             I::InitDynamicCall { callee } => self.init_dynamic_call(callee)?,
-            I::InitMethodCall { receiver, method } => self.init_method_call(receiver, method)?,
+            I::InitUserCallback {
+                callback,
+                arguments,
+            } => {
+                if !self.autoload.callbacks.is_empty() {
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                }
+                let callback = self.read_local(callback);
+                self.prepare_user_callback(callback, arguments)?;
+            }
+            I::SendUserCallback { src, arguments } => self.send_user_callback(src, arguments)?,
+            I::InitMethodCall { receiver, method }
+                if TRACK_GENERATORS && self.prepare_ready_native_method(receiver, method) => {}
+            I::InitMethodCall { receiver, method } => {
+                self.init_method_call::<TRACK_GENERATORS>(receiver, method)?
+            }
             I::InitStaticCall {
                 class,
                 method,
@@ -60,23 +120,51 @@ impl Vm {
             } => self.static_style_call(class, method, binding)?,
             I::New { class } => self.new_object(class)?,
             I::NewDynamic { class } => self.new_dynamic_object(class)?,
-            I::SendValue { src } => self.send(SentArgument::Value(src))?,
+            I::SendValue { src, .. } if TRACK_GENERATORS && self.send_window_argument(src)? => {}
+            I::SendLocal { local } if TRACK_GENERATORS && self.send_window_argument(local)? => {}
+            I::SendValue { src, of_call } => self.send(SentArgument::computed(src, of_call))?,
+            // A temporary read once: sent, then empty.
+            I::SendTake { src, of_call } => {
+                if !(TRACK_GENERATORS && self.send_window_argument(src)?) {
+                    self.send(SentArgument::computed(src, of_call))?;
+                }
+                self.clear_local(src)?;
+            }
+            I::SendConst { constant } => {
+                self.send(SentArgument::Literal(self.literal(constant)?))?
+            }
             I::SendLocal { local } => self.send(SentArgument::Local(local))?,
-            I::SendPath { path } => self.send(SentArgument::Path(self.path(path)?))?,
-            I::SendSpread { src } => self.spread(src)?,
+            I::SendPath { path } => {
+                if !self.send_path(self.path(path)?)? {
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                }
+            }
+            I::SendSpread { src } => {
+                if !self.spread(src)? {
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                }
+            }
             I::NameArgument { name } => self.name_argument(name)?,
             I::MakeCallable { dst } => self.make_callable(dst)?,
             I::ReceiveDefault { param, passed } => self.receive_default(param, passed)?,
 
             I::Nop => {}
+            I::AttributeDiagnostics => self.function_attribute_diagnostics()?,
             I::LoadNull { dst } => self.set(dst, Value::Null),
             I::LoadBool { dst, value } => self.set(dst, Value::Bool(value)),
             I::LoadInt { dst, value } => self.set(dst, Value::Int(i64::from(value))),
             I::LoadConst { dst, constant } => self.load_constant(dst, constant)?,
             I::Move { dst, src } => self.move_local(dst, src)?,
             I::Clear { reg } | I::UnsetLocal { local: reg } => self.clear_local(reg)?,
-            I::Assign { local, src } => self.execute_assign(local, src)?,
-            I::AssignOp { op, local, src } => self.execute_assign_op(op, local, src)?,
+            I::Assign { local, src } => return self.execute_assign(local, src),
+            // A temporary read once: assigned, then empty.
+            I::AssignTake { local, src } => {
+                let exit = self.execute_assign(local, src)?;
+                self.clear_local(src)?;
+                return Ok(exit);
+            }
+            I::AssignConst { local, constant } => self.assign_literal(local, constant)?,
+            I::AssignOp { op, local, src } => return self.execute_assign_op(op, local, src),
             I::CheckType { local, ty } => self.check_local_type(local, ty)?,
             I::IncDecLocal { mode, dst, local } => self.execute_inc_dec(mode, dst, local)?,
 
@@ -85,23 +173,113 @@ impl Vm {
                 lhs,
                 rhs,
                 target,
-            } => self.binary_int_branch(op, lhs, rhs, target)?,
+            } => self.binary_int_branch(op, lhs, rhs, target, false, work)?,
+            I::BinaryIntBranchIf {
+                op,
+                lhs,
+                rhs,
+                target,
+            } => self.binary_int_branch(op, lhs, rhs, target, true, work)?,
             I::BinaryInt { op, dst, lhs, rhs } => self.execute_binary_int(op, dst, lhs, rhs)?,
-            I::Binary { dst, op, lhs, rhs } => self.execute_binary(op, dst, lhs, rhs)?,
+            I::Binary { dst, op, lhs, rhs } => return self.execute_binary(op, dst, lhs, rhs),
+            I::BinaryBranch {
+                op,
+                lhs,
+                rhs,
+                target,
+            } => return self.binary_branch(op, lhs, rhs, target, false, work),
+            I::BinaryBranchIf {
+                op,
+                lhs,
+                rhs,
+                target,
+            } => return self.binary_branch(op, lhs, rhs, target, true, work),
             I::Unary { dst, op, src } => self.execute_unary(dst, op, src)?,
-            I::Cast { to, dst, src } => self.execute_cast(to, dst, src)?,
+            I::BuiltinUnary { op, dst, src } => {
+                return self.execute_builtin_unary(op, src, dst, ArgumentBinding::Frameless);
+            }
+            I::NamespacedBuiltin { op, dst, src } => {
+                return self.execute_builtin_unary(op, src, dst, ArgumentBinding::Caller);
+            }
+            I::GuardBuiltin { function, call } => self.execute_guard_builtin(function, call)?,
+            I::BuiltinFrame { op, dst } => self.execute_builtin_frame(op, dst)?,
+            I::ArrayKeyExists { dst, key, array } => {
+                return self.execute_array_key_exists(key, array, dst);
+            }
+            I::InLiteralArray {
+                dst,
+                needle,
+                haystack,
+                strict,
+            } => {
+                return self.execute_in_literal_array(needle, haystack, strict, dst);
+            }
+            I::Cast { to, dst, src } => {
+                if to == phera_bytecode::CastKind::String && self.operand(src).is_object() {
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                }
+                self.execute_cast(to, dst, src)?;
+            }
 
             I::Fetch { dst, path, mode }
             | I::FetchIndex {
                 dst, path, mode, ..
-            } => self.fetch_path(dst, path, mode)?,
-            I::AssignOpPath { op, dst, path, src } => self.assign_op_path(op, dst, path, src)?,
-            I::IncDecPath { mode, dst, path } => self.inc_dec_path(mode, dst, path)?,
+            } => {
+                return self.fetch_path(dst, path, mode);
+            }
+            I::AssignOpPath { op, dst, path, src } => {
+                return self.assign_op_path(op, dst, path, src);
+            }
+            I::IncDecPath { mode, dst, path } => {
+                return self.inc_dec_path(mode, dst, path);
+            }
             I::AppendLocal { local, src } => self.append_local(local, src)?,
-            I::AssignPath { path, src } => self.assign_path(path, src)?,
-            I::MakeReference { dst, path } => self.make_reference(dst, path)?,
-            I::BindReference { path, src } => self.bind_reference(path, src)?,
-            I::UnsetPath { path } => self.unset_place(&self.path(path)?)?,
+            I::AssignPath { path, src } => {
+                return self.assign_path(path, src);
+            }
+            I::AssignPathFromLocal { path, src, dst } => {
+                let handled = if let Some(value) = self.read_defined_local(src) {
+                    let place = self.path(path)?;
+                    if self.assign_property_site(&place, &value, Some((src, dst)))? {
+                        true
+                    } else if place.has_properties()?
+                        && let Some(stored) = self.assign_plain_property(&place, &value)?
+                    {
+                        self.set(dst, stored);
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+                if !handled {
+                    self.prepare_element_site(&self.path(path)?)?;
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                }
+            }
+            I::MakeReference { dst, path } => {
+                if self.path(path)?.has_properties()? {
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                }
+                self.make_reference(dst, path)?;
+            }
+            I::BindReference { path, src } => {
+                if self.path(path)?.has_properties()? {
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                }
+                self.bind_reference(path, src)?;
+            }
+            I::UnsetPath { path } => {
+                let place = self.path(path)?;
+                if place.has_properties()? {
+                    if self.unset_plain_property(&place)? {
+                        return Ok(None);
+                    }
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                }
+                self.unset_place(&place)?;
+            }
 
             I::DeclareClass { class } => self.declare_class(class)?,
             I::DynamicInstanceOf { dst, source, class } => {
@@ -110,13 +288,30 @@ impl Vm {
             I::FetchClassConstant { dst, class, name } => {
                 self.fetch_class_constant(dst, class, name)?
             }
+            I::FetchNamedClassConstant { dst, class, name } => {
+                self.fetch_named_class_constant(dst, class, name)?
+            }
+            I::FetchDynamicClassConstant { dst, class, name } => {
+                self.fetch_dynamic_class_constant(dst, class, name)?;
+            }
             I::FetchClassName { dst, class } => self.fetch_class_name(dst, class)?,
             I::FetchThis { dst } => self.fetch_this(dst)?,
             I::ThisOrNull { dst } => self.this_or_null(dst),
-            I::Clone { dst, src } => self.clone_object(dst, src)?,
+            I::Clone { .. } => return Ok(Some(BatchExit::Instruction(instruction))),
             I::InstanceOf { dst, src, class } => self.instance_of(dst, src, class)?,
+            I::InstanceOfBranch { .. }
+            | I::InstanceOfBranchIf { .. }
+            | I::DynamicInstanceOfBranch { .. }
+            | I::DynamicInstanceOfBranchIf { .. } => {
+                self.instance_of_branches(instruction, work)?
+            }
 
-            I::CheckReturn { source } => self.check_return_register(source)?,
+            I::CheckReturn { source } => {
+                if self.return_string_coercion_needed(&self.raw_local(source)) {
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                }
+                self.check_return_register(source)?;
+            }
             I::FinallyCall {
                 state,
                 target,
@@ -126,14 +321,19 @@ impl Vm {
             I::FinallyDiscard { state } => self.discard_finally(state),
             I::Throw { source } => return Err(self.throw_operand(source)?),
 
-            I::Echo { src } => self.echo_value(src)?,
+            I::Echo { src } => {
+                if self.operand(src).is_object() {
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                }
+                self.echo_value(src)?;
+            }
             I::Jump { target } => self.execute_jump(target, work)?,
             I::JumpIf { condition, target } => self.jump_if(condition, target, work)?,
             I::JumpIfNot { condition, target } => self.jump_if_not(condition, target, work)?,
             I::JumpIfNull { value, target } => self.jump_if_null(value, target)?,
             I::JumpIfNotNull { value, target } => self.jump_if_not_null(value, target)?,
-            I::BeginSilence => self.diagnostic_reporter.begin_silence(),
-            I::EndSilence => self.diagnostic_reporter.end_silence(),
+            I::BeginSilence => self.begin_silence(),
+            I::EndSilence => self.end_silence(),
             I::Raise { detail, .. } => self.raise_match_error(detail)?,
 
             I::Capture { src, kind } => self.capture(src, kind)?,
@@ -143,14 +343,28 @@ impl Vm {
                 binding,
             } => self.make_closure(dst, function, binding)?,
             I::NewArray { dst, .. } => self.set(dst, Value::Array(PhpArray::new().into())),
-            I::ArrayPush { array, src } | I::ArrayPushReference { array, src } => {
-                self.array_write(array, None, src, ArrayWrite::Element)?
+            I::ArrayPush { array, src } => {
+                self.array_write(array, None, src, ArrayWrite::Element)?;
+            }
+            I::ArrayPushReference { array, src } => {
+                self.array_write(array, None, src, ArrayWrite::Reference)?;
             }
             I::ArraySet { array, key, src } | I::ArraySetReference { array, key, src } => {
-                self.array_write(array, Some(key), src, ArrayWrite::Element)?
+                let mode = if matches!(instruction, I::ArraySetReference { .. }) {
+                    ArrayWrite::Reference
+                } else {
+                    ArrayWrite::Element
+                };
+                if !self.array_write(array, Some(key), src, mode)? {
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                }
             }
             I::ArraySpread { array, src } => {
-                self.array_write(array, None, src, ArrayWrite::Spread)?
+                if matches!(&*self.operand(src), Value::Object(object) if object.class.is_traversable())
+                {
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                }
+                self.array_write(array, None, src, ArrayWrite::Spread)?;
             }
 
             I::FetchConstant { dst, constant } => self.fetch_constant(dst, constant)?,
@@ -169,20 +383,38 @@ impl Vm {
                 src,
             } => self.init_static(local, variable, src)?,
 
-            I::IterStart { iter, src, .. } => self.iter_start(iter, src, None)?,
+            I::IterStart { iter, src, .. } => {
+                if !self.iter_start(iter, src, None)? {
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                }
+            }
             I::IterStartReference {
                 subject,
                 iter,
                 path,
                 ..
-            } => self.start_reference_iterator(iter, path, subject)?,
+            } => {
+                if self.path(path)?.has_properties()?
+                    || !self.start_reference_iterator(iter, path, subject)?
+                {
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                }
+            }
             I::IterNextKeyed {
                 iter,
                 key,
                 value,
                 end,
-            } => self.iter_next(iter, Some(key), value, end)?,
-            I::IterNext { iter, value, end } => self.iter_next(iter, None, value, end)?,
+            } => {
+                if !self.iter_next::<TRACK_GENERATORS>(iter, Some(key), value, end)? {
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                }
+            }
+            I::IterNext { iter, value, end } => {
+                if !self.iter_next::<TRACK_GENERATORS>(iter, None, value, end)? {
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                }
+            }
             I::IterEnd { iter } => self.end_iterator(iter)?,
             I::IssetLocal { .. } | I::IssetPath { .. } => {
                 return Err(internal_error!("unimplemented instruction"));
@@ -192,16 +424,26 @@ impl Vm {
     }
 
     /// `Call`: enter the prepared PHP function, or let the shell run a native one.
-    fn call(
+    fn call<const TRACK_GENERATORS: bool>(
         &mut self,
         destination: Reg,
         work: &mut usize,
     ) -> Result<Option<BatchExit>, NativeError> {
         *work += 1;
-        if self.enter_prepared_call(Some(destination))? {
-            return Ok(None);
-        }
-        Ok(Some(BatchExit::NativeCall(destination)))
+        use crate::calls::call_execution::CallEntry;
+        Ok(match self.enter_prepared_call(Some(destination))? {
+            CallEntry::Php => None,
+            CallEntry::Native if TRACK_GENERATORS => {
+                if let Some(value) = self.finish_ready_native_window()? {
+                    self.set(destination, value);
+                    None
+                } else {
+                    return self.call_native(destination);
+                }
+            }
+            CallEntry::Native => return self.call_native(destination),
+            CallEntry::ConvertStrings => Some(BatchExit::BindCall(destination)),
+        })
     }
 
     /// `Return` of a register. An undefined variable warns first, which may
@@ -215,6 +457,9 @@ impl Vm {
         let Some(value) = self.read_defined_local(source) else {
             return Ok(Some(BatchExit::Instruction(instruction)));
         };
+        if value.is_object() && self.return_string_coercion_needed(&value) {
+            return Ok(Some(BatchExit::Instruction(instruction)));
+        }
         Ok(self.return_value(value, stop)?.map(BatchExit::Returned))
     }
 
@@ -242,9 +487,110 @@ impl Vm {
         class: Reg,
         name: phera_bytecode::NameId,
     ) -> Result<(), NativeError> {
-        let class = self.class_target(class)?;
-        let name = self.name(name)?;
-        let value = self.class_constant(&class, &name)?;
+        let unit = self
+            .current()
+            .ok_or_else(|| internal_error!("constant frame"))?
+            .unit()
+            .clone();
+        let name = &unit.names[name.index()];
+        if name.eq_ignore_ascii_case("class") {
+            let value = self.read_local(class);
+            let Value::Object(object) = value else {
+                return Err(NativeError::error(format!(
+                    "Cannot use \"::class\" on {}",
+                    value.type_name()
+                )));
+            };
+            self.set(destination, Value::from(object.class.name()));
+            return Ok(());
+        }
+        let target = self.read_local(class);
+        let class = match &target {
+            Value::Object(object) => std::borrow::Cow::Borrowed(object.class.name()),
+            Value::InternedStr(name) => String::from_utf8_lossy(name.as_bytes()),
+            Value::String(name) => String::from_utf8_lossy(name.as_bytes()),
+            _ => {
+                return Err(NativeError::error(
+                    "Class name must be a valid object or a string",
+                ));
+            }
+        };
+        let value = self.class_constant(&class, name)?;
+        self.set(destination, value);
+        Ok(())
+    }
+
+    /// `Post::LIMIT`: the class is found by its symbol's name key. A
+    /// visible constant whose value is ready is read through borrows alone;
+    /// anything else (a class not declared yet, which autoloads; a value to
+    /// evaluate; a deprecation; an error) takes the path out of line.
+    fn fetch_named_class_constant(
+        &mut self,
+        destination: Reg,
+        class: phera_bytecode::SymbolId,
+        name: phera_bytecode::NameId,
+    ) -> Result<(), NativeError> {
+        let frame = self
+            .current()
+            .ok_or_else(|| internal_error!("constant frame"))?;
+        let function = frame.frame.function;
+        if let Some(value) = self.ready_named_class_constant(function, class, name) {
+            self.set(destination, value);
+            return Ok(());
+        }
+        self.named_class_constant_slow(destination, function, class, name)
+    }
+
+    #[inline]
+    fn ready_named_class_constant(
+        &self,
+        function: crate::code_table::FunctionIndex,
+        class: phera_bytecode::SymbolId,
+        name: phera_bytecode::NameId,
+    ) -> Option<Value> {
+        let key = self.code.unit_symbol_key(function, class);
+        let linked = self.classes.by_key(key)?;
+        let constant = linked
+            .constants
+            .get(&self.code.unit(function).names[name.index()])?;
+        if constant.deprecated.is_some() || !self.can_read_class_constant(constant) {
+            return None;
+        }
+        // A stored enum case was checked when it was stored; any other
+        // constant of a backed enum waits for that check.
+        let is_case = matches!(
+            constant.initializer,
+            crate::classes::class::ConstantInitializer::EnumCase { .. }
+        );
+        if !is_case && self.needs_enum_backing(linked) {
+            return None;
+        }
+        self.ready_constant_value(&constant.initializer)
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn named_class_constant_slow(
+        &mut self,
+        destination: Reg,
+        function: crate::code_table::FunctionIndex,
+        class: phera_bytecode::SymbolId,
+        name: phera_bytecode::NameId,
+    ) -> Result<(), NativeError> {
+        let unit = self.code.unit(function).clone();
+        let name = &unit.names[name.index()];
+        let written = &unit.symbols[class.index()].written;
+        let key = self.code.unit_symbol_key(function, class);
+        let linked = self.classes.by_key(key).cloned();
+        let value = match linked {
+            Some(linked) => self.class_constant_resolved(
+                Some(linked),
+                written,
+                name,
+                crate::class_constants::ConstantAccess::Read,
+            )?,
+            None => self.class_constant(written, name)?,
+        };
         self.set(destination, value);
         Ok(())
     }

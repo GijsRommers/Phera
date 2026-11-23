@@ -12,7 +12,7 @@ async fn fill(context: &mut dyn Context, this: Option<&Rc<Object>>, all: bool) -
         _ => None,
     };
     let Some(handle) = handle else {
-        return Ok(Value::Null);
+        return crate::stream_fetch::fill(context, &state, all).await;
     };
     loop {
         if !all && state.borrow().cursor < state.borrow().rows.values.len() {
@@ -21,6 +21,10 @@ async fn fill(context: &mut dyn Context, this: Option<&Rc<Object>>, all: bool) -
         match handle.fetch().await {
             Ok(Some(row)) => {
                 let mut statement = state.borrow_mut();
+                if statement.cursor == statement.rows.values.len() {
+                    statement.rows.values.clear();
+                    statement.cursor = 0;
+                }
                 for (column, cell) in statement.rows.columns.iter_mut().zip(&row) {
                     if let crate::metadata::Metadata::Sqlite(_, kind) = &mut column.metadata {
                         *kind = cell.kind();
@@ -28,8 +32,7 @@ async fn fill(context: &mut dyn Context, this: Option<&Rc<Object>>, all: bool) -
                 }
                 statement.rows.values.push(
                     row.into_iter()
-                        .map(crate::drivers::sqlite::statement::value)
-                        .collect(),
+                        .map(crate::drivers::sqlite::statement::value),
                 );
             }
             Ok(None) => {
@@ -65,6 +68,27 @@ pub fn fetch<'a>(
         ) {
             return Ok(Value::Bool(false));
         }
+        let (mode, row_class) = {
+            let state = state(this.as_ref())?;
+            let statement = state.borrow();
+            (statement.fetch, statement.row_class.clone())
+        };
+        if matches!(
+            crate::fetch::FetchMode::parse(
+                phera_extension_api::args::int(&args, 0).unwrap_or(0),
+                mode
+            )?,
+            crate::fetch::FetchMode::Class
+        ) {
+            let row_class = row_class.ok_or_else(|| {
+                crate::errors::exception(
+                    "SQLSTATE[HY000]: General error: No fetch class specified",
+                    None,
+                    0,
+                )
+            })?;
+            return row_class.next(context, this.as_ref()).await;
+        }
         crate::fetch::fetch(context, this.as_ref(), &args)
     })
 }
@@ -87,7 +111,7 @@ pub fn object<'a>(
 ) -> LocalFuture<'a, NativeResult> {
     Box::pin(async move {
         fill(context, this.as_ref(), false).await?;
-        crate::fetch::object(context, this.as_ref(), &args)
+        crate::fetch_class::RowClass::object(context, this.as_ref(), &args).await
     })
 }
 
@@ -98,8 +122,35 @@ pub fn all<'a>(
 ) -> LocalFuture<'a, NativeResult> {
     Box::pin(async move {
         fill(context, this.as_ref(), true).await?;
+        if let Some(class) =
+            crate::fetch_class::RowClass::configured(context, &args, 0, "PDOStatement::fetchAll")
+                .await?
+        {
+            return class.all(context, this.as_ref()).await;
+        }
+        if phera_extension_api::args::int(&args, 0).unwrap_or(0) == 0 {
+            let class = {
+                let state = state(this.as_ref())?;
+                let statement = state.borrow();
+                match statement.fetch {
+                    crate::fetch::FetchMode::Class => statement.row_class.clone(),
+                    _ => None,
+                }
+            };
+            if let Some(class) = class {
+                return class.all(context, this.as_ref()).await;
+            }
+        }
         crate::fetch_all::all(context, this.as_ref(), &args)
     })
+}
+
+pub fn set_mode<'a>(
+    context: &'a mut dyn Context,
+    this: Option<Rc<Object>>,
+    arguments: Vec<Value>,
+) -> LocalFuture<'a, NativeResult> {
+    Box::pin(async move { crate::fetch::set_mode(context, this.as_ref(), &arguments).await })
 }
 
 pub fn close<'a>(
@@ -118,6 +169,7 @@ pub fn close<'a>(
                 crate::errors::exception(error.message, None, i64::from(error.code))
             })?;
         }
+        crate::stream_fetch::close(context, &state).await?;
         crate::statement::close(context, this.as_ref(), &args)
     })
 }

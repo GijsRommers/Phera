@@ -1,9 +1,17 @@
 //! PHP path instructions instruction handlers, separate from dispatch.
 
-use phera_bytecode::{BinaryOp, FetchMode, IncDec, PathId, Reg};
+use crate::calls::execution_loop::BatchExit;
+use phera_bytecode::{BinaryOp, FetchMode, IncDec, Instruction, PathId, Reg};
 use phera_extension_api::NativeError;
 
-use crate::{Vm, ops};
+use crate::{
+    AccessPath, Vm,
+    access_mode::{Binding, Creation, Missing},
+    inline_stack::InlineStack,
+    ops,
+    path_update::PathKey,
+};
+use phera_value::Value;
 
 impl Vm {
     /// Append through aliases using the ordinary PHP write semantics.
@@ -22,13 +30,37 @@ impl Vm {
         destination: Reg,
         path: PathId,
         mode: FetchMode,
-    ) -> Result<(), NativeError> {
+    ) -> Result<Option<BatchExit>, NativeError> {
         let place = self.path(path)?;
-        if mode == FetchMode::Read
-            && let Some(value) = self.read_property_site(&place)?
-        {
-            self.set(destination, value);
-            return Ok(());
+        if mode == FetchMode::Read && self.fetch_property_site(&place, destination)? {
+            return Ok(None);
+        }
+        if mode != FetchMode::Destructure {
+            self.prepare_element_site(&place)?;
+        }
+        if self.classes.has_dimensions && self.prepare_dimension(&place)? {
+            return Ok(Some(BatchExit::Instruction(Instruction::Fetch {
+                dst: destination,
+                path,
+                mode,
+            })));
+        }
+        if place.has_properties()? && mode != FetchMode::Destructure {
+            if mode != FetchMode::Read
+                && (!matches!(place.base()?, phera_bytecode::PathBase::This { .. })
+                    || self.current().is_some_and(|frame| frame.this().is_some()))
+                && self.start_cached_getter(&place, destination)?
+            {
+                return Ok(None);
+            }
+            if self.fetch_plain_property(&place, destination, mode)? {
+                return Ok(None);
+            }
+            return Ok(Some(BatchExit::Instruction(Instruction::Fetch {
+                dst: destination,
+                path,
+                mode,
+            })));
         }
         if mode == FetchMode::Destructure {
             let root = self.read_place(
@@ -43,7 +75,7 @@ impl Vm {
                     self.warn(format!("Cannot use {} as array", root.type_name()));
                 }
                 self.set(destination, phera_value::Value::Null);
-                return Ok(());
+                return Ok(None);
             }
         }
         let value = self.read_place(
@@ -51,11 +83,18 @@ impl Vm {
             match mode {
                 FetchMode::Read | FetchMode::Destructure => crate::access_mode::Missing::Warn,
                 FetchMode::Quiet => crate::access_mode::Missing::Silent,
-                FetchMode::Isset => crate::access_mode::Missing::Isset,
+                FetchMode::Isset | FetchMode::Empty => crate::access_mode::Missing::Isset,
             },
         )?;
         self.set(destination, value);
-        Ok(())
+        if matches!(
+            place.base()?,
+            phera_bytecode::PathBase::NamedStaticProperty { .. }
+        ) {
+            // The loop reads the next one itself (see `crate::static_sites`).
+            self.prepare_static_site(&place)?;
+        }
+        Ok(None)
     }
 
     /// Implements PHP AssignOpPath semantics outside the dispatch loop.
@@ -65,9 +104,42 @@ impl Vm {
         destination: Reg,
         path: PathId,
         source: Reg,
-    ) -> Result<(), NativeError> {
+    ) -> Result<Option<BatchExit>, NativeError> {
         let place = self.path(path)?;
-        let left = self.read_place(&place, crate::access_mode::Missing::Warn)?;
+        if (self.classes.has_dimensions && self.prepare_dimension(&place)?)
+            || place.has_properties()?
+        {
+            // The loop updates the next such property itself (see
+            // `calls::fast_compound_assignments`).
+            self.prepare_update_site(&place)?;
+            return Ok(Some(BatchExit::Instruction(Instruction::AssignOpPath {
+                op: operator,
+                dst: destination,
+                path,
+                src: source,
+            })));
+        }
+        let (register, keys, left) = self.read_indexed_update(&place)?;
+        let right = self.operand(source).clone();
+        if (left.is_object() || right.is_object())
+            && let Some(value) = self.native_binary(operator, &left, &right)?
+        {
+            self.finish_indexed_update(&place, register, keys, value.clone())?;
+            self.set(destination, value);
+            return Ok(None);
+        }
+        // An object that converts through PHP code (`__toString`) needs
+        // the async handler, as a `Binary` of it does.
+        if crate::object_operators::has_binary(&left, &right)
+            || (operator == BinaryOp::Concat && (left.is_object() || right.is_object()))
+        {
+            return Ok(Some(BatchExit::Instruction(Instruction::AssignOpPath {
+                op: operator,
+                dst: destination,
+                path,
+                src: source,
+            })));
+        }
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         let value = ops::binary(
             operator,
@@ -77,9 +149,9 @@ impl Vm {
         );
         drop(diagnostics);
         let value = value?;
-        self.write_place(&place, value.clone(), crate::access_mode::Binding::ByValue)?;
+        self.finish_indexed_update(&place, register, keys, value.clone())?;
         self.set(destination, value);
-        Ok(())
+        Ok(None)
     }
 
     /// Implements PHP IncDecPath semantics outside the dispatch loop.
@@ -88,13 +160,23 @@ impl Vm {
         mode: IncDec,
         destination: Reg,
         path: PathId,
-    ) -> Result<(), NativeError> {
+    ) -> Result<Option<BatchExit>, NativeError> {
         let place = self.path(path)?;
         if let Some(value) = self.increment_property_site(&place, mode)? {
             self.set(destination, value);
-            return Ok(());
+            return Ok(None);
         }
-        let old = self.read_place(&place, crate::access_mode::Missing::Warn)?;
+        if (self.classes.has_dimensions && self.prepare_dimension(&place)?)
+            || place.has_properties()?
+        {
+            self.prepare_update_site(&place)?;
+            return Ok(Some(BatchExit::Instruction(Instruction::IncDecPath {
+                mode,
+                dst: destination,
+                path,
+            })));
+        }
+        let (register, keys, old) = self.read_indexed_update(&place)?;
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         let value = if matches!(mode, IncDec::PreIncrement | IncDec::PostIncrement) {
             phera_value::increment(&old, &mut diagnostics.buffer)
@@ -103,7 +185,12 @@ impl Vm {
         };
         drop(diagnostics);
         let value = value?;
-        self.write_place(&place, value.clone(), crate::access_mode::Binding::ByValue)?;
+        if let Some(limit) = crate::typed_increment::IntegerLimit::reached(&old, &value, mode)
+            && let Some(register) = register
+        {
+            self.check_increment_place(&place, register, &keys, limit)?;
+        }
+        self.finish_indexed_update(&place, register, keys, value.clone())?;
         self.set(
             destination,
             if matches!(mode, IncDec::PostIncrement | IncDec::PostDecrement) {
@@ -112,23 +199,98 @@ impl Vm {
                 value
             },
         );
-        Ok(())
+        Ok(None)
+    }
+
+    /// Resolve a writable index once for both halves of a compound update.
+    fn read_indexed_update(
+        &mut self,
+        place: &AccessPath,
+    ) -> Result<(Option<Reg>, InlineStack<PathKey>, Value), NativeError> {
+        let register = self.base_register(place, Creation::Existing, Missing::Warn)?;
+        if let Some((class, name)) = crate::static_places::static_base(place.base()?) {
+            self.validate_static_mutation(
+                class,
+                name,
+                &mut Value::Null,
+                crate::property_set_visibility::PropertyChange::Indirect,
+            )?;
+        }
+        let mut value = register.map_or(Value::Null, |register| {
+            self.read_root(register, Missing::Warn)
+        });
+        let mut keys = InlineStack::new();
+        for step in place.steps()? {
+            let phera_bytecode::Step::Index(index) = step else {
+                return Err(NativeError::error("Cannot use [] for reading"));
+            };
+            let key = self.write_index_key(&value, index)?;
+            value = self.read_writable_index(value, &key)?;
+            keys.push(PathKey::Index(Some(key)));
+        }
+        Ok((register, keys, value))
+    }
+
+    fn finish_indexed_update(
+        &mut self,
+        place: &AccessPath,
+        register: Option<Reg>,
+        keys: InlineStack<PathKey>,
+        value: Value,
+    ) -> Result<(), NativeError> {
+        if keys.iter().next().is_none() {
+            self.write_place(place, value, Binding::ByValue)
+        } else {
+            let register = match register {
+                Some(register) => register,
+                None => self
+                    .base_register(place, Creation::Create, Missing::Silent)?
+                    .ok_or_else(|| internal_error!("missing indexed update"))?,
+            };
+            self.write_resolved_place(place, register, keys, value, Binding::ByValue)
+        }
     }
 
     /// Implements PHP AssignPath semantics outside the dispatch loop.
-    pub(crate) fn assign_path(&mut self, path: PathId, source: Reg) -> Result<(), NativeError> {
+    pub(crate) fn assign_path(
+        &mut self,
+        path: PathId,
+        source: Reg,
+    ) -> Result<Option<BatchExit>, NativeError> {
         let value = self.read_local(source);
         let place = self.path(path)?;
-        if self.assign_property_site(&place, &value)? {
-            return Ok(());
+        if self.assign_property_site(&place, &value, None)? {
+            return Ok(None);
         }
         if place.steps()?.next().is_none()
             && let phera_bytecode::PathBase::Register(register) = place.base()?
         {
             self.restart_subject_iterators(register);
         }
+        if place.has_properties()?
+            && !(self.classes.has_dimensions && self.prepare_dimension(&place)?)
+            && self.assign_plain_property(&place, &value)?.is_some()
+        {
+            return Ok(None);
+        }
+        if (self.classes.has_dimensions && self.prepare_dimension(&place)?)
+            || place.has_properties()?
+            || (self.may_cast_typed_reference(&value) && place.steps()?.next().is_some())
+            || (matches!(value, phera_value::Value::Object(_))
+                && crate::static_places::static_base(place.base()?).is_some()
+                && place.steps()?.next().is_none()
+                && Self::has_string_conversion(&value))
+        {
+            // The loop writes the next such element itself (see
+            // `calls::fast_element_writes`).
+            self.prepare_element_site(&place)?;
+            return Ok(Some(BatchExit::Instruction(Instruction::AssignPath {
+                path,
+                src: source,
+            })));
+        }
         self.write_place(&place, value, crate::access_mode::Binding::ByValue)?;
-        Ok(())
+        Ok(None)
     }
 
     /// Implements PHP MakeReference semantics outside the dispatch loop.
@@ -144,17 +306,20 @@ impl Vm {
 
     /// Implements PHP BindReference semantics outside the dispatch loop.
     pub(crate) fn bind_reference(&mut self, path: PathId, source: Reg) -> Result<(), NativeError> {
-        let value = self
-            .current()
-            .and_then(|frame| frame.slots(&self.registers).get(source.index()))
-            .and_then(Option::as_ref)
-            .cloned()
-            .unwrap_or_default();
+        let value = self.raw_local(source);
         self.write_place(
             &self.path(path)?,
             value,
             crate::access_mode::Binding::ByReference,
         )?;
         Ok(())
+    }
+    /// Reference-binding instructions need the slot itself, before dereferencing.
+    pub(crate) fn raw_local(&self, source: Reg) -> phera_value::Value {
+        self.current()
+            .and_then(|frame| frame.slots(&self.registers).get(source.index()))
+            .and_then(Option::as_ref)
+            .cloned()
+            .unwrap_or_default()
     }
 }

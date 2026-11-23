@@ -1,14 +1,13 @@
 //! Building arrays from other values: `array_combine`, `array_flip`,
 //! `array_fill`, `array_fill_keys` and `array_pad`.
 
-use phera_extension_api::value::to_php_string;
 use phera_extension_api::{
-    ArrayKey, Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, PhpArray, Value,
-    args,
+    ArrayKey, Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType,
+    PhpArray, Value, args,
 };
 
 use super::{IntegerKeys, append_entry};
-use crate::arguments::required_array;
+use crate::arguments::{required_array, stringify};
 
 pub(super) const FUNCTIONS: &[FunctionEntry] = &[
     ARRAY_COMBINE,
@@ -24,14 +23,14 @@ const MAX_ARRAY_SIZE: u64 = 1 << 30;
 /// A value as a key the way `array_combine` and `array_fill_keys` read it:
 /// an int stays an int, anything else becomes a string first, so `true` is
 /// `"1"` and `1.5` is `"1.5"` (where `$array[1.5]` would be 1).
-pub(super) fn key_from_string(
+async fn key_from_string(
     context: &mut dyn Context,
     value: &Value,
 ) -> Result<ArrayKey, NativeError> {
     if let Value::Int(integer) = &*value.deref() {
         return Ok(ArrayKey::Int(*integer));
     }
-    let string = to_php_string(value, context.diagnostics())?;
+    let string = stringify(context, value).await?;
     Ok(ArrayKey::from_value(&Value::String(string))?)
 }
 
@@ -44,7 +43,7 @@ pub(super) fn key_from_string(
 /// array_combine(["a", "a"], [1, 2]);  // ["a" => 2]
 /// array_combine(["a"], [1, 2]);       // ValueError
 /// ```
-const ARRAY_COMBINE: FunctionEntry = FunctionEntry::sync(
+const ARRAY_COMBINE: FunctionEntry = FunctionEntry::asynchronous(
     "array_combine",
     &[
         Param::new("keys", ParamType::Array),
@@ -53,7 +52,18 @@ const ARRAY_COMBINE: FunctionEntry = FunctionEntry::sync(
     array_combine,
 );
 
-fn array_combine(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+fn array_combine(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move {
+        combine(context, &arguments)
+            .await
+            .map_err(|error| context.native_call_error("array_combine", &arguments, error))
+    })
+}
+
+async fn combine(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let keys = required_array(arguments, 0);
     let values = required_array(arguments, 1);
     if keys.len() != values.len() {
@@ -61,9 +71,9 @@ fn array_combine(context: &mut dyn Context, arguments: &[Value]) -> NativeResult
             "array_combine(): Argument #1 ($keys) and argument #2 ($values) must have the same number of elements",
         ));
     }
-    let mut result = PhpArray::new();
+    let mut result = PhpArray::with_capacity(keys.len());
     for (key, value) in keys.values().zip(values.values()) {
-        result.insert(key_from_string(context, key)?, value.clone());
+        result.insert(key_from_string(context, key).await?, value.clone());
     }
     Ok(Value::from(result))
 }
@@ -81,9 +91,13 @@ const ARRAY_FLIP: FunctionEntry = FunctionEntry::sync(
 );
 
 fn array_flip(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let mut result = PhpArray::new();
-    for (key, value) in required_array(arguments, 0).iter() {
-        if matches!(&*value.deref(), Value::Int(_) | Value::String(_)) {
+    let array = required_array(arguments, 0);
+    let mut result = PhpArray::with_capacity(array.len());
+    for (key, value) in array.iter() {
+        if matches!(
+            &*value.deref(),
+            Value::Int(_) | Value::InternedStr(_) | Value::String(_)
+        ) {
             result.insert(ArrayKey::from_value(value)?, Value::from(key));
         } else {
             context.warning(
@@ -123,17 +137,8 @@ fn array_fill(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         ));
     }
     let start = args::int(arguments, 0).unwrap_or_default();
-    if count > 0 && start.checked_add(count - 1).is_none() {
-        return Err(NativeError::error(
-            "Cannot add element to the array as the next element is already occupied",
-        ));
-    }
-    let value = &arguments[2];
-    let mut result = PhpArray::new();
-    for offset in 0..count {
-        result.insert(ArrayKey::Int(start + offset), value.clone());
-    }
-    Ok(Value::from(result))
+    let values = std::iter::repeat_n(arguments[2].clone(), count as usize);
+    Ok(Value::from(PhpArray::from_indexed_values(start, values)?))
 }
 
 /// `array_fill_keys(array $keys, mixed $value): array`
@@ -141,7 +146,7 @@ fn array_fill(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
 /// ```php
 /// array_fill_keys(["a", 5], 0); // ["a" => 0, 5 => 0]
 /// ```
-const ARRAY_FILL_KEYS: FunctionEntry = FunctionEntry::sync(
+const ARRAY_FILL_KEYS: FunctionEntry = FunctionEntry::asynchronous(
     "array_fill_keys",
     &[
         Param::new("keys", ParamType::Array),
@@ -150,11 +155,23 @@ const ARRAY_FILL_KEYS: FunctionEntry = FunctionEntry::sync(
     array_fill_keys,
 );
 
-fn array_fill_keys(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+fn array_fill_keys(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move {
+        fill_keys(context, &arguments)
+            .await
+            .map_err(|error| context.native_call_error("array_fill_keys", &arguments, error))
+    })
+}
+
+async fn fill_keys(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let value = &arguments[1];
-    let mut result = PhpArray::new();
-    for key in required_array(arguments, 0).values() {
-        result.insert(key_from_string(context, key)?, value.clone());
+    let keys = required_array(arguments, 0);
+    let mut result = PhpArray::with_capacity(keys.len());
+    for key in keys.values() {
+        result.insert(key_from_string(context, key).await?, value.clone());
     }
     Ok(Value::from(result))
 }
@@ -192,7 +209,7 @@ fn array_pad(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     }
     let padding = wanted - array.len() as u64;
     let value = &arguments[2];
-    let mut result = PhpArray::new();
+    let mut result = PhpArray::with_capacity(wanted as usize);
     if length < 0 {
         for _ in 0..padding {
             result.push(value.clone())?;

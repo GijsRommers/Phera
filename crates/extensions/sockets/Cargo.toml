@@ -1,0 +1,17 @@
+[package]
+name = "phera-ext-sockets"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+phera-extension-api.workspace = true
+phera-ext-streams.workspace = true
+nix = { workspace = true, features = ["net", "poll", "socket"] }
+rustix = { workspace = true, features = ["net", "event"] }
+socket2.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

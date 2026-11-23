@@ -21,18 +21,32 @@ impl Vm {
                 self.fetch_this(scratch)?;
                 return Ok(Some(scratch));
             }
-            PathBase::StaticProperty {
-                class,
-                name,
-                scratch,
-            } => {
-                let reference = match self.static_property(class, name) {
-                    Ok(reference) => reference,
-                    Err(_) if creation == Creation::Existing && missing != Missing::Warn => {
+            PathBase::StaticProperty { scratch, .. }
+            | PathBase::NamedStaticProperty { scratch, .. } => {
+                let Some((class, name)) = crate::static_places::static_base(place.base()?) else {
+                    return Err(internal_error!("static property base"));
+                };
+                let storage = match self.static_storage(class, name) {
+                    Ok(storage) => storage,
+                    Err(error)
+                        if creation == Creation::Existing
+                            && missing != Missing::Warn
+                            && !crate::autoload::ClassMiss::is(&error) =>
+                    {
                         return Ok(None);
                     }
                     Err(error) => return Err(error),
                 };
+                // A typed static without a value is not null: a read that
+                // warns throws.
+                if missing == Missing::Warn && !storage.value_initialized.get() {
+                    let (class_name, name) = self.static_property_names(class, name)?;
+                    return Err(NativeError::error(format!(
+                        "Typed static property {class_name}::${name} must not be accessed before \
+                         initialization"
+                    )));
+                }
+                let reference = Value::Reference(storage.reference.borrow().clone());
                 self.set(scratch, reference);
                 return Ok(Some(scratch));
             }
@@ -46,7 +60,14 @@ impl Vm {
                 let result =
                     to_php_string(&diagnostics.vm.operand(register), &mut diagnostics.buffer);
                 drop(diagnostics);
-                return self.global_register(result?.to_string_lossy(), scratch, creation, missing);
+                let leaf = place.steps()?.next().is_none();
+                return self.global_register(
+                    result?.to_string_lossy(),
+                    scratch,
+                    creation,
+                    missing,
+                    leaf,
+                );
             }
             PathBase::Globals => return Err(internal_error!("global table has no register")),
         };
@@ -57,22 +78,15 @@ impl Vm {
         let frame = self
             .current()
             .ok_or_else(|| internal_error!("place without frame"))?;
-        if let Some(index) = frame.function().locals.iter().position(|candidate| {
-            frame
-                .unit()
-                .names
-                .get(candidate.index())
-                .is_some_and(|value| value == &name)
-        }) {
-            return Ok(Some(Reg(index as u16)));
+        if let Some(register) = frame.named_register(&name) {
+            return Ok(Some(register));
         }
-        if let Some(register) = frame.extras.dynamic.get(&name) {
-            return Ok(Some(*register));
-        }
-        if creation == Creation::Create {
+        if creation == Creation::Create
+            || (self.in_global_scope() && self.globals.get(&name).is_some())
+        {
             self.named_slot(&name).map(Some)
         } else {
-            if missing == Missing::Warn && self.diagnostic_reporter.is_visible() {
+            if missing == Missing::Warn {
                 self.warn(format!("Undefined variable ${name}"))
             }
             Ok(None)
@@ -115,62 +129,18 @@ impl Vm {
         let Some(register) = self.base_register(place, Creation::Existing, missing)? else {
             return Ok(Value::Null);
         };
-        if let PathBase::StaticProperty { class, name, .. } = place.base()? {
-            let (class_name, name) = self.static_property_names(class, name)?;
-            if missing == Missing::Warn
-                && self.classes.get(&class_name).is_some_and(|class| {
-                    class
-                        .static_properties
-                        .iter()
-                        .any(|property| property.name == name && !property.value_initialized.get())
-                })
-            {
-                return Err(NativeError::error(format!(
-                    "Typed static property {class_name}::${name} must not be accessed before \
-                     initialization"
-                )));
-            }
-        }
         let mut value = self.read_root(register, missing);
-        for key in self.keys(place)?.iter().cloned() {
-            if let PathKey::Property(key) = key {
-                value = self.read_property(value, key, missing)?;
-                continue;
-            }
-            let PathKey::Index(key) = key else {
-                return Err(internal_error!("path key"));
-            };
-            let key = key.ok_or_else(|| NativeError::error("Cannot use [] for reading"))?;
-            value = match value {
-                Value::Array(array) => {
-                    if let Some(value) = array.get(&key) {
-                        value.deref().clone()
-                    } else {
-                        if missing == Missing::Warn {
-                            self.warn(format!("Undefined array key {}", display_key(&key)))
-                        }
-                        Value::Null
-                    }
-                }
-                Value::String(string) => self.read_string_offset(&string, key, missing)?,
-                other => {
-                    if missing == Missing::Warn {
-                        self.warn(format!(
-                            "Trying to access array offset on {}",
-                            other.type_name()
-                        ))
-                    }
-                    Value::Null
-                }
-            };
+        for step in place.steps()? {
+            value = self.ordinary_step(value, step, missing)?;
         }
         Ok(value)
     }
 }
 
-fn display_key(key: &ArrayKey) -> String {
+pub(crate) fn display_key(key: &ArrayKey) -> String {
     match key {
         ArrayKey::Int(index) => index.to_string(),
+        ArrayKey::Interned(string) => format!("\"{}\"", string.to_string_lossy()),
         ArrayKey::String(string) => format!("\"{}\"", string.to_string_lossy()),
     }
 }

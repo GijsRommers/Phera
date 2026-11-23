@@ -2,13 +2,15 @@
 //! produces the same nodes as the brace forms.
 
 use phera_ast::{
-    Block, Catch, DeclareDirective, Expression, ExpressionKind, Literal, Statement, StatementKind,
-    StaticVariable, SwitchCase,
+    Block, Catch, DeclareDirective, ElseIf, Expression, ExpressionKind, Literal, Statement,
+    StatementKind, StaticVariable, SwitchCase,
 };
 use phera_lexer::TokenKind;
 
 use crate::error::ParseError;
-use crate::parser::Parser;
+use crate::parser::{ParsePurpose, Parser};
+
+mod labels;
 
 impl Parser<'_> {
     /// A top-level statement: an attributed declaration, a `use`, or a plain
@@ -42,7 +44,7 @@ impl Parser<'_> {
             return Ok(statement);
         }
 
-        if self.at(TokenKind::Use) {
+        if self.at(TokenKind::Use) && !self.at2(TokenKind::Colon) {
             return self.parse_use_statement();
         }
 
@@ -61,10 +63,19 @@ impl Parser<'_> {
     fn parse_statement_inner(&mut self, top: bool) -> Result<Statement, ParseError> {
         let start = self.peek_span();
 
+        if self.at2(TokenKind::Colon) && crate::parser::is_word_token(self.kind()) {
+            let kind = self.parse_label(top)?;
+            return Ok(Statement {
+                kind,
+                span: self.span_since(start),
+            });
+        }
+
         let kind = match self.kind() {
             TokenKind::LeftBrace => {
                 self.bump()?;
-                let statements = self.parse_inner_statements()?;
+                // On PHP's stack: the `{` and the statement list.
+                let statements = self.with_php_slots(1, Self::parse_inner_statements)?;
                 self.close_brace()?;
                 StatementKind::Block(statements)
             }
@@ -78,13 +89,13 @@ impl Parser<'_> {
             TokenKind::Declare => return self.parse_declare(),
             TokenKind::Break => {
                 self.bump()?;
-                let level = self.parse_jump_level()?;
+                let level = self.parse_jump_level("break")?;
                 self.expect_end()?;
                 StatementKind::Break(level)
             }
             TokenKind::Continue => {
                 self.bump()?;
-                let level = self.parse_jump_level()?;
+                let level = self.parse_jump_level("continue")?;
                 self.expect_end()?;
                 StatementKind::Continue(level)
             }
@@ -163,12 +174,7 @@ impl Parser<'_> {
                 self.expect_end()?;
                 StatementKind::Unset(variables)
             }
-            TokenKind::Goto => {
-                self.bump()?;
-                let name = self.parse_strict_identifier()?;
-                self.expect_end()?;
-                StatementKind::Goto(name)
-            }
+            TokenKind::Goto => self.parse_goto()?,
             TokenKind::AttributeStart => {
                 let attributes = self.parse_attributes()?;
                 if matches!(self.kind(), TokenKind::Fn)
@@ -194,11 +200,6 @@ impl Parser<'_> {
                 }
             }
             TokenKind::HaltCompiler => return self.parse_halt_compiler(),
-            TokenKind::Identifier if self.at2(TokenKind::Colon) => {
-                let name = self.parse_strict_identifier()?;
-                self.bump()?; // `:`
-                StatementKind::Label(name)
-            }
             TokenKind::Function
                 if matches!(self.kind2(), TokenKind::LeftParen)
                     || (self.at2(TokenKind::Ampersand) && self.kind3() == TokenKind::LeftParen) =>
@@ -288,7 +289,7 @@ impl Parser<'_> {
         }
         if self.at(TokenKind::LeftBrace) {
             self.bump()?;
-            let statements = self.parse_inner_statements()?;
+            let statements = self.with_php_slots(1, Self::parse_inner_statements)?;
             self.close_brace()?;
             Ok(statements)
         } else {
@@ -319,70 +320,75 @@ impl Parser<'_> {
         let start = self.expect(TokenKind::If, "'if'")?.span;
         let condition = self.parse_paren_expr()?;
         let alt = self.at(TokenKind::Colon);
-        let then = if alt {
-            self.bump()?;
-            self.parse_alt_statements(&[TokenKind::ElseIf, TokenKind::Else, TokenKind::EndIf])?
-        } else {
-            self.parse_body()?
-        };
-        let otherwise = self.parse_if_tail(alt)?;
+        // On PHP's stack: `if`, `(`, the condition and `)`.
+        let then = self.with_php_slots(4, |parser| {
+            if alt {
+                parser.bump()?;
+                parser.parse_alt_statements(&[TokenKind::ElseIf, TokenKind::Else, TokenKind::EndIf])
+            } else {
+                parser.parse_body()
+            }
+        })?;
+        let (elseifs, otherwise) = self.parse_if_tail(alt)?;
 
         Ok(Statement {
             kind: StatementKind::If {
                 condition,
                 then,
+                elseifs,
                 otherwise,
             },
             span: self.span_since(start),
         })
     }
 
-    /// The `elseif`/`else`/`endif` part after an if body.
-    fn parse_if_tail(&mut self, alt: bool) -> Result<Option<Block>, ParseError> {
-        if self.at(TokenKind::ElseIf) {
+    /// The `elseif`/`else`/`endif` part after an if body. The `elseif`
+    /// branches are collected in a loop: a ladder is as long as it likes.
+    fn parse_if_tail(&mut self, alt: bool) -> Result<(Vec<ElseIf>, Option<Block>), ParseError> {
+        let mut elseifs = Vec::new();
+        while self.at(TokenKind::ElseIf) {
             let start = self.peek_span();
             self.bump()?;
             let condition = self.parse_paren_expr()?;
-            let then = if alt {
-                self.expect(TokenKind::Colon, "':'")?;
-                self.parse_alt_statements(&[TokenKind::ElseIf, TokenKind::Else, TokenKind::EndIf])?
-            } else {
-                self.parse_body()?
-            };
-            // Each `elseif` nests one level deeper in the tree, so a long
-            // chain counts against the nesting limit like any other recursion.
-            self.enter()?;
-            let otherwise = self.parse_if_tail(alt);
-            self.leave();
-            let otherwise = otherwise?;
-            let nested = Statement {
-                kind: StatementKind::If {
-                    condition,
-                    then,
-                    otherwise,
-                },
+            let body = self.with_php_slots(4, |parser| {
+                if alt {
+                    parser.expect(TokenKind::Colon, "':'")?;
+                    parser.parse_alt_statements(&[
+                        TokenKind::ElseIf,
+                        TokenKind::Else,
+                        TokenKind::EndIf,
+                    ])
+                } else {
+                    parser.parse_body()
+                }
+            })?;
+            elseifs.push(ElseIf {
+                condition,
+                body,
                 span: self.span_since(start),
-            };
-            Ok(Some(vec![nested]))
-        } else if self.at(TokenKind::Else) {
+            });
+        }
+
+        let otherwise = if self.at(TokenKind::Else) {
             self.bump()?;
-            let body = if alt {
+            if alt {
                 self.expect(TokenKind::Colon, "':'")?;
                 let body = self.parse_alt_statements(&[TokenKind::EndIf])?;
                 self.expect(TokenKind::EndIf, "'endif'")?;
                 self.expect_end()?;
-                body
+                Some(body)
             } else {
-                self.parse_body()?
-            };
-            Ok(Some(body))
-        } else if alt {
-            self.expect(TokenKind::EndIf, "'endif'")?;
-            self.expect_end()?;
-            Ok(None)
+                // On PHP's stack: the `if` so far and the `else`.
+                Some(self.with_php_slots(1, Self::parse_body)?)
+            }
         } else {
-            Ok(None)
-        }
+            if alt {
+                self.expect(TokenKind::EndIf, "'endif'")?;
+                self.expect_end()?;
+            }
+            None
+        };
+        Ok((elseifs, otherwise))
     }
 
     fn parse_while(&mut self) -> Result<Statement, ParseError> {
@@ -395,7 +401,8 @@ impl Parser<'_> {
             self.expect_end()?;
             body
         } else {
-            self.parse_body()?
+            // On PHP's stack: `while`, `(`, the condition and `)`.
+            self.with_php_slots(4, Self::parse_body)?
         };
 
         Ok(Statement {
@@ -406,7 +413,7 @@ impl Parser<'_> {
 
     fn parse_do_while(&mut self) -> Result<Statement, ParseError> {
         let start = self.expect(TokenKind::Do, "'do'")?.span;
-        let body = self.parse_body()?;
+        let body = self.with_php_slots(1, Self::parse_body)?;
         self.expect(TokenKind::While, "'while'")?;
         let condition = self.parse_paren_expr()?;
         self.expect_end()?;
@@ -434,7 +441,8 @@ impl Parser<'_> {
             self.expect_end()?;
             body
         } else {
-            self.parse_body()?
+            // On PHP's stack: `for`, `(`, three expression lists, two `;`, `)`.
+            self.with_php_slots(8, Self::parse_body)?
         };
 
         Ok(Statement {
@@ -472,7 +480,8 @@ impl Parser<'_> {
             self.expect_end()?;
             body
         } else {
-            self.parse_body()?
+            // On PHP's stack: `foreach`, `(`, the subject, `as`, the variable, `)`.
+            self.with_php_slots(6, Self::parse_body)?
         };
 
         Ok(Statement {
@@ -788,19 +797,31 @@ impl Parser<'_> {
     }
 
     /// `break;` is `Break(1)`; `break 2;` is `Break(2)`.
-    fn parse_jump_level(&mut self) -> Result<u32, ParseError> {
+    fn parse_jump_level(&mut self, keyword: &str) -> Result<u32, ParseError> {
         if self.at(TokenKind::Semicolon) || self.at(TokenKind::CloseTag) {
             return Ok(1);
         }
         // PHP accepts any expression here and rejects invalid levels at
         // compile time; the AST stores a plain level.
         let expression = self.parse_expr(0)?;
-        Ok(match &expression.kind {
-            ExpressionKind::Literal(Literal::Int(value)) => {
-                (*value).clamp(0, u32::MAX as i64) as u32
+        match expression.kind {
+            ExpressionKind::Literal(Literal::Int(value))
+                if value > 0 || self.purpose == ParsePurpose::Syntax =>
+            {
+                Ok(value.clamp(0, u32::MAX as i64) as u32)
             }
-            _ => 1,
-        })
+            _ if self.purpose == ParsePurpose::Syntax => Ok(1),
+            ExpressionKind::Literal(Literal::Int(_) | Literal::Float(_) | Literal::String(_)) => {
+                Err(ParseError::compile(
+                    format!("'{keyword}' operator accepts only positive integers"),
+                    expression.span,
+                ))
+            }
+            _ => Err(ParseError::compile(
+                format!("'{keyword}' operator with non-integer operand is no longer supported"),
+                expression.span,
+            )),
+        }
     }
 
     /// A comma-separated expression list up to (not including) `stop`.

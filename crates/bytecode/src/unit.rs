@@ -5,6 +5,9 @@ use crate::{Function, FunctionId, NameId};
 /// One compiled PHP file.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct CompiledUnit {
+    /// Cold metadata for constants declared with `const`.
+    pub constant_metadata:
+        std::collections::HashMap<String, crate::reflection::DeclarationMetadata>,
     /// The path the file was compiled from, as `__FILE__` reports it.
     pub file: String,
     /// Non-fatal declaration diagnostics are emitted when this file is compiled for execution.
@@ -15,6 +18,16 @@ pub struct CompiledUnit {
     pub main: Function,
     /// Every function the file declares, in source order.
     pub functions: Vec<Function>,
+    /// Reflection metadata for functions, indexed by their local function number.
+    pub function_metadata: Vec<crate::reflection::FunctionMetadata>,
+    /// Only these units need the class linker to read attribute metadata.
+    pub has_link_attributes: bool,
+    /// Validated declaration expressions are compiled only when reflection reads them.
+    pub reflection_initializers: Vec<crate::reflection::InitializerSource>,
+    /// Files with a comment span or deferred initializer keep the original source.
+    pub reflection_lines: Option<phera_source::LineTable>,
+    /// Original bytes, retained once for doc comments and deferred initializers.
+    pub reflection_source: Option<Box<[u8]>>,
     /// Source class declarations; runtime linking is request-local.
     pub classes: Vec<crate::ClassDeclaration>,
     /// Unconditional declarations eligible for dependency-aware prelinking.
@@ -29,6 +42,8 @@ pub struct CompiledUnit {
     /// Functions and constants the code refers to by name.
     pub symbols: Vec<Symbol>,
     pub types: Vec<Type>,
+    /// Call and lookup facts prepared once for code retained by the web runtime.
+    pub metadata: Option<std::sync::Arc<crate::UnitMetadata>>,
 }
 
 /// A literal value. Converted to a PHP value by the VM when loaded.
@@ -78,6 +93,54 @@ pub struct Type {
     pub intersection: bool,
     /// The type as PHP prints it in a `TypeError`: `?int`, `string|int`.
     pub display: String,
+}
+
+/// The built-in types in the order PHP prints them in a union. Class names
+/// come before all of them, in the order they were written.
+const UNION_ORDER: &[&str] = &[
+    "static", "callable", "object", "array", "string", "int", "float", "bool", "false", "true",
+    "void", "never", "null",
+];
+
+/// A declared type as PHP prints it: the members of a union in PHP's own
+/// order, whatever order the source has them in, and `T|null` as `?T`.
+///
+/// ```text
+/// int|string            string|int
+/// null|float|Countable  Countable|float|null
+/// null|int              ?int
+/// ```
+///
+/// An intersection keeps its written bound order. Inside a union it is
+/// parenthesized so its members read as one alternative.
+pub fn union_in_php_order(written: &str) -> String {
+    let mut members: Vec<&str> = written.trim_start_matches('?').split('|').collect();
+    if written.starts_with('?') {
+        members.push("null");
+    }
+    // A stable sort: class names share rank 0 and keep their written order.
+    members.sort_by_key(|member| {
+        UNION_ORDER
+            .iter()
+            .position(|builtin| builtin == member)
+            .map_or(0, |position| position + 1)
+    });
+    members.dedup();
+    match members.as_slice() {
+        [single, "null"] if !single.contains('&') => format!("?{single}"),
+        many if many.len() > 1 && written.contains('&') => many
+            .iter()
+            .map(|member| {
+                if member.contains('&') && !member.starts_with('(') {
+                    std::borrow::Cow::Owned(format!("({member})"))
+                } else {
+                    std::borrow::Cow::Borrowed(*member)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("|"),
+        _ => members.join("|"),
+    }
 }
 
 /// A set of built-in types, one bit each, so a type check is a bit test.
@@ -136,4 +199,33 @@ const _: fn() = || {
 pub struct DeclarationWarning {
     pub message: String,
     pub line: u32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::union_in_php_order;
+
+    #[test]
+    fn built_in_types_follow_php_order_and_class_names_stay_first() {
+        assert_eq!(union_in_php_order("int|string"), "string|int");
+        assert_eq!(
+            union_in_php_order("null|float|bool|int|array|string|Countable|Stringable"),
+            "Countable|Stringable|array|string|int|float|bool|null"
+        );
+        assert_eq!(union_in_php_order("B|A|false"), "B|A|false");
+    }
+
+    #[test]
+    fn one_type_or_null_is_written_with_a_question_mark() {
+        assert_eq!(union_in_php_order("null|int"), "?int");
+        assert_eq!(union_in_php_order("?int"), "?int");
+        assert_eq!(union_in_php_order("int"), "int");
+        assert_eq!(union_in_php_order("int|string|null"), "string|int|null");
+    }
+
+    #[test]
+    fn intersections_are_left_as_written() {
+        assert_eq!(union_in_php_order("B&A"), "B&A");
+        assert_eq!(union_in_php_order("(B&A)|null"), "(B&A)|null");
+    }
 }

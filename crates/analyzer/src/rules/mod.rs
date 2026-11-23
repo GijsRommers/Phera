@@ -9,6 +9,8 @@ mod magic_constant;
 mod missing_method;
 mod missing_return;
 mod named_argument;
+mod no_parent;
+mod not_supported;
 mod possible_variable;
 mod static_call;
 mod this_context;
@@ -25,6 +27,7 @@ mod void_return;
 pub enum Finding {
     UnknownClass(String),
     UnknownFunction(String),
+    NotSupported(&'static phera_source::deprecations::Deprecation),
     UnknownMethod(String, String),
     UnknownProperty(String, String),
     UnknownConstant(String),
@@ -35,6 +38,7 @@ pub enum Finding {
     PossibleVariable(String),
     ThisContext,
     AbstractNew(String),
+    NoParent(String),
     InterfaceNew(String),
     UnknownStaticProperty(String, String),
     UnknownClassConstant(String),
@@ -56,6 +60,7 @@ pub fn all() -> Vec<&'static dyn Rule> {
     vec![
         &unknown_class::UnknownClass,
         &unknown_function::UnknownFunction,
+        &not_supported::NotSupported,
         &unknown_method::UnknownMethod,
         &unknown_property::UnknownProperty,
         &unknown_constant::UnknownConstant,
@@ -66,6 +71,7 @@ pub fn all() -> Vec<&'static dyn Rule> {
         &possible_variable::PossibleVariable,
         &this_context::ThisContext,
         &abstract_new::AbstractNew,
+        &no_parent::NoParent,
         &interface_new::InterfaceNew,
         &unknown_static_property::UnknownStaticProperty,
         &unknown_class_constant::UnknownClassConstant,

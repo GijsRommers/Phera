@@ -11,6 +11,7 @@ pub enum ErrorKind {
     ValueError,
     ArithmeticError,
     DivisionByZeroError,
+    Native(&'static str),
 }
 
 impl ErrorKind {
@@ -22,6 +23,7 @@ impl ErrorKind {
             ErrorKind::ValueError => "ValueError",
             ErrorKind::ArithmeticError => "ArithmeticError",
             ErrorKind::DivisionByZeroError => "DivisionByZeroError",
+            ErrorKind::Native(class) => class,
         }
     }
 }
@@ -65,6 +67,11 @@ impl std::error::Error for OpError {}
 /// Receives PHP-level warnings, notices and deprecations. Operations that would
 /// emit these in real PHP take a `&mut dyn Diagnostics`.
 pub trait Diagnostics {
+    /// PHP float-to-string conversion uses the request's precision.
+    fn float_precision(&self) -> i32 {
+        14
+    }
+
     fn warning(&mut self, message: String);
     fn notice(&mut self, message: String);
     fn deprecated(&mut self, message: String);
@@ -84,6 +91,7 @@ impl Diagnostics for NoDiagnostics {
 #[derive(Debug, Default, Clone)]
 pub struct CollectDiagnostics {
     pub entries: Vec<(DiagnosticKind, String)>,
+    pub float_precision: Option<i32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,6 +102,10 @@ pub enum DiagnosticKind {
 }
 
 impl Diagnostics for CollectDiagnostics {
+    fn float_precision(&self) -> i32 {
+        self.float_precision.unwrap_or(14)
+    }
+
     fn warning(&mut self, message: String) {
         self.entries.push((DiagnosticKind::Warning, message));
     }

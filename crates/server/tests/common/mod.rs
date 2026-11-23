@@ -17,12 +17,30 @@ pub fn start(
     max_body_bytes: usize,
 ) -> (ServerHandle, SocketAddr) {
     let config = ServerConfig {
-        addr: "127.0.0.1:0".parse().unwrap(),
         workers,
         max_body_bytes,
-        header_read_timeout: Duration::from_secs(10),
-        shutdown_timeout: Duration::from_secs(5),
+        ..test_config()
     };
+    start_with(factory, config)
+}
+
+/// The configuration the tests start from: a random local port, and
+/// timeouts short enough that a test which hangs fails soon.
+pub fn test_config() -> ServerConfig {
+    ServerConfig {
+        addr: "127.0.0.1:0".parse().unwrap(),
+        workers: 1,
+        idle_timeout: Duration::from_secs(10),
+        shutdown_timeout: Duration::from_secs(5),
+        ..ServerConfig::default()
+    }
+}
+
+/// Start a server with every setting chosen by the test.
+pub fn start_with(
+    factory: impl HandlerFactory,
+    config: ServerConfig,
+) -> (ServerHandle, SocketAddr) {
     let server = Server::bind(config, factory).unwrap();
     let addr = server.local_addr();
     (server.spawn(), addr)
@@ -117,6 +135,19 @@ impl Client {
     pub fn read_response_head(&mut self) -> Response {
         let (response, _length) = self.read_head();
         response
+    }
+
+    /// Read until the server closes the connection or breaks it, and
+    /// return how many bytes arrived.
+    pub fn read_until_closed(&mut self) -> usize {
+        let mut received = 0;
+        let mut buffer = [0u8; 16 * 1024];
+        loop {
+            match self.reader.read(&mut buffer) {
+                Ok(0) | Err(_) => return received,
+                Ok(count) => received += count,
+            }
+        }
     }
 
     /// Assert that no body bytes arrive within a short window: the server

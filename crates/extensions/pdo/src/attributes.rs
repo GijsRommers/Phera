@@ -1,28 +1,20 @@
 //! `$pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_SILENT)` changes later failures.
 
+mod read;
+
+pub use read::get;
+
 use std::rc::Rc;
 
-use phera_extension_api::value::{to_bool, to_int};
+use phera_extension_api::value::{NumVal, parse_numeric, to_int};
 use phera_extension_api::{Context, LocalFuture, NativeError, NativeResult, Object, Value, args};
 
-use crate::connection::session;
-use crate::constants::{
-    ATTR_CASE, ATTR_CLIENT_VERSION, ATTR_DEFAULT_FETCH_MODE, ATTR_DRIVER_NAME,
-    ATTR_EMULATE_PREPARES, ATTR_ERRMODE, ATTR_PERSISTENT, ATTR_SERVER_VERSION,
-    ATTR_STRINGIFY_FETCHES, ATTR_TIMEOUT, CASE_LOWER, CASE_NATURAL, CASE_UPPER, ERRMODE_EXCEPTION,
-    ERRMODE_SILENT, ERRMODE_WARNING, SQLITE_ATTR_EXTENDED_RESULT_CODES, SQLITE_ATTR_OPEN_FLAGS,
-    SQLITE_ATTR_TRANSACTION_MODE, SQLITE_OPEN_CREATE, SQLITE_OPEN_READWRITE,
-};
+use crate::connection::{Session, session};
+use crate::constants::*;
 use crate::dsn::DriverName;
-use crate::errors::{DbError, ErrorMode, unsupported};
+use crate::errors::{DbError, ErrorMode};
 use crate::fetch::FetchMode;
-
-/// pdo_mysql's TLS options, `Pdo\Mysql::ATTR_SSL_KEY` (1006) to
-/// `ATTR_SSL_CIPHER` (1010), and `ATTR_SSL_VERIFY_SERVER_CERT`. Phera does
-/// not register `Pdo\Mysql`'s constants yet, so only the numbers reach it.
-const MYSQL_ATTR_SSL_KEY: i64 = 1006;
-const MYSQL_ATTR_SSL_CIPHER: i64 = 1010;
-const MYSQL_ATTR_SSL_VERIFY_SERVER_CERT: i64 = 1013;
+use crate::statement_class::StatementClass;
 
 #[derive(Clone, Copy)]
 pub enum ColumnCase {
@@ -31,131 +23,300 @@ pub enum ColumnCase {
     Lower,
 }
 
-/// The attributes pdo_sqlite accepts in `setAttribute()`; the constructor
-/// also takes `ATTR_OPEN_FLAGS`. Any other is refused with false.
-const SQLITE_SETTABLE: [i64; 8] = [
-    ATTR_TIMEOUT,
-    ATTR_ERRMODE,
-    ATTR_CASE,
-    ATTR_PERSISTENT,
-    ATTR_STRINGIFY_FETCHES,
-    ATTR_DEFAULT_FETCH_MODE,
-    SQLITE_ATTR_EXTENDED_RESULT_CODES,
-    SQLITE_ATTR_TRANSACTION_MODE,
-];
+#[derive(Clone, Copy)]
+pub enum NullHandling {
+    Natural,
+    EmptyString,
+    ToString,
+}
 
-/// The attributes pdo_sqlite answers in `getAttribute()`.
-const SQLITE_READABLE: [i64; 9] = [
-    ATTR_ERRMODE,
-    ATTR_SERVER_VERSION,
-    ATTR_CLIENT_VERSION,
-    ATTR_CASE,
-    ATTR_PERSISTENT,
-    ATTR_DRIVER_NAME,
-    ATTR_STRINGIFY_FETCHES,
-    ATTR_DEFAULT_FETCH_MODE,
-    SQLITE_ATTR_TRANSACTION_MODE,
-];
-
-/// The seconds SQLite waits for a lock before it reports "database is locked".
-const SQLITE_DEFAULT_TIMEOUT: i64 = 60;
+impl NullHandling {
+    pub fn number(self) -> i64 {
+        match self {
+            Self::Natural => 0,
+            Self::EmptyString => 1,
+            Self::ToString => 2,
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct Attributes {
-    driver: DriverName,
     pub errors: ErrorMode,
     pub fetch: FetchMode,
+    pub fetch_flags: i64,
     pub emulate: bool,
     pub stringify: bool,
     pub case: ColumnCase,
+    pub oracle_nulls: NullHandling,
     pub persistent: bool,
-    /// SQLite only: the lock timeout in seconds, the open flags, whether
-    /// errors report SQLite's extended result codes, and the BEGIN mode.
+    pub statement_class: StatementClass,
     pub timeout: i64,
     pub sqlite_flags: i64,
     pub extended: bool,
     pub transaction_mode: i64,
+    pub autocommit: bool,
+    pub mysql_table_names: bool,
+    pub mysql_buffered: bool,
+    pub national_strings: bool,
+    pub pgsql_disable_prepares: bool,
+    pub pgsql_prefetch: bool,
 }
 
 impl Attributes {
     pub fn new(driver: DriverName) -> Self {
         Self {
-            driver,
             errors: ErrorMode::Exception,
             fetch: FetchMode::Both,
+            fetch_flags: 0,
             emulate: driver == DriverName::Mysql,
             stringify: false,
             case: ColumnCase::Natural,
+            oracle_nulls: NullHandling::Natural,
             persistent: false,
-            timeout: SQLITE_DEFAULT_TIMEOUT,
+            statement_class: StatementClass::default(),
+            timeout: 60,
             sqlite_flags: SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE,
             extended: false,
             transaction_mode: 0,
+            autocommit: true,
+            mysql_table_names: false,
+            mysql_buffered: true,
+            national_strings: false,
+            pgsql_disable_prepares: false,
+            pgsql_prefetch: true,
+        }
+    }
+}
+
+pub(crate) fn integer(value: &Value) -> Result<i64, NativeError> {
+    match &*value.deref() {
+        Value::Int(value) => return Ok(*value),
+        Value::Bool(value) => return Ok(i64::from(*value)),
+        Value::InternedStr(value) => {
+            let parsed = parse_numeric(value.as_bytes());
+            if parsed.exact
+                && let Some(NumVal::Int(value)) = parsed.value
+            {
+                return Ok(value);
+            }
+        }
+        Value::String(value) => {
+            let parsed = parse_numeric(value.as_bytes());
+            if parsed.exact
+                && let Some(NumVal::Int(value)) = parsed.value
+            {
+                return Ok(value);
+            }
+        }
+        _ => {}
+    }
+    Err(NativeError::type_error(format!(
+        "Attribute value must be of type int for selected attribute, {} given",
+        value.type_name()
+    )))
+}
+
+fn boolean(value: &Value) -> Result<bool, NativeError> {
+    match &*value.deref() {
+        Value::Bool(value) => Ok(*value),
+        Value::Int(value) => Ok(*value != 0),
+        _ => Err(NativeError::type_error(format!(
+            "Attribute value must be of type bool for selected attribute, {} given",
+            value.type_name()
+        ))),
+    }
+}
+
+/// PDO applies core and mutable driver options after establishing the connection.
+#[derive(Clone, Copy)]
+pub enum AttributeCall {
+    Construct,
+    Connect,
+    Set,
+}
+
+impl AttributeCall {
+    pub fn argument(self) -> &'static str {
+        match self {
+            Self::Construct => "PDO::__construct(): Argument #4 ($options)",
+            Self::Connect => "PDO::connect(): Argument #4 ($options)",
+            Self::Set => "PDO::setAttribute(): Argument #2 ($value)",
         }
     }
 
-    pub fn set(
-        &mut self,
-        context: &mut dyn Context,
-        attribute: i64,
-        value: &Value,
-    ) -> Result<(), NativeError> {
-        let sqlite = self.driver == DriverName::Sqlite;
-        match attribute {
-            ATTR_TIMEOUT if sqlite => self.timeout = to_int(value, context.diagnostics())?,
-            SQLITE_ATTR_OPEN_FLAGS if sqlite => {
-                self.sqlite_flags = to_int(value, context.diagnostics())?
+    pub fn method(self) -> &'static str {
+        match self {
+            Self::Construct => "PDO::__construct",
+            Self::Connect => "PDO::connect",
+            Self::Set => "PDO::setAttribute",
+        }
+    }
+}
+
+pub async fn apply(
+    context: &mut dyn Context,
+    connection: &Rc<Session>,
+    attribute: i64,
+    value: &Value,
+    call: AttributeCall,
+) -> NativeResult {
+    let driver = connection.name;
+    match (driver, attribute) {
+        (_, ATTR_STATEMENT_CLASS) => {
+            if connection.attributes.borrow().persistent {
+                let error = DbError::general(
+                    "PDO::ATTR_STATEMENT_CLASS cannot be used with persistent PDO instances",
+                );
+                return connection.fail_attribute(context, error, call);
             }
-            SQLITE_ATTR_EXTENDED_RESULT_CODES if sqlite => self.extended = to_bool(value),
-            SQLITE_ATTR_TRANSACTION_MODE if sqlite => {
-                self.transaction_mode = to_int(value, context.diagnostics())?
+            let class = StatementClass::parse(context, value, call).await?;
+            connection.attributes.borrow_mut().statement_class = class;
+            return Ok(Value::Bool(true));
+        }
+        (DriverName::Sqlite, ATTR_TIMEOUT) => {
+            let seconds = integer(value)?;
+            let milliseconds = ((seconds.wrapping_mul(1000) as i32).max(0)) as u64;
+            if let Err(error) = connection.driver.sqlite_timeout(milliseconds).await {
+                return connection.fail(context, error, "PDO::setAttribute");
             }
-            ATTR_ERRMODE => {
-                self.errors = match to_int(value, context.diagnostics())? {
-                    ERRMODE_SILENT => ErrorMode::Silent,
-                    ERRMODE_WARNING => ErrorMode::Warning,
-                    ERRMODE_EXCEPTION => ErrorMode::Exception,
-                    _ => {
-                        return Err(NativeError::value_error(
-                            "Error mode must be one of the PDO::ERRMODE_* constants",
+        }
+        (DriverName::Mysql, ATTR_AUTOCOMMIT) => {
+            let enabled = boolean(value)?;
+            if connection.attributes.borrow().autocommit != enabled {
+                connection.attributes.borrow_mut().autocommit = enabled;
+                let result = {
+                    let lease = &connection.driver;
+                    let result = lease.mysql_autocommit(enabled).await;
+                    if let Some(active) = lease.observed_transaction_state() {
+                        connection.transaction.set(active);
+                    }
+                    result
+                };
+                if let Err(error) = result {
+                    return connection.fail(context, error, "PDO::setAttribute");
+                }
+            }
+        }
+        _ => {}
+    }
+    change(
+        &mut connection.attributes.borrow_mut(),
+        driver,
+        attribute,
+        value,
+        call,
+    )
+}
+
+fn change(
+    attrs: &mut Attributes,
+    driver: DriverName,
+    attribute: i64,
+    value: &Value,
+    call: AttributeCall,
+) -> NativeResult {
+    match (driver, attribute) {
+        (_, ATTR_ERRMODE) => {
+            attrs.errors = match integer(value)? {
+                ERRMODE_SILENT => ErrorMode::Silent,
+                ERRMODE_WARNING => ErrorMode::Warning,
+                ERRMODE_EXCEPTION => ErrorMode::Exception,
+                _ => {
+                    return Err(invalid(
+                        call,
+                        "Error mode must be one of the PDO::ERRMODE_* constants",
+                    ));
+                }
+            }
+        }
+        (_, ATTR_CASE) => {
+            attrs.case = match integer(value)? {
+                CASE_NATURAL => ColumnCase::Natural,
+                CASE_UPPER => ColumnCase::Upper,
+                CASE_LOWER => ColumnCase::Lower,
+                _ => {
+                    return Err(invalid(
+                        call,
+                        "Case folding mode must be one of the PDO::CASE_* constants",
+                    ));
+                }
+            }
+        }
+        (_, ATTR_ORACLE_NULLS) => {
+            attrs.oracle_nulls = match integer(value)? {
+                0 => NullHandling::Natural,
+                1 => NullHandling::EmptyString,
+                2 => NullHandling::ToString,
+                _ => {
+                    return Err(invalid(
+                        call,
+                        "PDO::ATTR_ORACLE_NULLS must be one of the PDO::NULL_* constants",
+                    ));
+                }
+            };
+        }
+        (_, ATTR_STRINGIFY_FETCHES) => attrs.stringify = boolean(value)?,
+        (_, ATTR_DEFAULT_FETCH_MODE) => {
+            let number = match &*value.deref() {
+                Value::Array(items) => {
+                    if matches!(
+                        items.get(&phera_extension_api::ArrayKey::Int(0)),
+                        Some(Value::Int(FETCH_CLASS | FETCH_INTO))
+                    ) {
+                        return Err(invalid(
+                            call,
+                            "PDO::FETCH_INTO and PDO::FETCH_CLASS cannot be set as \
+                             the default fetch mode",
                         ));
                     }
+                    i64::from(!items.is_empty())
                 }
+                value => integer(value)?,
+            };
+            if number == FETCH_DEFAULT {
+                return Err(invalid(
+                    call,
+                    "Fetch mode must be a bitmask of PDO::FETCH_* constants",
+                ));
             }
-            ATTR_CASE => {
-                self.case = match to_int(value, context.diagnostics())? {
-                    CASE_NATURAL => ColumnCase::Natural,
-                    CASE_UPPER => ColumnCase::Upper,
-                    CASE_LOWER => ColumnCase::Lower,
-                    _ => return Err(NativeError::value_error("Invalid case folding mode")),
-                }
-            }
-            ATTR_STRINGIFY_FETCHES => self.stringify = to_bool(value),
-            ATTR_DEFAULT_FETCH_MODE => {
-                self.fetch = FetchMode::parse(to_int(value, context.diagnostics())?, self.fetch)?
-            }
-            ATTR_EMULATE_PREPARES => self.emulate = to_bool(value),
-            ATTR_PERSISTENT => self.persistent = to_bool(value),
-            // A TLS option must not be ignored silently.
-            MYSQL_ATTR_SSL_KEY..=MYSQL_ATTR_SSL_CIPHER | MYSQL_ATTR_SSL_VERIFY_SERVER_CERT => {
-                return Err(unsupported("TLS"));
-            }
-            _ => return Err(unsupported("This PDO attribute")),
+            let number = i64::from(number as u16);
+            attrs.fetch_flags = number & FETCH_GROUPING;
+            attrs.fetch = FetchMode::default_attribute(number & !FETCH_GROUPING);
         }
-        Ok(())
+        (DriverName::Sqlite, ATTR_TIMEOUT) => attrs.timeout = integer(value)?,
+        (DriverName::Sqlite, SQLITE_ATTR_EXTENDED_RESULT_CODES) => {
+            attrs.extended = integer(value)? != 0
+        }
+        (DriverName::Sqlite, SQLITE_ATTR_TRANSACTION_MODE) => {
+            let mode = integer(value)?;
+            if !(0..=2).contains(&mode) {
+                return Ok(Value::Bool(false));
+            }
+            attrs.transaction_mode = mode;
+        }
+        (DriverName::Mysql | DriverName::Postgres, ATTR_EMULATE_PREPARES) => {
+            attrs.emulate = boolean(value)?
+        }
+        (DriverName::Mysql, ATTR_AUTOCOMMIT) => {}
+        (DriverName::Mysql, ATTR_DEFAULT_STR_PARAM) => {
+            attrs.national_strings = integer(value)? == STR_NATL
+        }
+        (DriverName::Mysql, ATTR_FETCH_TABLE_NAMES) => attrs.mysql_table_names = boolean(value)?,
+        (DriverName::Mysql, MYSQL_BUFFERED) => attrs.mysql_buffered = boolean(value)?,
+        (DriverName::Postgres, PGSQL_DISABLE_PREPARES) => {
+            attrs.pgsql_disable_prepares = boolean(value)?
+        }
+        (DriverName::Postgres, ATTR_PREFETCH) => attrs.pgsql_prefetch = boolean(value)?,
+        _ => return Ok(Value::Bool(false)),
     }
+    Ok(Value::Bool(true))
 }
 
-/// Whether the constructor's options may set `attribute`: for SQLite only
-/// the ones pdo_sqlite knows.
-pub fn constructor_accepts(driver: DriverName, attribute: i64) -> bool {
-    driver != DriverName::Sqlite
-        || attribute == SQLITE_ATTR_OPEN_FLAGS
-        || SQLITE_SETTABLE.contains(&attribute)
+fn invalid(call: AttributeCall, message: &str) -> NativeError {
+    NativeError::value_error(format!("{} {message}", call.argument()))
 }
 
-/// `setAttribute()`. Asynchronous because SQLite's lock timeout is set on
-/// the database's own thread.
 pub fn set<'a>(
     context: &'a mut dyn Context,
     this: Option<Rc<Object>>,
@@ -163,122 +324,29 @@ pub fn set<'a>(
 ) -> LocalFuture<'a, NativeResult> {
     Box::pin(async move {
         let connection = session(this.as_ref())?;
+        connection.success();
         let attribute = args::int(&arguments, 0).unwrap_or_default();
-        let value = args::value(&arguments, 1);
-        if connection.name == DriverName::Sqlite {
-            if !SQLITE_SETTABLE.contains(&attribute) {
-                return Ok(Value::Bool(false));
-            }
-            if attribute == SQLITE_ATTR_TRANSACTION_MODE
-                && !(0..=SQLITE_TRANSACTION_MODES).contains(&to_int(value, context.diagnostics())?)
-            {
-                return Ok(Value::Bool(false));
-            }
-            if attribute == ATTR_TIMEOUT {
-                let seconds = to_int(value, context.diagnostics())?;
-                let milliseconds = seconds.max(0).saturating_mul(1000) as u64;
-                let result = connection
-                    .driver
-                    .lock()
-                    .await
-                    .sqlite_timeout(milliseconds)
-                    .await;
-                if let Err(error) = result {
-                    return connection.fail(context, error, "PDO::setAttribute");
-                }
-            }
-        }
-        connection
-            .attributes
-            .borrow_mut()
-            .set(context, attribute, value)?;
-        Ok(Value::Bool(true))
+        apply(
+            context,
+            &connection,
+            attribute,
+            args::value(&arguments, 1),
+            AttributeCall::Set,
+        )
+        .await
     })
 }
 
-/// The highest `Pdo\Sqlite::TRANSACTION_MODE_*`.
-const SQLITE_TRANSACTION_MODES: i64 = 2;
-
-pub fn get(
+pub fn sqlite_pre_open(
     context: &mut dyn Context,
-    this: Option<&Rc<Object>>,
-    arguments: &[Value],
-) -> NativeResult {
-    let connection = session(this)?;
-    let attribute = args::int(arguments, 0).unwrap_or_default();
-    if connection.name == DriverName::Sqlite && !SQLITE_READABLE.contains(&attribute) {
-        let error = DbError {
-            state: "IM001".into(),
-            code: None,
-            detail: "driver does not support that attribute".into(),
-        };
-        return connection.fail(context, error, "PDO::getAttribute");
+    attrs: &mut Attributes,
+    attribute: i64,
+    value: &Value,
+) -> Result<(), NativeError> {
+    match attribute {
+        ATTR_TIMEOUT => attrs.timeout = to_int(value, context.diagnostics())?,
+        SQLITE_ATTR_OPEN_FLAGS => attrs.sqlite_flags = to_int(value, context.diagnostics())?,
+        _ => {}
     }
-    let attributes = connection.attributes.borrow();
-    let value = match attribute {
-        ATTR_ERRMODE => Value::Int(match attributes.errors {
-            ErrorMode::Silent => ERRMODE_SILENT,
-            ErrorMode::Warning => ERRMODE_WARNING,
-            ErrorMode::Exception => ERRMODE_EXCEPTION,
-        }),
-        ATTR_SERVER_VERSION => Value::from(connection.version.clone()),
-        // SQLite's client is its engine; the server drivers' client versions
-        // are not known.
-        ATTR_CLIENT_VERSION if connection.name == DriverName::Sqlite => {
-            Value::from(connection.version.clone())
-        }
-        SQLITE_ATTR_TRANSACTION_MODE => Value::Int(attributes.transaction_mode),
-        ATTR_CASE => Value::Int(match attributes.case {
-            ColumnCase::Natural => CASE_NATURAL,
-            ColumnCase::Upper => CASE_UPPER,
-            ColumnCase::Lower => CASE_LOWER,
-        }),
-        ATTR_PERSISTENT => Value::Bool(attributes.persistent),
-        ATTR_DRIVER_NAME => Value::from(connection.name.name()),
-        ATTR_STRINGIFY_FETCHES => Value::Bool(attributes.stringify),
-        ATTR_DEFAULT_FETCH_MODE => Value::Int(attributes.fetch.number()),
-        ATTR_EMULATE_PREPARES => Value::Bool(attributes.emulate),
-        _ => return Err(unsupported("This PDO attribute")),
-    };
-    Ok(value)
-}
-
-#[cfg(test)]
-mod tests {
-    use phera_extension_api::testing::TestContext;
-    use phera_extension_api::{NativeError, Value};
-
-    use super::Attributes;
-    use crate::dsn::DriverName;
-
-    fn refusal(attribute: i64) -> String {
-        let mut attributes = Attributes::new(DriverName::Mysql);
-        let error = attributes
-            .set(&mut TestContext::default(), attribute, &Value::from("x"))
-            .unwrap_err();
-        let NativeError::Unwind(_) = &error else {
-            panic!("a PDOException")
-        };
-        let (_, message, _, _) = error.into_exception_parts().unwrap();
-        message
-    }
-
-    #[test]
-    fn mysql_tls_options_are_refused_as_tls() {
-        // SSL_KEY, SSL_CERT, SSL_CA, SSL_CAPATH, SSL_CIPHER, SSL_VERIFY_SERVER_CERT
-        for attribute in [1006, 1007, 1008, 1009, 1010, 1013] {
-            assert_eq!(
-                refusal(attribute),
-                "TLS is not supported yet",
-                "{attribute}"
-            );
-        }
-        // SERVER_PUBLIC_KEY and LOCAL_INFILE_DIRECTORY are not TLS options.
-        for attribute in [1011, 1014] {
-            assert_eq!(
-                refusal(attribute),
-                "This PDO attribute is not supported yet"
-            );
-        }
-    }
+    Ok(())
 }

@@ -2,10 +2,20 @@
 //! Uncertain facts become mixed rather than producing a guessed diagnostic.
 
 use super::*;
+use phera_source::deprecations::{ItemKind, omitted};
 
 impl Analyzer<'_> {
     pub fn atoms(&mut self, expression: &Expression, scope: &mut Scope, quiet: bool) -> ValueType {
         match &expression.kind {
+            ExpressionKind::Literal(Literal::Int(value)) if self.level >= 2 => {
+                ValueType::IntLiteral(*value)
+            }
+            ExpressionKind::Literal(Literal::Bool(value)) if self.level >= 2 => {
+                ValueType::BoolLiteral(*value)
+            }
+            ExpressionKind::Literal(Literal::String(value)) if self.level >= 2 => {
+                ValueType::StringLiteral(value.as_slice().into())
+            }
             ExpressionKind::Literal(literal) => match literal {
                 Literal::Null => ValueType::Null,
                 Literal::Bool(_) => ValueType::Bool,
@@ -55,7 +65,12 @@ impl Analyzer<'_> {
                     .known
                     .contains(&Symbol::Constant(Symbol::constant_name(n)))
         }) {
-            if name.text.starts_with("__") && name.text.ends_with("__") {
+            if let Some(item) = candidates
+                .last()
+                .and_then(|name| omitted(ItemKind::Constant, name))
+            {
+                self.report(Finding::NotSupported(item), name.span);
+            } else if name.text.starts_with("__") && name.text.ends_with("__") {
                 self.report(Finding::MagicConstant(name.text.clone()), name.span);
             } else {
                 self.report(Finding::UnknownConstant(candidates[0].clone()), name.span);

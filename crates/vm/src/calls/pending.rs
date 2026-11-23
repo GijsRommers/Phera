@@ -14,7 +14,7 @@
 
 use phera_bytecode::{NameId, PathId, Reg, SymbolId};
 use phera_extension_api::{NativeError, NativeResult};
-use phera_value::{Value, to_php_string};
+use phera_value::Value;
 
 use crate::calls::call_state::{CallTarget, Callee, ParameterSpec};
 use crate::calls::prepared_call::{CallDetails, CallKind, PreparedCall, PreparedCallee};
@@ -27,23 +27,28 @@ use crate::{AccessPath, Vm};
 pub(crate) enum LinkedFunction {
     Php(FunctionIndex),
     Other(Callee),
+    /// An unqualified name in a namespace links separately at each instruction.
+    NamespaceFallback,
+}
+
+impl LinkedFunction {
+    /// This link as a request forked from a snapshot may use it, if it may:
+    /// a function by number or a native one, which hold no object of the
+    /// VM they were made in.
+    pub(crate) fn shared(&self) -> Option<Self> {
+        match self {
+            LinkedFunction::Other(callee) => callee.shared().map(LinkedFunction::Other),
+            LinkedFunction::Php(_) | LinkedFunction::NamespaceFallback => Some(self.clone()),
+        }
+    }
 }
 
 impl Vm {
     /// Resolve the callee before argument evaluation so reference parameters are known.
     pub(crate) fn init_call(&mut self, symbol: SymbolId) -> Result<(), NativeError> {
-        let linked = self.current().and_then(|frame| {
-            frame
-                .cache()
-                .symbols
-                .borrow()
-                .get(symbol.index())
-                .cloned()
-                .flatten()
-        });
-        let linked = match linked {
-            Some(linked) => linked,
-            None => self.link_function_symbol(symbol)?,
+        let linked = match self.linked_function(symbol)? {
+            LinkedFunction::NamespaceFallback => self.link_namespace_call_site(symbol)?,
+            linked => linked,
         };
         match linked {
             LinkedFunction::Php(function) => {
@@ -51,35 +56,97 @@ impl Vm {
                 Ok(())
             }
             LinkedFunction::Other(callee) => self.prepare_call(callee),
+            LinkedFunction::NamespaceFallback => Err(internal_error!("namespace site target")),
+        }
+    }
+
+    pub(super) fn linked_function(
+        &mut self,
+        symbol: SymbolId,
+    ) -> Result<LinkedFunction, NativeError> {
+        let linked = self.current().and_then(|frame| {
+            let cache = frame.cache();
+            let own = cache
+                .symbols
+                .borrow()
+                .get(symbol.index())
+                .cloned()
+                .flatten();
+            // What the snapshot linked, copied once into this request's cache.
+            own.or_else(|| cache.base_symbol(symbol.index()))
+        });
+        match linked {
+            Some(linked) => Ok(linked),
+            None => self.link_function_symbol(symbol),
         }
     }
 
     /// Find what a function symbol names, with PHP's namespace fallback, and
     /// remember it for the file: a declared function cannot go away.
     fn link_function_symbol(&mut self, symbol: SymbolId) -> Result<LinkedFunction, NativeError> {
-        let definition = self
-            .current()
-            .and_then(|frame| frame.unit().symbols.get(symbol.index()))
-            .cloned()
-            .ok_or_else(|| internal_error!("invalid symbol"))?;
-        let name = if self.exists(&definition.name) {
-            definition.name
-        } else if let Some(fallback) = definition.fallback.filter(|name| self.exists(name)) {
-            fallback
+        let definition = self.function_symbol(symbol)?;
+        let linked = if definition.fallback.is_some() {
+            LinkedFunction::NamespaceFallback
         } else {
-            definition.written
+            self.resolve_function_symbol(&definition)?
         };
-        let callee = self.resolve_callee(&name)?;
-        let linked = match callee.target {
-            CallTarget::User(function) => LinkedFunction::Php(function),
-            _ => LinkedFunction::Other(callee),
-        };
-        if let Some(frame) = self.current()
-            && let Some(slot) = frame.cache().symbols.borrow_mut().get_mut(symbol.index())
-        {
-            *slot = Some(linked.clone());
+        if let Some(frame) = self.current() {
+            frame.cache().set_symbol(symbol.index(), linked.clone());
         }
         Ok(linked)
+    }
+
+    fn function_symbol(&self, symbol: SymbolId) -> Result<phera_bytecode::Symbol, NativeError> {
+        self.current()
+            .and_then(|frame| frame.unit().symbols.get(symbol.index()))
+            .cloned()
+            .ok_or_else(|| internal_error!("invalid symbol"))
+    }
+
+    /// Zend remembers the first successful target at an INIT_NS_FCALL site.
+    /// A different site can see a declaration that happened in the meantime.
+    #[inline(never)]
+    fn link_namespace_call_site(&self, symbol: SymbolId) -> Result<LinkedFunction, NativeError> {
+        use crate::unit_caches::CachedSite;
+        let frame = self
+            .current()
+            .ok_or_else(|| internal_error!("namespace call frame"))?;
+        let site = frame
+            .code
+            .site(frame.frame.function, frame.ip())
+            .ok_or_else(|| internal_error!("namespace call site"))?;
+        if let CachedSite::Function(callee) = &*site.borrow() {
+            return Ok((**callee).clone());
+        }
+        let linked = self.resolve_function_symbol(&self.function_symbol(symbol)?)?;
+        *site.borrow_mut() = CachedSite::Function(Box::new(linked.clone()));
+        Ok(linked)
+    }
+
+    fn resolve_function_symbol(
+        &self,
+        definition: &phera_bytecode::Symbol,
+    ) -> Result<LinkedFunction, NativeError> {
+        let name = if self.exists(&definition.name) {
+            &definition.name
+        } else if let Some(fallback) = definition
+            .fallback
+            .as_ref()
+            .filter(|name| self.exists(name))
+        {
+            fallback
+        } else {
+            &definition.name
+        };
+        let callee = self.resolve_named_callee(
+            name,
+            &definition.written,
+            definition.fallback.as_deref().unwrap_or(&definition.name),
+        )?;
+        Ok(match callee.target {
+            CallTarget::User(function) => LinkedFunction::Php(function),
+            _ => LinkedFunction::Other(callee),
+        })
     }
 
     /// Resolve a computed callable after publishing its conversion diagnostics.
@@ -101,19 +168,32 @@ impl Vm {
 
     /// Snapshot the signature and target so argument evaluation cannot change resolution.
     pub(crate) fn resolve_callee(&self, name: &str) -> Result<Callee, NativeError> {
-        let lower = name.trim_start_matches('\\').to_ascii_lowercase();
+        self.resolve_named_callee(name, name, name)
+    }
+
+    fn resolve_named_callee(
+        &self,
+        name: &str,
+        written: &str,
+        policy_name: &str,
+    ) -> Result<Callee, NativeError> {
+        let lower = phera_extension_api::folded_name(name.trim_start_matches('\\'));
         if let Some(index) = self.function_table.get(&lower) {
             return Ok(self.function_callee(index));
         }
-        let (name, target, parameters): (_, _, Vec<_>) =
-            if let Some(entry) = self.registry.get_function(name.trim_start_matches('\\')) {
-                (
-                    entry.name.into(),
-                    CallTarget::Native(*entry),
-                    entry.params.iter().map(ParameterSpec::native).collect(),
-                )
-            } else if let Some(intrinsic) = crate::intrinsics::Intrinsic::resolve(name) {
-                let parameters = intrinsic
+        let (name, target, parameters): (_, _, Vec<_>) = if let Some(entry) =
+            self.registry.get_folded_function(&lower)
+        {
+            (
+                entry.name.into(),
+                CallTarget::Native(*entry),
+                entry.params.iter().map(ParameterSpec::native).collect(),
+            )
+        } else if let Some(intrinsic) = crate::intrinsics::Intrinsic::resolve_folded(&lower) {
+            let parameters = if let Some(parameters) = intrinsic.parameters() {
+                parameters.iter().map(ParameterSpec::native).collect()
+            } else {
+                intrinsic
                     .parameter_names()
                     .iter()
                     .map(|name| ParameterSpec {
@@ -121,16 +201,28 @@ impl Vm {
                         ty: None,
                         by_reference: matches!(intrinsic, crate::intrinsics::Intrinsic::IsCallable)
                             && *name == "callable_name",
-                        variadic: matches!(intrinsic, crate::intrinsics::Intrinsic::CallUserFunc)
-                            && *name == "args",
+                        requires_reference: matches!(
+                            intrinsic,
+                            crate::intrinsics::Intrinsic::IsCallable
+                        ) && *name == "callable_name",
+                        variadic: matches!(
+                            (intrinsic, *name),
+                            (crate::intrinsics::Intrinsic::CallUserFunc, "args")
+                                | (crate::intrinsics::Intrinsic::Compact, "var_names")
+                        ),
                     })
-                    .collect();
-                (lower.into(), CallTarget::Intrinsic(intrinsic), parameters)
-            } else {
-                return Err(NativeError::error(format!(
-                    "Call to undefined function {name}()"
-                )));
+                    .collect()
             };
+            (lower.into(), CallTarget::Intrinsic(intrinsic), parameters)
+        } else {
+            return Err(crate::unsupported_items::omitted_item(
+                phera_source::deprecations::ItemKind::Function,
+                policy_name,
+            )
+            .unwrap_or_else(|| {
+                NativeError::error(format!("Call to undefined function {written}()"))
+            }));
+        };
         Ok(Callee {
             argument_binding: crate::calls::callback_binding::ArgumentBinding::Caller,
             name,
@@ -206,22 +298,32 @@ impl Vm {
     }
 
     /// Numeric exit values set status; strings are output before unwinding the request.
-    pub(crate) fn exit_value(&mut self, register: Reg) -> NativeResult {
+    pub(crate) async fn exit_value(&mut self, register: Reg) -> NativeResult {
         let value = self.get(register);
-        let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
+        if value.is_object()
+            && (self
+                .current()
+                .is_some_and(|frame| frame.function().strict_types)
+                || !Self::has_string_conversion(&value))
+        {
+            return Err(NativeError::type_error(format!(
+                "exit(): Argument #1 ($status) must be of type string|int, {} given",
+                value.type_name(),
+            )));
+        }
         if matches!(
             value,
             Value::Int(_) | Value::Bool(_) | Value::Null | Value::Float(_)
         ) {
+            let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
             diagnostics.vm.status = phera_value::to_int(&value, &mut diagnostics.buffer)? as i32;
         } else {
-            let text = to_php_string(&value, &mut diagnostics.buffer)?;
-            diagnostics.vm.out(text.as_bytes());
+            let text = self.stringify_value(&value).await?;
+            self.out(text.as_bytes());
         }
-        drop(diagnostics);
-        self.call_stack.clear();
+        self.release_frames_for_exit();
         Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
-            (),
+            crate::request_end::Exit,
         ))))
     }
 }
@@ -246,14 +348,19 @@ pub(crate) fn prepare_general(
     let size = general_window(&callee);
     let base = registers.len();
     registers.grow_to(base + size);
+    let mut call = PreparedCall::new(PreparedCallee::General, base);
+    if matches!(
+        callee.target,
+        crate::calls::call_state::CallTarget::Magic(_)
+    ) {
+        call.flags
+            .insert(crate::calls::prepared_call::CallFlags::MAGIC);
+    }
     let details = CallDetails {
         callee: Some(callee),
         ..CallDetails::default()
     };
-    stack.push_call(
-        PreparedCall::new(PreparedCallee::General, base),
-        Some(details),
-    );
+    stack.push_call(call, Some(details));
 }
 
 /// The window size of a call to a general callee (native code): one

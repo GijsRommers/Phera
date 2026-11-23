@@ -30,16 +30,19 @@ mod key;
 mod lookup;
 mod mutation;
 mod pointer;
+mod separation;
 mod storage;
 #[cfg(test)]
 mod tests;
 
 use crate::value::Value;
 pub use key::ArrayKey;
+pub(crate) use key::numeric_string_key;
 use std::fmt;
 use storage::Storage;
+pub(crate) use storage::hash_str_bytes;
 
-#[derive(Clone, Default)]
+#[derive(Default)]
 pub struct PhpArray {
     storage: Storage,
     /// The key `$a[]` uses next: one more than the largest integer key ever
@@ -64,8 +67,70 @@ impl PhpArray {
         }
     }
 
+    /// Builds a packed list, reserving the caller's known length up front.
+    pub fn from_values(values: impl IntoIterator<Item = Value>, capacity: usize) -> Self {
+        let mut slots = Vec::with_capacity(capacity);
+        slots.extend(values.into_iter().map(Some));
+        let next_free = (!slots.is_empty()).then_some(slots.len() as i64);
+        Self {
+            storage: Storage::List(slots),
+            next_free,
+            ..Self::default()
+        }
+    }
+
+    /// Builds a fresh array with consecutive integer keys, starting at `start`.
+    pub fn from_indexed_values(
+        start: i64,
+        values: impl ExactSizeIterator<Item = Value>,
+    ) -> Result<Self, crate::OpError> {
+        use storage::{Entry, OrderedMap};
+
+        let count = values.len();
+        if start == 0 || count == 0 {
+            return Ok(Self::from_values(values, count));
+        }
+        let last = i64::try_from(count - 1)
+            .ok()
+            .and_then(|offset| start.checked_add(offset))
+            .ok_or_else(|| {
+                crate::OpError::error(
+                    "Cannot add element to the array as the next element is already occupied",
+                )
+            })?;
+        let entries = values
+            .enumerate()
+            .map(|(offset, value)| Entry {
+                key: ArrayKey::Int(start + offset as i64),
+                value: Some(value),
+            })
+            .collect();
+        Ok(Self {
+            storage: Storage::Map(OrderedMap::new(entries)),
+            next_free: Some(last.saturating_add(1)),
+            ..Self::default()
+        })
+    }
+
     pub fn len(&self) -> usize {
         self.storage.len() - self.dead as usize
+    }
+
+    /// The bytes this array holds on the heap for its slots and its index
+    /// (by capacity), not counting what its values point to. For the
+    /// footprint of a fork (see `crate::fork::Fork::footprint`).
+    pub fn heap_bytes(&self) -> usize {
+        use std::mem::size_of;
+        match &self.storage {
+            storage::Storage::List(slots) => slots.capacity() * size_of::<Option<Value>>(),
+            storage::Storage::Map(map) => {
+                map.entries.capacity() * size_of::<storage::Entry>()
+                    + map.index.as_ref().map_or(0, |index| {
+                        size_of::<storage::Index>()
+                            + index.positions.capacity() * (size_of::<u32>() + 1)
+                    })
+            }
+        }
     }
     pub fn is_empty(&self) -> bool {
         self.len() == 0

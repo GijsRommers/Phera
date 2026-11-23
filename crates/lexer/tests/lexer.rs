@@ -8,6 +8,21 @@ fn file_tokens(source: &str) -> Vec<Token> {
     collect(source, Lexer::new(source))
 }
 
+#[test]
+fn a_cli_shebang_keeps_all_remaining_token_offsets() {
+    let source = "#!/usr/bin/env php\n<?php __halt_compiler();payload";
+    let tokens = collect(source, Lexer::new(source).after_shebang());
+    let open_tag = &tokens[0];
+    assert_eq!(open_tag.kind, OpenTag);
+    assert_eq!(open_tag.span.start, "#!/usr/bin/env php\n".len());
+    let payload = tokens
+        .iter()
+        .find(|token| token.kind == InlineHtml)
+        .unwrap();
+    assert_eq!(payload.span.start, source.find("payload").unwrap());
+    assert_eq!(&source[payload.span.start..payload.span.end], "payload");
+}
+
 /// Lexes PHP code (no `<?php` tag needed), returning every token including `Eof`.
 fn tokens(source: &str) -> Vec<Token> {
     collect(source, Lexer::new_php(source))
@@ -480,13 +495,42 @@ fn unterminated_interpolated_strings() {
 }
 
 #[test]
-fn deprecated_dollar_brace_interpolation_is_rejected() {
-    for source in [r#""${a}""#, r#""${a[1]}""#, r#""${expr()}""#] {
-        assert!(
-            matches!(first_error(source).kind, LexErrorKind::Unsupported(_)),
-            "in {source:?}"
-        );
-    }
+fn deprecated_dollar_brace_interpolation_has_php_tokens() {
+    assert_eq!(
+        kinds(r#""${a}""#),
+        [
+            DoubleQuote,
+            DollarCurlyOpen,
+            StringVarname,
+            RightBrace,
+            DoubleQuote
+        ]
+    );
+    assert_eq!(
+        kinds(r#""${a[1]}""#),
+        [
+            DoubleQuote,
+            DollarCurlyOpen,
+            StringVarname,
+            LeftBracket,
+            Integer,
+            RightBracket,
+            RightBrace,
+            DoubleQuote,
+        ]
+    );
+    assert_eq!(
+        kinds(r#""${expr()}""#),
+        [
+            DoubleQuote,
+            DollarCurlyOpen,
+            Identifier,
+            LeftParen,
+            RightParen,
+            RightBrace,
+            DoubleQuote,
+        ]
+    );
 }
 
 #[test]
@@ -615,11 +659,11 @@ fn heredoc_start_must_be_followed_by_a_newline() {
 }
 
 #[test]
-fn backticks_are_rejected() {
-    assert!(matches!(
-        first_error("`ls`").kind,
-        LexErrorKind::Unsupported(_)
-    ));
+fn backticks_interpolate_variables_and_preserve_escaped_delimiters() {
+    assert_eq!(
+        kinds(r"`printf $word \``"),
+        [Backquote, StringPart, Variable, StringPart, Backquote]
+    );
 }
 
 // --- Operators --------------------------------------------------------------

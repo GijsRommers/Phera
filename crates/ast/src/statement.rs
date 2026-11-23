@@ -21,11 +21,24 @@ pub enum StatementKind {
     InlineHtml(Vec<u8>),
     Block(Block),
 
-    /// `elseif` and `else if` are nested: the `otherwise` block then holds a
-    /// single `If` statement. The `if: ... endif;` form parses to the same node.
+    /// A whole `if` ladder:
+    ///
+    /// ```php
+    /// if ($a) { A(); } elseif ($b) { B(); } elseif ($c) { C(); } else { D(); }
+    /// ```
+    ///
+    /// `then` is `A();`, `elseifs` holds the `$b` and `$c` branches in source
+    /// order, `otherwise` is `D();`. Generated code has ladders of a hundred
+    /// thousand `elseif`s; as a list they are one node, not that many nested
+    /// ones that every pass would recurse through.
+    ///
+    /// `else if` (two words) is PHP's `else` followed by an ordinary `if`
+    /// statement, and stays nested, as in PHP's grammar: `otherwise` holds
+    /// that one `If`. The `if: ... endif;` form parses to the same node.
     If {
         condition: Expression,
         then: Block,
+        elseifs: Vec<ElseIf>,
         otherwise: Option<Block>,
     },
     While {
@@ -74,7 +87,9 @@ pub enum StatementKind {
         directives: Vec<DeclareDirective>,
         body: Option<Block>,
     },
+    /// A file- or function-local jump to a case-sensitive label.
     Goto(Identifier),
+    /// A standalone statement, even immediately before a closing brace.
     Label(Identifier),
 
     /// For the `namespace Foo;` form, `statements` holds everything up to the
@@ -88,6 +103,7 @@ pub enum StatementKind {
     /// Group uses are flattened: `use A\{B, C as D};` is two items.
     Use(Vec<UseItem>),
     Const {
+        doc_comment: Option<Span>,
         attributes: Vec<Attribute>,
         items: Vec<ConstantDeclaration>,
     },
@@ -117,6 +133,14 @@ pub struct StaticVariable {
     pub span: Span,
 }
 
+/// One `elseif ($condition) { ... }` branch of [`StatementKind::If`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct ElseIf {
+    pub condition: Expression,
+    pub body: Block,
+    pub span: Span,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Catch {
     /// `catch (A | B $e)` has two types.
@@ -133,7 +157,7 @@ pub struct DeclareDirective {
     pub value: Expression,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum UseKind {
     /// `use Foo\Bar;` imports a class, interface, trait, enum or namespace.
     Class,

@@ -5,6 +5,11 @@ use super::*;
 use crate::index::Signature;
 use std::collections::BTreeSet;
 
+pub struct ArgumentFacts {
+    pub evaluation: Evaluation,
+    pub types: Vec<ValueType>,
+}
+
 impl Analyzer<'_> {
     pub fn arguments(
         &mut self,
@@ -15,22 +20,61 @@ impl Analyzer<'_> {
         span: Span,
         kind: CallKind,
     ) -> Evaluation {
-        let Arguments::List(arguments) = arguments else {
-            return Evaluation::Completes;
+        self.argument_facts(arguments, signature, label, scope, span, kind)
+            .evaluation
+    }
+
+    pub fn argument_facts(
+        &mut self,
+        arguments: &Arguments,
+        signature: Option<&Signature>,
+        label: &str,
+        scope: &mut Scope,
+        span: Span,
+        kind: CallKind,
+    ) -> ArgumentFacts {
+        let mut facts = ArgumentFacts {
+            evaluation: Evaluation::Completes,
+            types: Vec::new(),
         };
-        if self.evaluate_arguments(arguments, signature, scope) == Evaluation::Never {
-            return Evaluation::Never;
+        let Arguments::List(arguments) = arguments else {
+            return facts;
+        };
+        let collect = self.level >= 5
+            || self.level >= 4
+                && label
+                    .strip_suffix("()")
+                    .and_then(super::refine_types::predicate_type)
+                    .is_some()
+            || self.level >= 2
+                && (super::builtin_facts::takes_facts(label)
+                    || signature
+                        .and_then(|signature| signature.documentation.as_deref())
+                        .is_some_and(|doc| {
+                            !doc.template_names.is_empty()
+                                || doc.returns.as_ref().is_some_and(|annotation| {
+                                    matches!(annotation.ty, ValueType::Conditional(_))
+                                })
+                        }));
+        let types = collect.then_some(&mut facts.types);
+        if self.evaluate_arguments(arguments, signature, scope, types) == Evaluation::Never {
+            facts.evaluation = Evaluation::Never;
+            return facts;
         }
         scope.forget_reference_types();
         self.record_exception(scope);
         let Some(signature) = signature else {
-            return Evaluation::Completes;
+            return facts;
         };
         let supplied = self.bind_arguments(arguments, signature, label, span, kind);
         if !arguments.iter().any(|a| a.spread) {
             self.check_arity(arguments.len(), &supplied, signature, label, span);
         }
-        Evaluation::Completes
+        if self.level >= 5 {
+            let target = super::argument_contracts::select_target(signature, label, kind);
+            self.check_argument_contracts(arguments, &facts.types, signature, &target, scope);
+        }
+        facts
     }
 
     fn evaluate_arguments(
@@ -38,31 +82,47 @@ impl Analyzer<'_> {
         arguments: &[Argument],
         signature: Option<&Signature>,
         scope: &mut Scope,
+        mut types: Option<&mut Vec<ValueType>>,
     ) -> Evaluation {
         for (position, argument) in arguments.iter().enumerate() {
-            let parameter = signature.and_then(|s| {
-                if let Some(name) = &argument.name {
-                    s.parameters
-                        .iter()
-                        .find(|p| p.name == name.name)
-                        .or_else(|| s.parameters.last().filter(|p| p.variadic))
-                } else {
-                    s.parameters
-                        .get(position)
-                        .or_else(|| s.parameters.last().filter(|p| p.variadic))
-                }
-            });
+            let parameter =
+                signature.and_then(|signature| signature.parameter_at(position, argument));
             if parameter.is_some_and(|p| p.by_reference) {
                 self.ensure_reference(&argument.value, scope);
             }
+            let previous_binding = self.pending_binding.clone();
+            if let Some(class) = parameter.and_then(|p| p.closure_receiver.as_deref()) {
+                self.prepare_documented_binding(&argument.value, class);
+            }
             let ty = self.expression(&argument.value, scope, signature.is_none());
+            let explicitly_bound = self
+                .pending_binding
+                .as_ref()
+                .is_some_and(|(offset, _)| *offset == argument.value.span.start);
+            self.pending_binding = previous_binding;
+            if !explicitly_bound
+                && closure_binding::is_closure(&argument.value)
+                && let ValueType::Callable(signature) = &ty
+            {
+                self.unbound_invocation(signature);
+            }
             if ty == ValueType::Never {
                 return Evaluation::Never;
+            }
+            if !scope.facts.is_empty()
+                && let ValueType::Callable(signature) = &ty
+            {
+                for target in &signature.captured_writes {
+                    scope.facts.forget_write(Some(target));
+                }
             }
             if self.context.scope_kind == ScopeKind::Global
                 && (ty.may_be_callable() || parameter.is_some_and(|p| p.ty.may_be_callable()))
             {
                 scope.unknown_writes();
+            }
+            if let Some(types) = &mut types {
+                types.push(ty);
             }
             if (signature.is_none() || parameter.is_some_and(|p| p.by_reference))
                 && let ExpressionKind::Variable(Variable::Named(name)) = &argument.value.kind

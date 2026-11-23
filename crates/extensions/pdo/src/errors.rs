@@ -10,33 +10,15 @@ pub enum ErrorMode {
     Exception,
 }
 
-#[derive(Clone, Debug)]
-pub struct DbError {
-    pub state: String,
-    pub code: Option<i64>,
-    pub detail: String,
+pub use phera_db_drivers::errors::DbError;
+
+pub trait PdoError {
+    fn message(&self) -> String;
+    fn report(&self, context: &mut dyn Context, mode: ErrorMode, method: &str) -> NativeResult;
 }
 
-impl DbError {
-    /// `SQLSTATE[HY000]: General error: ...`, for failures that are not the
-    /// server's: a bad setting, a feature that is missing.
-    pub fn general(detail: impl Into<String>) -> Self {
-        Self {
-            state: "HY000".into(),
-            code: None,
-            detail: detail.into(),
-        }
-    }
-
-    pub fn parameter(detail: &str) -> Self {
-        Self {
-            state: "HY093".into(),
-            code: None,
-            detail: detail.into(),
-        }
-    }
-
-    pub fn message(&self) -> String {
+impl PdoError for DbError {
+    fn message(&self) -> String {
         let description = match self.state.as_str() {
             "00000" => "No error",
             "HY093" => "Invalid parameter number",
@@ -50,6 +32,7 @@ impl DbError {
             "23000" => "Integrity constraint violation",
             "23502" => "Not null violation",
             "23503" => "Foreign key violation",
+            "55000" => "Object not in prerequisite state",
             "22P02" => "Invalid text representation",
             "22012" => "Division by zero",
             "08006" => "Connection failure",
@@ -71,7 +54,7 @@ impl DbError {
         message
     }
 
-    pub fn report(&self, context: &mut dyn Context, mode: ErrorMode, method: &str) -> NativeResult {
+    fn report(&self, context: &mut dyn Context, mode: ErrorMode, method: &str) -> NativeResult {
         match mode {
             ErrorMode::Silent => Ok(Value::Bool(false)),
             ErrorMode::Warning => {
@@ -154,9 +137,14 @@ pub fn exception(message: impl Into<String>, error: Option<&DbError>, code: i64)
     } else {
         thrown.with_code(code)
     };
-    if error.state == "IM001" && error.detail == "driver does not support that attribute" {
+    if (error.state == "IM001" && error.detail == "driver does not support that attribute")
+        || (error.state == "HY000" && error.detail.starts_with("PDO::ATTR_STATEMENT_CLASS"))
+    {
         let mut information = PhpArray::new();
-        information.insert(phera_extension_api::ArrayKey::Int(0), Value::from("IM001"));
+        information.insert(
+            phera_extension_api::ArrayKey::Int(0),
+            Value::from(error.state.as_str()),
+        );
         information.insert(phera_extension_api::ArrayKey::Int(1), Value::Int(0));
         return thrown.with_property("errorInfo", Value::from(information));
     }
@@ -168,7 +156,7 @@ pub fn exception(message: impl Into<String>, error: Option<&DbError>, code: i64)
 
 #[cfg(test)]
 mod tests {
-    use super::DbError;
+    use super::{DbError, PdoError};
 
     #[test]
     fn formats_driver_and_parameter_errors() {

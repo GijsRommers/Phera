@@ -1,0 +1,1 @@
+2	return-in-finally	Returning from finally overrides a pending return or exception.

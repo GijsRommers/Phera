@@ -34,23 +34,42 @@
 //!
 //! See `docs/architecture.md`, sections 4 and 9.3.
 
+mod builtin;
 mod class;
+mod code;
 mod display;
 mod function;
 mod ids;
 mod instruction;
+pub mod name_keys;
+pub mod reflection;
 mod unit;
+mod unit_metadata;
 
-pub use class::{
-    ClassConstant, ClassDeclaration, ClassKind, Initializer, MethodDeclaration,
-    PropertyDeclaration, Visibility,
+pub use name_keys::NameKey;
+pub use unit_metadata::{
+    DeclarationScope, FunctionShape, FunctionSignature, UnitMetadata, class_keys,
 };
-pub use function::{ArgumentLayout, Function, Handler, Parameter, Path, PathBase, Step};
+
+pub use builtin::{BuiltinFrame, BuiltinUnary, CallbackArguments};
+pub use class::{
+    ClassConstant, ClassDeclaration, ClassKind, EnumBacking, EnumCase, Initializer,
+    MethodDeclaration, PropertyDeclaration, PropertyHook, PropertyHooks, TRAIT_CLASS_NAME,
+    TraitAdaptation, TraitUse, Visibility,
+};
+pub use code::Code;
+pub use function::{
+    ArgumentLayout, Function, Handler, MethodSite, Parameter, Path, PathBase, SiteArgument, Step,
+};
 pub use ids::{
-    ClassId, ConstId, FunctionId, IterId, NameId, PathId, Reg, StaticId, SymbolId, Target, TypeId,
+    ClassId, ConstId, FunctionId, IterId, MethodSiteId, NameId, PathId, Reg, StaticId, SymbolId,
+    Target, TypeId,
 };
 pub use instruction::{
-    BinaryOp, CaptureKind, CastKind, ClassBinding, ClosureBinding, FetchMode, FinallyEntry, IncDec,
-    IncludeKind, Instruction, RuntimeError, UnaryOp,
+    BinaryOp, CallResult, CaptureKind, CastKind, ClassBinding, ClosureBinding, FetchMode,
+    FinallyEntry, IncDec, IncludeKind, Instruction, RuntimeError, UnaryOp,
 };
-pub use unit::{CompiledUnit, Constant, ConstantKey, DeclarationWarning, Symbol, Type, TypeMask};
+pub use unit::{
+    CompiledUnit, Constant, ConstantKey, DeclarationWarning, Symbol, Type, TypeMask,
+    union_in_php_order,
+};

@@ -16,7 +16,7 @@ struct UnpackedEntry {
 
 impl Vm {
     /// Writable source arrays receive the same cells bound to by-reference parameters.
-    pub(crate) fn spread(&mut self, register: Reg) -> Result<(), NativeError> {
+    pub(crate) fn spread(&mut self, register: Reg) -> Result<bool, NativeError> {
         let source = self
             .current()
             .and_then(|frame| frame.slots(&self.registers).get(register.index()))
@@ -25,6 +25,7 @@ impl Vm {
             .unwrap_or_default();
         let mut array = match &*source.deref() {
             Value::Array(array) => array.clone(),
+            Value::Object(object) if object.class.is_traversable() => return Ok(false),
             _ => {
                 return Err(NativeError::type_error(format!(
                     "Only arrays and Traversables can be unpacked, {} given",
@@ -48,22 +49,13 @@ impl Vm {
                 .try_borrow_mut()
                 .map_err(|_| internal_error!("unpack source"))? = Value::Array(array);
         }
-        Ok(())
+        Ok(true)
     }
 
     /// PHP binds integer keys positionally and rejects them after any string key.
     fn unpack_entry(&mut self, entry: &UnpackedEntry) -> Result<Value, NativeError> {
-        match &entry.key {
-            ArrayKey::String(name) => self.call_stack.top_details_mut()?.named = Some(name.clone()),
-            ArrayKey::Int(_) if self.call_stack.top_call()?.flags.contains(CallFlags::NAMED) => {
-                return Err(NativeError::error(
-                    "Cannot use positional argument after named argument during unpacking",
-                ));
-            }
-            ArrayKey::Int(_) => {}
-        }
+        let index = self.unpack_index(&entry.key)?;
         let view = CallView::top(&self.code, &self.call_stack)?;
-        let index = view.argument_index()?;
         let parameters = view.parameters();
         let by_reference = parameters
             .receiving(index)
@@ -79,5 +71,21 @@ impl Vm {
         };
         self.store_sent_value(index, value.clone())?;
         Ok(value)
+    }
+
+    pub(crate) fn unpack_index(&mut self, key: &ArrayKey) -> Result<usize, NativeError> {
+        match key {
+            ArrayKey::Interned(name) => {
+                self.call_stack.top_details_mut()?.named = Some(name.to_php_string())
+            }
+            ArrayKey::String(name) => self.call_stack.top_details_mut()?.named = Some(name.clone()),
+            ArrayKey::Int(_) if self.call_stack.top_call()?.flags.contains(CallFlags::NAMED) => {
+                return Err(NativeError::error(
+                    "Cannot use positional argument after named argument during unpacking",
+                ));
+            }
+            ArrayKey::Int(_) => {}
+        }
+        CallView::top(&self.code, &self.call_stack)?.argument_index()
     }
 }

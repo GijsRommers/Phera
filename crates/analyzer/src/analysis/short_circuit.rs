@@ -1,67 +1,34 @@
-//! Guards can terminate: `isset($x) || throw new Exception` defines `$x` on continuation.
+//! Coalescing probes safely: `$x ?? throw new Exception` defines `$x` on continuation.
 //! Only expression branches that complete contribute facts after the guard.
 
 use super::*;
 
 impl Analyzer<'_> {
-    pub fn short_circuit(
+    pub fn coalesce(
         &mut self,
-        operator: BinaryOperator,
         left: &Expression,
         right: &Expression,
         scope: &mut Scope,
         quiet: bool,
     ) -> ValueType {
-        let truth = self.condition_truth(left, scope);
+        self.constant_null_check(left, scope, dead_code::NullCheck::Coalesce);
         let nullish = self.nullish(left, scope);
-        let left_ty = self.expression(
-            left,
-            scope,
-            quiet || operator == BinaryOperator::NullCoalesce,
-        );
-        if left_ty == ValueType::Never {
+        let left_ty = self.expression(left, scope, true);
+        if left_ty == ValueType::Never || nullish == Some(false) {
             return left_ty;
         }
-        let take_right = match operator {
-            BinaryOperator::And => truth,
-            BinaryOperator::Or => truth.map(|v| !v),
-            _ => nullish,
-        };
-        if take_right == Some(false) {
-            return if operator == BinaryOperator::NullCoalesce {
-                left_ty
-            } else {
-                ValueType::Bool
-            };
+        if nullish == Some(true) {
+            return self.expression(right, scope, quiet);
         }
         let mut skipped = scope.clone();
-        if operator == BinaryOperator::NullCoalesce {
-            self.refine_defined(left, &mut skipped);
-        } else {
-            self.refine(left, &mut skipped, operator == BinaryOperator::Or);
-        }
-        self.refine(left, scope, operator == BinaryOperator::And);
+        self.refine_defined(left, &mut skipped);
         let right_ty = self.expression(right, scope, quiet);
-        let mut paths = Vec::new();
-        if take_right != Some(true) {
-            paths.push(skipped);
-        }
-        if right_ty != ValueType::Never {
-            paths.push(scope.clone());
-        }
-        if paths.is_empty() {
-            return ValueType::Never;
-        }
-        *scope = Scope::join(&paths);
-        if operator == BinaryOperator::NullCoalesce {
-            if take_right == Some(true) {
-                right_ty
-            } else {
-                left_ty.without_null().join(&right_ty)
-            }
+        *scope = if right_ty == ValueType::Never {
+            skipped
         } else {
-            ValueType::Bool
-        }
+            Scope::join(&[skipped, std::mem::take(scope)])
+        };
+        left_ty.without_null().join(&right_ty)
     }
 
     pub fn nullish(&self, expression: &Expression, scope: &Scope) -> Option<bool> {

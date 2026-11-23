@@ -2,101 +2,9 @@
 //! Spread arguments make counts uncertain, and variadics accept extra named arguments.
 
 use super::*;
-
-struct ResolvedCall {
-    signature: Option<crate::index::Signature>,
-    label: String,
-    intrinsic: Option<String>,
-    kind: CallKind,
-}
+use phera_source::deprecations::ItemKind;
 
 impl Analyzer<'_> {
-    pub fn call(
-        &mut self,
-        callee: &Expression,
-        arguments: &Arguments,
-        scope: &mut Scope,
-    ) -> ValueType {
-        let resolved = if let ExpressionKind::Name(name) = &callee.kind
-            && callee.span == name.span
-        {
-            self.named_call(name, scope)
-        } else {
-            let ty = self.expression(callee, scope, false);
-            if ty == ValueType::Never {
-                return ty;
-            }
-            ResolvedCall {
-                signature: self.callable_signature(ty),
-                label: "callable".into(),
-                intrinsic: None,
-                kind: CallKind::Callable,
-            }
-        };
-        let evaluation = self.arguments(
-            arguments,
-            resolved.signature.as_ref(),
-            &resolved.label,
-            scope,
-            callee.span,
-            resolved.kind,
-        );
-        if evaluation == Evaluation::Never {
-            return ValueType::Never;
-        }
-        if !matches!(arguments, Arguments::FirstClassCallable) {
-            if let Some(signature) = &resolved.signature {
-                self.unbound_invocation(signature);
-            }
-            self.apply_global_effects(resolved.signature.as_ref(), scope);
-        }
-        if let Some(name) = resolved.intrinsic {
-            self.intrinsic(&name, arguments, scope);
-        }
-        if matches!(arguments, Arguments::FirstClassCallable) {
-            resolved
-                .signature
-                .map_or(ValueType::Mixed, |s| ValueType::Callable(Box::new(s)))
-        } else {
-            resolved.signature.map_or(ValueType::Mixed, |s| s.returns)
-        }
-    }
-
-    fn named_call(&mut self, name: &Name, scope: &Scope) -> ResolvedCall {
-        let candidates = self.context.names.resolve(name, UseKind::Function);
-        let found = candidates.iter().find_map(|name| {
-            self.index
-                .functions
-                .get(&name.to_ascii_lowercase())
-                .map(|signature| (name, signature))
-        });
-        if found.is_none()
-            && !candidates.iter().any(|name| {
-                self.context
-                    .known
-                    .contains(&Symbol::Function(name.to_ascii_lowercase()))
-                    || scope
-                        .known
-                        .contains(&Symbol::Function(name.to_ascii_lowercase()))
-            })
-        {
-            self.report(Finding::UnknownFunction(candidates[0].clone()), name.span);
-        }
-        let intrinsic = found
-            .filter(|(name, _)| {
-                self.index
-                    .builtin_functions
-                    .contains(&name.to_ascii_lowercase())
-            })
-            .map(|(name, _)| name.to_string());
-        ResolvedCall {
-            signature: found.map(|(_, signature)| signature.clone()),
-            label: format!("{}()", found.map_or(&candidates[0], |(name, _)| name)),
-            intrinsic,
-            kind: CallKind::Direct,
-        }
-    }
-
     pub fn method_call(
         &mut self,
         ty: &ValueType,
@@ -111,7 +19,11 @@ impl Analyzer<'_> {
         {
             return self.invoke_closure(signature, arguments, scope, span);
         }
-        let (ValueType::Class(class), MemberName::Identifier(method)) = (ty, name) else {
+        let receiver = match name {
+            MemberName::Identifier(method) => self.method_receiver(ty, &method.name, span, access),
+            _ => None,
+        };
+        let (Some(class), MemberName::Identifier(method)) = (receiver.as_deref(), name) else {
             if let MemberName::Expression(e) = name
                 && self.expression(e, scope, false) == ValueType::Never
             {
@@ -125,8 +37,61 @@ impl Analyzer<'_> {
                 ValueType::Mixed
             };
         };
-        let signature = self.index.method(class, &method.name).cloned();
-        self.validate_method(class, &method.name, signature.as_ref(), span, access);
+        self.dependencies.resolve(self.index, class);
+        let late_class = access
+            .late_bound()
+            .then_some(self.context.class.as_deref())
+            .flatten();
+        let fallback_receiver = ValueType::Class(late_class.unwrap_or(class).into());
+        let receiver = if late_class.is_none()
+            && (ty.class_name().is_some() || matches!(ty, ValueType::Intersection(_)))
+        {
+            ty
+        } else {
+            &fallback_receiver
+        };
+        let signature = self
+            .index
+            .method_owner(class, &method.name)
+            .map(|(owner, signature)| {
+                let signature = signature.clone().typed(self.index);
+                if self.level >= 2 {
+                    signature.for_receiver(self.index, owner, receiver)
+                } else {
+                    signature
+                }
+            })
+            .or_else(|| self.index.doc_method(class, &method.name).cloned())
+            .map(|mut signature| {
+                for parameter in &mut signature.parameters {
+                    if let Some(receiver) = parameter.closure_receiver.take() {
+                        parameter.closure_receiver =
+                            match self.relative_type(ValueType::Class(receiver), class) {
+                                ValueType::Class(class) => Some(class),
+                                _ => None,
+                            };
+                    }
+                }
+                signature
+            });
+        if signature.is_none()
+            && let Some(item) = self.omitted_builtin_member(ItemKind::Method, class, &method.name)
+            && self
+                .index
+                .method(
+                    class,
+                    if access.static_call() {
+                        "__callStatic"
+                    } else {
+                        "__call"
+                    },
+                )
+                .is_none()
+        {
+            self.report(Finding::NotSupported(item), span);
+        } else {
+            self.validate_method(class, &method.name, signature.as_ref(), span, access);
+        }
         // The engine synthesizes Closure::__invoke from each actual closure. The stub
         // placeholder has no usable parameter list; inferred closures use their own signature.
         let parameters = if class.eq_ignore_ascii_case("Closure")
@@ -138,7 +103,7 @@ impl Analyzer<'_> {
         };
         let binding = self.pending_binding.take();
         self.prepare_binding(class, &method.name, arguments, scope);
-        let evaluation = self.arguments(
+        let facts = self.argument_facts(
             arguments,
             parameters,
             &format!("{class}::{}()", method.name),
@@ -150,13 +115,43 @@ impl Analyzer<'_> {
             self.apply_global_effects(signature.as_ref(), scope);
         }
         self.pending_binding = binding;
-        if evaluation == Evaluation::Never {
+        if facts.evaluation == Evaluation::Never {
             return ValueType::Never;
         }
         if matches!(arguments, Arguments::FirstClassCallable) {
-            signature.map_or(ValueType::Mixed, |s| ValueType::Callable(Box::new(s)))
+            signature.map_or(ValueType::Mixed, crate::index::Signature::as_closure)
         } else {
-            signature.map_or(ValueType::Mixed, |s| self.relative_type(s.returns, class))
+            if let Some(signature) = &signature {
+                self.discarded_method_result(span, class, &method.name, signature, access);
+            }
+            let returns = if let Some(signature) = signature {
+                signature.infer_return(arguments, &facts.types, self.index)
+            } else if self.level >= 2 && !matches!(access, Access::Guarded | Access::GuardedStatic)
+            {
+                let dispatcher = if access.static_call() {
+                    "__callStatic"
+                } else {
+                    "__call"
+                };
+                self.index.method_owner(class, dispatcher).map_or(
+                    ValueType::Mixed,
+                    |(owner, signature)| {
+                        let returns = signature
+                            .clone()
+                            .typed(self.index)
+                            .for_receiver(self.index, owner, receiver)
+                            .returns;
+                        if returns == ValueType::Void {
+                            ValueType::Mixed
+                        } else {
+                            returns
+                        }
+                    },
+                )
+            } else {
+                ValueType::Mixed
+            };
+            self.relative_type(returns, class)
         }
     }
 
@@ -172,8 +167,17 @@ impl Analyzer<'_> {
             if access.static_call() && !signature.modifiers.is_static {
                 self.report(Finding::StaticCall(class.into(), method.into()), span);
             }
-        } else if self.index.complete(class)
-            && access.reports_missing()
+        } else if self.can_report_missing_method(class, method, access) {
+            self.report(Finding::UnknownMethod(class.into(), method.into()), span);
+        }
+    }
+
+    pub fn can_report_missing_method(&self, class: &str, method: &str, access: Access) -> bool {
+        access.reports_missing(self.level)
+            && self.index.complete(class)
+            && !self
+                .index
+                .documented_method(class, method, access.static_call())
             && self.index.class(class).is_some_and(|c| {
                 c.kind != ClassKind::Trait
                     && !(c.modifiers.is_abstract && access.dynamic_receiver())
@@ -189,9 +193,6 @@ impl Analyzer<'_> {
                     },
                 )
                 .is_none()
-        {
-            self.report(Finding::UnknownMethod(class.into(), method.into()), span);
-        }
     }
 
     pub fn new_object(
@@ -199,15 +200,19 @@ impl Analyzer<'_> {
         target: &NewTarget,
         arguments: &Arguments,
         scope: &mut Scope,
+        span: Span,
     ) -> ValueType {
         let NewTarget::Class(expression) = target else {
             if let NewTarget::Anonymous(class) = target {
                 let name = crate::collect::anonymous_name(&self.file.path, class.span.start);
-                let signature = self.index.method(&name, "__construct").cloned();
+                let signature = self
+                    .index
+                    .method(&name, "__construct")
+                    .map(|signature| signature.clone().typed(self.index));
                 let evaluation = self.arguments(
                     arguments,
                     signature.as_ref(),
-                    "anonymous class",
+                    "new anonymous class",
                     scope,
                     class.span,
                     CallKind::Direct,
@@ -225,13 +230,18 @@ impl Analyzer<'_> {
             return ValueType::Never;
         }
         let class = class.name();
-        let signature = class
-            .as_ref()
-            .and_then(|c| self.index.method(c, "__construct"))
-            .cloned();
+        let signature = class.as_ref().and_then(|class| {
+            let (owner, signature) = self.index.method_owner(class, "__construct")?;
+            Some(signature.clone().typed(self.index).for_receiver(
+                self.index,
+                owner,
+                &ValueType::Class(class.clone()),
+            ))
+        });
         let late_static = matches!(&expression.kind, ExpressionKind::Name(n)
             if n.text.eq_ignore_ascii_case("static"));
         if !late_static
+            && matches!(expression.kind, ExpressionKind::Name(_))
             && let Some(info) = class.as_ref().and_then(|c| self.index.class(c))
             && (info.modifiers.is_abstract || info.kind == ClassKind::Interface)
         {
@@ -252,6 +262,11 @@ impl Analyzer<'_> {
         );
         if evaluation == Evaluation::Never {
             return ValueType::Never;
+        }
+        if let Some(class) = &class
+            && !late_static
+        {
+            self.discarded_constructor_result(span, class);
         }
         self.apply_global_effects(signature.as_ref(), scope);
         class.map_or(ValueType::Mixed, ValueType::Class)

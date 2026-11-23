@@ -2,6 +2,24 @@
 
 use phera_value::{Value, float_to_string_precision14};
 
+/// Traces render a case as `Color::Red` and other objects as `Object(Color)`.
+pub(crate) fn trace_argument(value: &Value, limit: usize) -> String {
+    match &*value.deref() {
+        Value::Array(_) => "Array".into(),
+        Value::Object(object)
+            if object.class.is_enum()
+                && let Some(name) = object
+                    .get(&phera_value::ArrayKey::interned_str(b"name"))
+                    .and_then(|value| value.str_ref().map(|s| s.to_string_lossy())) =>
+        {
+            format!("{}::{name}", object.class.name())
+        }
+        Value::Object(object) => format!("Object({})", object.class.name()),
+        Value::Resource(resource) => format!("Resource id #{}", resource.id),
+        _ => describe_with_limit(value, limit),
+    }
+}
+
 /// PHP limits exception strings to fifteen source bytes before escaping them.
 pub(crate) fn describe(value: &Value) -> String {
     describe_with_limit(value, 15)
@@ -20,6 +38,7 @@ pub(crate) fn describe_with_limit(value: &Value, limit: usize) -> String {
             }
             text
         }
+        Value::InternedStr(value) => quoted_string(value.as_bytes(), limit),
         Value::String(value) => quoted_string(value.as_bytes(), limit),
         value => format!("of type {}", value.type_name()),
     }

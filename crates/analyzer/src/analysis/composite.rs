@@ -12,23 +12,68 @@ impl Analyzer<'_> {
         quiet: bool,
     ) -> ValueType {
         match &expression.kind {
-            ExpressionKind::Array(items) => {
-                for item in items {
-                    if let Some(key) = &item.key
-                        && self.expression(key, scope, false) == ValueType::Never
-                    {
-                        return ValueType::Never;
-                    }
-                    if item.by_reference {
-                        self.ensure_reference(&item.value, scope);
-                    }
-                    if self.expression(&item.value, scope, false) == ValueType::Never {
-                        return ValueType::Never;
-                    }
+            ExpressionKind::Array(items) => self.array_literal(items, scope),
+            ExpressionKind::Index { target, index } => {
+                let target = self.expression(target, scope, quiet);
+                if target == ValueType::Never {
+                    return target;
                 }
-                ValueType::Array
+                let key = index.as_ref().map_or(ValueType::Mixed, |index| {
+                    self.expression(index, scope, quiet)
+                });
+                if key == ValueType::Never {
+                    return key;
+                }
+                super::arrays::offset_type(&target, &key)
             }
-            ExpressionKind::Match(expression) => self.match_expression(expression, scope),
+            ExpressionKind::Unary { operator, operand } if self.level >= 3 => {
+                let ty = self.expression(operand, scope, quiet);
+                if ty == ValueType::Never {
+                    ty
+                } else {
+                    if self.level >= 4 && *operator == UnaryOperator::Not {
+                        let truth = dead_code::truth(&ty);
+                        self.constant_negation(expression, operand, truth);
+                        if let Some(truth) = truth {
+                            return ValueType::BoolLiteral(!truth);
+                        }
+                    }
+                    super::operators::unary_type(*operator, ty)
+                }
+            }
+            ExpressionKind::Cast { kind, operand } if self.level >= 2 => {
+                let ty = self.expression(operand, scope, quiet);
+                if ty == ValueType::Never {
+                    return ty;
+                }
+                match kind {
+                    CastKind::Int => ValueType::Int,
+                    CastKind::Float => ValueType::Float,
+                    CastKind::String => ValueType::String,
+                    CastKind::Array
+                        if matches!(ty, ValueType::Shape(_) | ValueType::Collection(_)) =>
+                    {
+                        ty
+                    }
+                    CastKind::Array => ValueType::Array,
+                    CastKind::Object => ValueType::Object,
+                    CastKind::Bool => ValueType::Bool,
+                    CastKind::Unset => ValueType::Null,
+                    CastKind::Void => ValueType::Void,
+                }
+            }
+            ExpressionKind::Match(value) => self.match_expression(value, scope, expression.span),
+            ExpressionKind::Clone { object, with } if self.level >= 2 => {
+                let object = self.expression(object, scope, quiet);
+                if object == ValueType::Never
+                    || with
+                        .as_ref()
+                        .is_some_and(|with| self.expression(with, scope, quiet) == ValueType::Never)
+                {
+                    return ValueType::Never;
+                }
+                object
+            }
             ExpressionKind::Closure(closure) => self.closure(closure, scope, expression.span),
             ExpressionKind::ArrowFunction(arrow) => self.arrow(arrow, scope, expression.span),
             ExpressionKind::Throw(value) => {
@@ -59,7 +104,6 @@ impl Analyzer<'_> {
                     }
                 }
                 match expression.kind {
-                    ExpressionKind::Array(_) => ValueType::Array,
                     ExpressionKind::InterpolatedString(_) => ValueType::String,
                     _ => ValueType::Mixed,
                 }

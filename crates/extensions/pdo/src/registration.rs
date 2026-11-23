@@ -1,11 +1,23 @@
 //! Native method signatures match PHP: `$pdo->query(query: 'SELECT 1', fetchMode: PDO::FETCH_NUM)`.
 
 use phera_extension_api::{
-    ClassEntry, ConstantValue, FunctionEntry, MethodEntry, Param, ParamType, PropertyEntry,
-    Registry, Visibility,
+    ClassEntry, ClassHooks, ConstantValue, FunctionEntry, MethodEntry, NativeClone, Param,
+    ParamType, PropertyEntry, Registry, Visibility,
 };
 
-use crate::{attributes, connection, constants, fetch, statement, transactions};
+use crate::{attributes, connection, constants, statement, transactions};
+
+static CONNECTION: ClassHooks = ClassHooks {
+    clone: Some(NativeClone::Forbidden),
+    fork: Some(connection::fork_session),
+    ..ClassHooks::EMPTY
+};
+
+static STATEMENT: ClassHooks = ClassHooks {
+    clone: Some(NativeClone::Forbidden),
+    fork: Some(refuse_fork),
+    ..ClassHooks::EMPTY
+};
 
 pub fn register(registry: &mut Registry) {
     registry.class(ClassEntry {
@@ -21,14 +33,18 @@ pub fn register(registry: &mut Registry) {
     });
     registry.class(ClassEntry {
         constants: constants::CONSTANTS,
-        deprecated_constants: constants::SQLITE_DEPRECATED,
+        deprecated_constants: constants::DRIVER_DEPRECATED,
         methods: PDO_METHODS,
+        hooks: Some(&CONNECTION),
         ..ClassEntry::class("PDO")
     });
-    for name in ["Pdo\\Pgsql", "Pdo\\Mysql"] {
+    for (name, constants) in [
+        ("Pdo\\Pgsql", constants::PGSQL),
+        ("Pdo\\Mysql", constants::MYSQL),
+    ] {
         registry.class(ClassEntry {
             parent: Some("PDO"),
-            methods: PDO_METHODS,
+            constants,
             ..ClassEntry::class(name)
         });
     }
@@ -47,6 +63,7 @@ pub fn register(registry: &mut Registry) {
             )]
         },
         methods: STATEMENT_METHODS,
+        hooks: Some(&STATEMENT),
         ..ClassEntry::class("PDOStatement")
     });
     registry.function(FunctionEntry::sync("pdo_drivers", &[], connection::drivers));
@@ -59,13 +76,14 @@ const PDO_METHODS: &[MethodEntry] = &[
             Param::new("dsn", ParamType::String),
             Param::new("username", ParamType::String)
                 .nullable()
-                .optional(),
+                .with_default(ConstantValue::Null),
             Param::new("password", ParamType::String)
                 .nullable()
-                .optional(),
+                .with_default(ConstantValue::Null)
+                .sensitive(),
             Param::new("options", ParamType::Array)
                 .nullable()
-                .optional(),
+                .with_default(ConstantValue::Null),
         ],
         connection::construct,
     ),
@@ -75,81 +93,80 @@ const PDO_METHODS: &[MethodEntry] = &[
             Param::new("dsn", ParamType::String),
             Param::new("username", ParamType::String)
                 .nullable()
-                .optional(),
+                .with_default(ConstantValue::Null),
             Param::new("password", ParamType::String)
                 .nullable()
-                .optional(),
+                .with_default(ConstantValue::Null)
+                .sensitive(),
             Param::new("options", ParamType::Array)
                 .nullable()
-                .optional(),
+                .with_default(ConstantValue::Null),
         ],
         connection::connect,
     )
-    .static_(),
-    MethodEntry::public("getAvailableDrivers", &[], connection::available).static_(),
-    MethodEntry::public(
-        "pgsqlCopyFromArray",
-        &[Param::new("args", ParamType::Mixed).variadic()],
-        statement::unsupported_method,
-    ),
-    MethodEntry::public(
-        "pgsqlCopyFromFile",
-        &[Param::new("args", ParamType::Mixed).variadic()],
-        statement::unsupported_method,
-    ),
-    MethodEntry::public(
-        "pgsqlCopyToArray",
-        &[Param::new("args", ParamType::Mixed).variadic()],
-        statement::unsupported_method,
-    ),
-    MethodEntry::public(
-        "pgsqlCopyToFile",
-        &[Param::new("args", ParamType::Mixed).variadic()],
-        statement::unsupported_method,
-    ),
-    MethodEntry::public_async("beginTransaction", &[], transactions::begin),
-    MethodEntry::public_async("commit", &[], transactions::commit),
-    MethodEntry::public_async("rollBack", &[], transactions::rollback),
-    MethodEntry::public_async("inTransaction", &[], transactions::active),
-    MethodEntry::public("errorCode", &[], connection::error_code),
-    MethodEntry::public("errorInfo", &[], connection::error_info),
+    .static_()
+    .returning("static"),
+    MethodEntry::public_async("beginTransaction", &[], transactions::begin)
+        .tentative_return("bool"),
+    MethodEntry::public_async("commit", &[], transactions::commit).tentative_return("bool"),
+    MethodEntry::public("errorCode", &[], connection::error_code).tentative_return("?string"),
+    MethodEntry::public("errorInfo", &[], connection::error_info).tentative_return("array"),
     MethodEntry::public_async(
         "exec",
         &[Param::new("statement", ParamType::String)],
         connection::exec,
-    ),
+    )
+    .tentative_return("int|false"),
+    MethodEntry::public_async(
+        "getAttribute",
+        &[Param::new("attribute", ParamType::Int)],
+        attributes::get,
+    )
+    .tentative_return("mixed"),
+    MethodEntry::public("getAvailableDrivers", &[], connection::available)
+        .static_()
+        .tentative_return("array"),
+    MethodEntry::public_async("inTransaction", &[], transactions::active).tentative_return("bool"),
+    MethodEntry::public_async(
+        "lastInsertId",
+        &[Param::new("name", ParamType::String)
+            .nullable()
+            .with_default(ConstantValue::Null)],
+        connection::last_id,
+    )
+    .tentative_return("string|false"),
     MethodEntry::public_async(
         "prepare",
         &[
             Param::new("query", ParamType::String),
-            Param::new("options", ParamType::Array).optional(),
+            Param::new("options", ParamType::Array).with_default(ConstantValue::EmptyArray),
         ],
         statement::prepare,
-    ),
+    )
+    .tentative_return("PDOStatement|false"),
     MethodEntry::public_async(
         "query",
         &[
             Param::new("query", ParamType::String),
             Param::new("fetchMode", ParamType::Int)
                 .nullable()
-                .optional(),
+                .with_default(ConstantValue::Null),
             Param::new("fetchModeArgs", ParamType::Mixed).variadic(),
         ],
         statement::query,
-    ),
+    )
+    .tentative_return("PDOStatement|false"),
     MethodEntry::public_async(
         "quote",
         &[
             Param::new("string", ParamType::String),
-            Param::new("type", ParamType::Int).optional(),
+            Param::new("type", ParamType::Int)
+                .with_default(ConstantValue::Int(constants::PARAM_STR)),
         ],
         connection::quote,
-    ),
-    MethodEntry::public_async(
-        "lastInsertId",
-        &[Param::new("name", ParamType::String).nullable().optional()],
-        connection::last_id,
-    ),
+    )
+    .tentative_return("string|false"),
+    MethodEntry::public_async("rollBack", &[], transactions::rollback).tentative_return("bool"),
     MethodEntry::public_async(
         "setAttribute",
         &[
@@ -157,11 +174,58 @@ const PDO_METHODS: &[MethodEntry] = &[
             Param::new("value", ParamType::Mixed),
         ],
         attributes::set,
+    )
+    .tentative_return("bool"),
+    MethodEntry::public(
+        "pgsqlCopyFromArray",
+        &[
+            Param::new("tableName", ParamType::String),
+            Param::new("rows", ParamType::Iterable),
+            Param::new("separator", ParamType::String).optional(),
+            Param::new("nullAs", ParamType::String).optional(),
+            Param::new("fields", ParamType::String)
+                .nullable()
+                .optional(),
+        ],
+        statement::unsupported_method,
     ),
     MethodEntry::public(
-        "getAttribute",
-        &[Param::new("attribute", ParamType::Int)],
-        attributes::get,
+        "pgsqlCopyFromFile",
+        &[
+            Param::new("tableName", ParamType::String),
+            Param::new("filename", ParamType::String),
+            Param::new("separator", ParamType::String).optional(),
+            Param::new("nullAs", ParamType::String).optional(),
+            Param::new("fields", ParamType::String)
+                .nullable()
+                .optional(),
+        ],
+        statement::unsupported_method,
+    ),
+    MethodEntry::public(
+        "pgsqlCopyToArray",
+        &[
+            Param::new("tableName", ParamType::String),
+            Param::new("separator", ParamType::String).optional(),
+            Param::new("nullAs", ParamType::String).optional(),
+            Param::new("fields", ParamType::String)
+                .nullable()
+                .optional(),
+        ],
+        statement::unsupported_method,
+    ),
+    MethodEntry::public(
+        "pgsqlCopyToFile",
+        &[
+            Param::new("tableName", ParamType::String),
+            Param::new("filename", ParamType::String),
+            Param::new("separator", ParamType::String).optional(),
+            Param::new("nullAs", ParamType::String).optional(),
+            Param::new("fields", ParamType::String)
+                .nullable()
+                .optional(),
+        ],
+        statement::unsupported_method,
     ),
 ];
 
@@ -215,13 +279,13 @@ const STATEMENT_METHODS: &[MethodEntry] = &[
         &[Param::new("column", ParamType::Int).optional()],
         crate::drivers::sqlite::fetch::column,
     ),
-    MethodEntry::public(
+    MethodEntry::public_async(
         "setFetchMode",
         &[
             Param::new("mode", ParamType::Int),
             Param::new("args", ParamType::Mixed).variadic(),
         ],
-        fetch::set_mode,
+        crate::drivers::sqlite::fetch::set_mode,
     ),
     MethodEntry::public_async("closeCursor", &[], crate::drivers::sqlite::fetch::close),
     MethodEntry::public("columnCount", &[], statement::column_count),
@@ -238,7 +302,13 @@ const STATEMENT_METHODS: &[MethodEntry] = &[
     ),
     MethodEntry::public(
         "bindColumn",
-        &[Param::new("args", ParamType::Mixed).variadic()],
+        &[
+            Param::new("column", ParamType::IntOrString),
+            Param::new("var", ParamType::Mixed).by_ref(),
+            Param::new("type", ParamType::Int).optional(),
+            Param::new("maxLength", ParamType::Int).optional(),
+            Param::new("driverOptions", ParamType::Mixed).optional(),
+        ],
         statement::unsupported_method,
     ),
     MethodEntry::public_async(
@@ -246,21 +316,9 @@ const STATEMENT_METHODS: &[MethodEntry] = &[
         &[Param::new("column", ParamType::Int)],
         crate::metadata::get,
     ),
-    MethodEntry::public(
-        "nextRowset",
-        &[Param::new("args", ParamType::Mixed).variadic()],
-        statement::unsupported_method,
-    ),
-    MethodEntry::public(
-        "getIterator",
-        &[Param::new("args", ParamType::Mixed).variadic()],
-        statement::unsupported_method,
-    ),
-    MethodEntry::public(
-        "debugDumpParams",
-        &[Param::new("args", ParamType::Mixed).variadic()],
-        statement::unsupported_method,
-    ),
+    MethodEntry::public("nextRowset", &[], statement::unsupported_method),
+    MethodEntry::public("getIterator", &[], statement::unsupported_method),
+    MethodEntry::public("debugDumpParams", &[], statement::unsupported_method),
     MethodEntry::public(
         "getAttribute",
         &[Param::new("name", ParamType::Int)],
@@ -268,7 +326,10 @@ const STATEMENT_METHODS: &[MethodEntry] = &[
     ),
     MethodEntry::public(
         "setAttribute",
-        &[Param::new("args", ParamType::Mixed).variadic()],
+        &[
+            Param::new("attribute", ParamType::Int),
+            Param::new("value", ParamType::Mixed),
+        ],
         statement::unsupported_method,
     ),
 ];
@@ -278,3 +339,13 @@ const SQLITE_METHODS: &[MethodEntry] = &[MethodEntry::public(
     &[Param::new("name", ParamType::String)],
     crate::drivers::sqlite::methods::load,
 )];
+
+/// A statement belongs to the session that prepared it, and a fork has a
+/// session of its own: prepare it again after `Phera\snapshot()`.
+fn refuse_fork(
+    _object: &phera_extension_api::Object,
+    _state: &dyn std::any::Any,
+    _fork: &mut phera_extension_api::value::Fork<'_>,
+) -> Result<Box<dyn std::any::Any>, String> {
+    Err("a prepared statement belongs to the session of one request; prepare it after Phera\\snapshot()".into())
+}

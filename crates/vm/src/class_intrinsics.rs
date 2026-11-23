@@ -1,280 +1,306 @@
-//! Class introspection reads linked metadata without triggering autoloading.
+//! `class_exists('A')` may load A, whereas `class_exists('A', false)` only checks the table.
 
-use crate::Vm;
-use phera_bytecode::ClassKind;
+use phera_bytecode::{ClassKind, Visibility};
 use phera_extension_api::{NativeError, NativeResult};
-use phera_value::{ArrayKey, PhpArray, Value};
-use std::rc::Rc;
+use phera_value::{PhpArray, Value};
 
-/// Class functions are resolved once, alongside other request intrinsics.
-#[derive(Clone, Copy)]
-pub(crate) enum ClassFunction {
-    GetClass,
-    GetParentClass,
-    GetCalledClass,
-    MethodExists,
-    ClassExists,
-    InterfaceExists,
-    IsA,
-    IsSubclassOf,
-    ObjectId,
-    ObjectHash,
-    ClassMethods,
-    ClassParents,
-    ClassImplements,
-    DeclaredClasses,
-}
+use crate::{Vm, calls::callback_binding::ArgumentOrigin, function_introspection::deprecated};
 
-impl ClassFunction {
-    /// PHP builtin function identifiers are case insensitive.
-    pub(crate) fn resolve(name: &str) -> Option<Self> {
-        Some(match name {
-            "get_class" => Self::GetClass,
-            "get_parent_class" => Self::GetParentClass,
-            "get_called_class" => Self::GetCalledClass,
-            "method_exists" => Self::MethodExists,
-            "class_exists" => Self::ClassExists,
-            "interface_exists" => Self::InterfaceExists,
-            "is_a" => Self::IsA,
-            "is_subclass_of" => Self::IsSubclassOf,
-            "spl_object_id" => Self::ObjectId,
-            "spl_object_hash" => Self::ObjectHash,
-            "get_class_methods" => Self::ClassMethods,
-            "class_parents" => Self::ClassParents,
-            "class_implements" => Self::ClassImplements,
-            "get_declared_classes" => Self::DeclaredClasses,
-            _ => return None,
-        })
-    }
-}
+pub(crate) use crate::class_function::ClassFunction;
 
 impl Vm {
-    /// Extract class identifiers without converting arbitrary values to strings.
-    fn introspection_class(value: &Value) -> Option<String> {
-        match &*value.deref() {
-            Value::Object(object) => Some(object.class.name().to_owned()),
-            Value::String(name) => Some(name.to_string_lossy()),
-            _ => None,
-        }
-    }
-
-    /// Class predicates distinguish existence from ancestry and never instantiate anything.
-    pub(crate) fn class_intrinsic(
+    pub(crate) async fn class_intrinsic(
         &mut self,
         function: ClassFunction,
-        arguments: &[Value],
+        mut arguments: Vec<Value>,
+        origin: ArgumentOrigin,
     ) -> NativeResult {
-        use ClassFunction as Function;
+        use ClassFunction as Operation;
+        self.with_argument_origin(origin, |vm| {
+            phera_extension_api::prepare_call(
+                function.name(),
+                function.parameters(),
+                &mut arguments,
+                vm,
+            )
+        })?;
         let value = arguments.first().cloned().unwrap_or_default();
-        let name = Self::introspection_class(&value);
-        let class = name.as_ref().and_then(|name| self.classes.get(name));
+        let option = |index: usize, default: bool| {
+            arguments.get(index).map_or(default, phera_value::to_bool)
+        };
+
         match function {
-            Function::GetClass => {
-                if let Value::Object(object) = value {
-                    return Ok(Value::from(object.class.name().to_owned()));
+            Operation::DeclaredClasses
+            | Operation::DeclaredInterfaces
+            | Operation::DeclaredTraits => {
+                return self.declared_classes(function);
+            }
+            Operation::GetCalledClass => {
+                return self.called_class_name();
+            }
+            Operation::GetClass | Operation::GetParentClass if arguments.is_empty() => {
+                if matches!(function, Operation::GetClass)
+                    && self.current().and_then(|frame| frame.scope()).is_none()
+                {
+                    return Err(NativeError::error(
+                        "get_class() without arguments must be called from within a class",
+                    ));
                 }
-                if arguments.is_empty() {
-                    return self
-                        .current()
-                        .and_then(|frame| frame.scope())
-                        .map(|scope| Value::from(scope.name.clone()))
-                        .ok_or_else(|| {
-                            NativeError::error(
-                                "get_class() without arguments must be called from within a class",
-                            )
-                        });
+                let signature = format!("{}() without arguments", function.name());
+                return Err(deprecated(&signature, "8.3"));
+            }
+            Operation::GetClass
+            | Operation::GetObjectVars
+            | Operation::GetMangledObjectVars
+            | Operation::ObjectId
+            | Operation::ObjectHash => {
+                let Value::Object(mut object) = value else {
+                    return Err(internal_error!("class function object"));
+                };
+                if matches!(function, Operation::GetObjectVars) && object.lazy().is_some() {
+                    object = self.initialize_lazy_via_callback(object).await?;
                 }
-                Err(NativeError::type_error(format!(
-                    "get_class(): Argument #1 ($object) must be of type object, {} given",
-                    value.type_name()
+                if matches!(function, Operation::GetObjectVars)
+                    && let Some(class) = self.hooked_property_class(&object)
+                {
+                    let native = crate::error_traces::NativeTrace::new(
+                        function.name(),
+                        &[Value::Object(object.clone())],
+                    );
+                    let properties = self
+                        .enumerate_hooked_native(
+                            object,
+                            class,
+                            phera_extension_api::PropertyPurpose::ObjectVars,
+                            native,
+                        )
+                        .await?;
+                    return Ok(Value::from(properties));
+                }
+                return Ok(match function {
+                    Operation::GetClass => Value::from(object.class.name()),
+                    Operation::GetObjectVars => Value::from(self.visible_properties(
+                        &object,
+                        phera_extension_api::PropertyPurpose::ObjectVars,
+                    )?),
+                    Operation::GetMangledObjectVars => {
+                        Value::from(phera_extension_api::Context::object_properties(
+                            self,
+                            &object,
+                            phera_extension_api::PropertyPurpose::ArrayCast,
+                        )?)
+                    }
+                    Operation::ObjectId => Value::Int(object.id.into()),
+                    _ => Value::from(object.handle_hash()),
+                });
+            }
+            Operation::ClassAlias => {
+                return self
+                    .class_alias(
+                        &string(&value),
+                        &string(&arguments[1]),
+                        option(2, true),
+                        &arguments,
+                    )
+                    .await;
+            }
+            _ => {}
+        }
+
+        let autoload = match function {
+            Operation::IsA | Operation::IsSubclassOf => {
+                option(2, matches!(function, Operation::IsSubclassOf))
+            }
+            Operation::ClassExists
+            | Operation::InterfaceExists
+            | Operation::TraitExists
+            | Operation::EnumExists
+            | Operation::ClassParents
+            | Operation::ClassImplements
+            | Operation::ClassUses => option(1, true),
+            _ => true,
+        };
+        let class = match &value {
+            Value::Object(object) => self.classes.for_object(object),
+            Value::InternedStr(_) | Value::String(_) => {
+                let name = value.str_ref().expect("checked string").to_string_lossy();
+                if autoload {
+                    self.lookup_class_from(&name, Some((function.name(), &arguments)))
+                        .await?
+                } else if matches!(function, Operation::IsA | Operation::IsSubclassOf) {
+                    None
+                } else {
+                    self.classes.get(&name)
+                }
+            }
+            _ => None,
+        };
+        match function {
+            Operation::ClassExists => Ok(Value::Bool(
+                class.is_some_and(|class| class.kind.is_class()),
+            )),
+            Operation::InterfaceExists => Ok(Value::Bool(
+                class.is_some_and(|class| class.kind == ClassKind::Interface),
+            )),
+            Operation::TraitExists => Ok(Value::Bool(
+                class.is_some_and(|class| class.kind == ClassKind::Trait),
+            )),
+            Operation::EnumExists => Ok(Value::Bool(
+                class.is_some_and(|class| class.kind == ClassKind::Enum),
+            )),
+            Operation::IsA | Operation::IsSubclassOf => {
+                let target = self.classes.get(&string(&arguments[1]));
+                Ok(Value::Bool(class.zip(target).is_some_and(
+                    |(class, target)| {
+                        class.is_a(&target.name)
+                            && !(matches!(function, Operation::IsSubclassOf)
+                                && class.index == target.index)
+                    },
                 )))
             }
-            Function::GetParentClass => {
-                let class = class.or_else(|| {
-                    if arguments.is_empty() {
-                        self.current().and_then(|frame| frame.scope().cloned())
-                    } else {
-                        None
-                    }
-                });
-                Ok(class
-                    .and_then(|class| class.parent.clone())
-                    .map(|parent| Value::from(parent.name.clone()))
-                    .unwrap_or(Value::Bool(false)))
-            }
-            Function::GetCalledClass => self
-                .current()
-                .and_then(|frame| frame.called())
-                .map(|called| Value::from(called.name.clone()))
-                .ok_or_else(|| {
-                    NativeError::error("get_called_class() must be called from within a class")
-                }),
-            Function::ClassExists | Function::InterfaceExists => {
-                Ok(Value::Bool(class.is_some_and(|class| {
-                    if matches!(function, Function::InterfaceExists) {
-                        class.kind == ClassKind::Interface
-                    } else {
-                        class.kind != ClassKind::Interface
-                    }
-                })))
-            }
-            Function::MethodExists => {
-                let method = arguments
-                    .get(1)
-                    .and_then(Self::introspection_class)
-                    .unwrap_or_default();
-                Ok(Value::Bool(class.is_some_and(|class| {
-                    class.methods.contains_key(&method.to_ascii_lowercase())
-                        || class.name == "Closure" && method.eq_ignore_ascii_case("__invoke")
-                })))
-            }
-            Function::IsA | Function::IsSubclassOf => {
-                let allow_string = arguments
-                    .get(2)
-                    .map(phera_value::to_bool)
-                    .unwrap_or(matches!(function, Function::IsSubclassOf));
-                let target = arguments
-                    .get(1)
-                    .and_then(Self::introspection_class)
-                    .unwrap_or_default();
-                Ok(Value::Bool(
-                    (value.is_object() || allow_string)
-                        && class.is_some_and(|class| {
-                            class.is_a(&target)
-                                && (!matches!(function, Function::IsSubclassOf)
-                                    || !class.name.eq_ignore_ascii_case(&target))
-                        }),
-                ))
-            }
-            Function::ObjectId | Function::ObjectHash => {
-                let Value::Object(object) = value else {
-                    let name = if matches!(function, Function::ObjectId) {
-                        "spl_object_id"
-                    } else {
-                        "spl_object_hash"
-                    };
-                    return Err(NativeError::type_error(format!(
-                        "{name}(): Argument #1 ($object) must be of type object, {} given",
-                        value.type_name()
-                    )));
-                };
-                Ok(if matches!(function, Function::ObjectId) {
-                    Value::Int(object.id.into())
+            Operation::GetParentClass | Operation::ClassMethods => {
+                let class = class.ok_or_else(|| invalid_class_argument(function, &value))?;
+                if matches!(function, Operation::GetParentClass) {
+                    Ok(class
+                        .parent
+                        .as_ref()
+                        .map_or(Value::Bool(false), |parent| parent.name_value.clone()))
                 } else {
-                    Value::from(format!("{:016x}{:016x}", object.id, 0))
-                })
+                    self.class_methods(&class)
+                }
             }
-            _ => self.class_listing(function, class),
-        }
-    }
-
-    /// Visibility-aware listings expose only members callable from the active lexical scope.
-    fn class_listing(
-        &mut self,
-        function: ClassFunction,
-        class: Option<Rc<crate::classes::Class>>,
-    ) -> NativeResult {
-        use ClassFunction as Function;
-        let mut result = PhpArray::new();
-        if matches!(function, Function::DeclaredClasses) {
-            for name in &self.classes.order {
-                if self
-                    .classes
-                    .get(name)
-                    .is_some_and(|class| class.kind != ClassKind::Interface)
+            Operation::GetClassVars => {
+                let class = class.ok_or_else(|| NativeError::type_error(format!(
+                    "get_class_vars(): Argument #1 ($class) must be a valid class name, {} given", string(&value)
+                )))?;
+                self.class_variables(&class, (function.name(), &arguments))
+                    .await
+            }
+            Operation::ClassParents | Operation::ClassImplements | Operation::ClassUses => {
+                check_object_or_class(function, &value)?;
+                let Some(class) = class else {
+                    let suffix = if autoload {
+                        " and could not be loaded"
+                    } else {
+                        ""
+                    };
+                    self.warn(format!(
+                        "{}(): Class {} does not exist{suffix}",
+                        function.name(),
+                        string(&value)
+                    ));
+                    return Ok(Value::Bool(false));
+                };
+                self.class_relations(function, &class)
+            }
+            Operation::MethodExists | Operation::PropertyExists => {
+                check_object_or_class(function, &value)?;
+                let name = string(&arguments[1]);
+                if matches!(function, Operation::PropertyExists)
+                    && let Value::Object(original) = &value
+                    && original.lazy().is_some()
                 {
-                    result.push(Value::from(name.clone()))?;
-                }
-            }
-            return Ok(Value::Array(Rc::new(result)));
-        }
-        let Some(class) = class else {
-            return Ok(Value::Bool(false));
-        };
-        match function {
-            Function::ClassMethods => {
-                let mut methods: Vec<_> = class.methods.values().collect();
-                methods.sort_by_key(|method| self.method_listing_order(&class, method));
-                for method in methods {
-                    if self.check_method_visibility(method).is_ok() {
-                        result.push(Value::from(method.name.clone()))?;
+                    let object = crate::lazy_objects::resolved_lazy_instance(original.clone());
+                    let (exists, pending) = self.lazy_property_exists_status(&object, &name)?;
+                    if !pending {
+                        return Ok(Value::Bool(exists));
                     }
+                    let object = self.initialize_lazy_via_callback(object).await?;
+                    return self
+                        .lazy_property_exists_status(&object, &name)
+                        .map(|(exists, _)| Value::Bool(exists));
                 }
-            }
-            Function::ClassParents => {
-                let mut parent = class.parent.clone();
-                while let Some(class) = parent {
-                    result.insert(
-                        ArrayKey::str(class.name.as_str()),
-                        Value::from(class.name.clone()),
-                    );
-                    parent = class.parent.clone();
+                // A native class answers for properties that live in its
+                // own state (DateInterval's `y`, `m`, `d` and so on).
+                if matches!(function, Operation::PropertyExists)
+                    && let Value::Object(object) = &value
+                    && let Some(access) = crate::properties::native_property_access(object)
+                    && (access.read)(
+                        self,
+                        object,
+                        &name,
+                        phera_extension_api::NativePropertyRead::Exists,
+                    )?
+                    .is_some()
+                {
+                    return Ok(Value::Bool(true));
                 }
-            }
-            Function::ClassImplements => {
-                let mut pending = vec![class];
-                while let Some(class) = pending.pop() {
-                    for interface in &class.interfaces {
-                        result.insert(
-                            ArrayKey::str(interface.name.as_str()),
-                            Value::from(interface.name.clone()),
-                        );
-                        pending.push(interface.clone());
+                Ok(Value::Bool(class.is_some_and(|class| {
+                    if matches!(function, Operation::PropertyExists) {
+                        class.name != phera_extension_api::serialization::INCOMPLETE_CLASS
+                            && self.class_property_exists(&value, &class, &name)
+                    } else {
+                        class
+                            .methods
+                            .get(&name.to_ascii_lowercase())
+                            .is_some_and(|method| {
+                                method.visibility != Visibility::Private
+                                    || method.declaring == class.name
+                                    || value.is_object()
+                            })
+                            || (class.name == "Closure" && name.eq_ignore_ascii_case("__invoke"))
                     }
-                    pending.extend(class.parent.clone());
-                }
+                })))
             }
-            _ => return Err(internal_error!("class listing")),
+            _ => Err(internal_error!("class introspection function")),
         }
-        Ok(Value::Array(Rc::new(result)))
     }
-}
 
-/// PHP lists declared methods before inherited methods, retaining source order within each class.
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
-struct MethodOrder {
-    /// Zero denotes the requested class, then each successive parent.
-    depth: usize,
-    /// User function order or the native registration position.
-    declaration: usize,
+    /// PHP lists the canonical declaration spelling, or the lowercased key for an alias.
+    fn declared_classes(&self, function: ClassFunction) -> NativeResult {
+        let mut listed = PhpArray::new();
+        for name in self.classes.names() {
+            if self
+                .classes
+                .get_lowercase(&name.to_ascii_lowercase())
+                .is_some_and(|class| match function {
+                    ClassFunction::DeclaredInterfaces => class.kind == ClassKind::Interface,
+                    ClassFunction::DeclaredTraits => class.kind == ClassKind::Trait,
+                    _ => class.kind.is_class(),
+                })
+            {
+                listed.push(Value::from(name))?;
+            }
+        }
+        Ok(Value::from(listed))
+    }
 }
 
 impl Vm {
-    /// A method's declaring class determines its position independently of hash table order.
-    fn method_listing_order(
-        &self,
-        class: &Rc<crate::classes::Class>,
-        method: &crate::classes::Method,
-    ) -> MethodOrder {
-        let mut ancestor = Some(class.clone());
-        let mut depth = 0;
-        while let Some(class) = ancestor {
-            if class.name == method.declaring {
-                break;
-            }
-            depth += 1;
-            ancestor = class.parent.clone();
-        }
-        let declaration = match &method.body {
-            crate::classes::MethodBody::User(reference) => reference.index(),
-            crate::classes::MethodBody::Closure(operation) => {
-                crate::closure_methods::ClosureMethod::entries()
-                    .iter()
-                    .position(|(entry, _)| entry == operation)
-                    .unwrap_or(0)
-            }
-            crate::classes::MethodBody::Native(_) => self
-                .registry
-                .classes()
-                .find(|class| class.name == method.declaring)
-                .and_then(|class| {
-                    class
-                        .methods
-                        .iter()
-                        .position(|entry| entry.name == method.name)
-                })
-                .unwrap_or(0),
-        };
-        MethodOrder { depth, declaration }
+    pub(crate) fn called_class_name(&self) -> NativeResult {
+        self.current()
+            .and_then(|frame| frame.called())
+            .map(|class| class.name_value.clone())
+            .ok_or_else(|| {
+                NativeError::error("get_called_class() must be called from within a class")
+            })
     }
+}
+
+fn check_object_or_class(function: ClassFunction, value: &Value) -> Result<(), NativeError> {
+    if matches!(
+        value,
+        Value::InternedStr(_) | Value::String(_) | Value::Object(_)
+    ) {
+        return Ok(());
+    }
+    Err(NativeError::type_error(format!(
+        "{}(): Argument #1 ($object_or_class) must be of type object|string, {} given",
+        function.name(),
+        value.type_name()
+    )))
+}
+
+fn invalid_class_argument(function: ClassFunction, value: &Value) -> NativeError {
+    NativeError::type_error(format!(
+        "{}(): Argument #1 ($object_or_class) must be an object or a valid class name, {} given",
+        function.name(),
+        value.type_name()
+    ))
+}
+
+fn string(value: &Value) -> String {
+    value
+        .str_ref()
+        .map_or_else(String::new, |name| name.to_string_lossy())
 }

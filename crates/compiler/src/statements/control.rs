@@ -1,7 +1,6 @@
 //! Compile statement constructs into ordered IR and patch their control-flow exits.
 
 use phera_ast as ast;
-use phera_bytecode::Reg;
 
 use crate::ir::{Constant, Instruction, Target};
 use crate::policies::DeclarationTiming;
@@ -14,17 +13,43 @@ impl Compiler<'_> {
         expression: &ast::Expression,
         line: usize,
     ) -> Result<(), CompileError> {
-        let first = self.next;
-        self.compile_expression(expression)?;
-        let temporaries: Vec<_> = (first..self.next)
-            .map(|index| Reg(index as u16))
-            .filter(|register| !self.locals.values().any(|local| local == register))
-            .collect();
-        for register in temporaries {
-            self.emit(Instruction::Clear { register }, line);
-        }
-
-        Ok(())
+        self.clear_temporaries_after(line, |compiler| {
+            // `(void) f();` evaluates the operand and discards it outright.
+            if let ast::ExpressionKind::Cast {
+                kind: ast::CastKind::Void,
+                operand,
+            } = &expression.kind
+            {
+                return compiler.compile_expression(operand).map(drop);
+            }
+            let result = compiler.compile_expression(expression)?;
+            // The call is the last instruction but for the clears of its
+            // operands (`expressions::operand_release`).
+            let call = compiler
+                .function
+                .instructions
+                .iter_mut()
+                .rev()
+                .find(|instruction| {
+                    !matches!(instruction, Instruction::Clear { register } if *register != result)
+                });
+            if let Some(
+                Instruction::FinishCall {
+                    destination,
+                    result: use_of_result,
+                }
+                | Instruction::Call {
+                    destination,
+                    result: use_of_result,
+                    ..
+                },
+            ) = call
+                && *destination == result
+            {
+                *use_of_result = phera_bytecode::CallResult::Discarded;
+            }
+            Ok(())
+        })
     }
 
     /// Evaluate and print each argument in source order.
@@ -34,8 +59,12 @@ impl Compiler<'_> {
         line: usize,
     ) -> Result<(), CompileError> {
         for expression in expressions {
-            let register = self.compile_expression(expression)?;
-            self.emit(Instruction::Echo(register), line);
+            // Each item's temporaries are freed once it is printed, as in PHP.
+            self.clear_temporaries_after(line, |compiler| {
+                let register = compiler.compile_expression(expression)?;
+                compiler.emit(Instruction::Echo(register), line);
+                Ok(())
+            })?;
         }
 
         Ok(())
@@ -53,30 +82,73 @@ impl Compiler<'_> {
         Ok(())
     }
 
-    /// Patch both branch exits after their bodies are emitted.
+    /// Test each condition in turn and run the first branch that holds;
+    /// every branch then jumps past the rest of the ladder.
     pub(crate) fn compile_if(
         &mut self,
         condition: &ast::Expression,
         then: &[ast::Statement],
+        elseifs: &[ast::ElseIf],
         otherwise: &Option<Vec<ast::Statement>>,
         line: usize,
     ) -> Result<(), CompileError> {
-        let register = self.compile_expression(condition)?;
-        let jump = self.emit(
-            Instruction::Branch {
-                value: register,
-                target: Target(0),
-                when: false,
-            },
-            line,
-        );
-        self.block(then, DeclarationTiming::AtExecution)?;
-        let end = self.emit(Instruction::Jump(Target(0)), line);
-        self.patch(jump, self.position());
+        // `if (cond) continue;` as the only branch: the condition branches
+        // straight to the loop's continue edge, one instruction per round
+        // instead of a branch plus two jumps. Only when a bare `continue`
+        // would compile to a bare jump: no running finally between the `if`
+        // and the loop, and the innermost context is a loop, not a switch.
+        if elseifs.is_empty()
+            && otherwise.is_none()
+            && let [only] = then
+            && let ast::StatementKind::Continue(depth) = &only.kind
+            && (*depth == 0 || *depth == 1)
+            && let Some(loop_state) = self.loops.last()
+            && !matches!(
+                loop_state.cleanup,
+                Some(crate::statements::exits::LoopCleanup::Switch(_))
+            )
+            && self
+                .finalies
+                .iter()
+                .all(|scope| scope.loop_depth < self.loops.len())
+        {
+            let patches = self.compile_condition(condition, true, line)?;
+            if let Some(loop_state) = self.loops.last_mut() {
+                loop_state.continues.extend(patches);
+            }
+            return Ok(());
+        }
+        let branches =
+            std::iter::once((condition, then, line)).chain(elseifs.iter().map(|elseif| {
+                (
+                    &elseif.condition,
+                    &elseif.body[..],
+                    self.lines.line(elseif.span.start),
+                )
+            }));
+        let mut ends = Vec::new();
+        for (condition, body, line) in branches {
+            let mark = self.mark_temporaries();
+            let start = self.temporaries_start();
+            let skips = self.compile_condition(condition, false, line)?;
+            let temporaries = self.temporaries_since(start);
+            // The condition's values are freed on both ways out, as in PHP.
+            self.clear_condition_temporaries(&temporaries, line);
+            self.release_temporaries(mark);
+            self.block(body, DeclarationTiming::AtExecution)?;
+            ends.push(self.emit(Instruction::Jump(Target(0)), line));
+            for skip in &skips {
+                self.patch(*skip, self.position());
+            }
+            self.clear_condition_temporaries(&temporaries, line);
+        }
         if let Some(body) = otherwise {
             self.block(body, DeclarationTiming::AtExecution)?
         }
-        self.patch(end, self.position());
+        let end = self.position();
+        for jump in ends {
+            self.patch(jump, end);
+        }
 
         Ok(())
     }
@@ -89,22 +161,22 @@ impl Compiler<'_> {
         line: usize,
     ) -> Result<(), CompileError> {
         let start = self.position();
-        let register = self.compile_expression(condition)?;
-        let end = self.emit(
-            Instruction::Branch {
-                value: register,
-                target: Target(0),
-                when: false,
-            },
-            line,
-        );
+        let mark = self.temporaries_start();
+        let ends = self.compile_condition(condition, false, line)?;
+        let condition = self.temporaries_since(mark);
+        self.clear_condition_temporaries(&condition, line);
         self.loops.push(Loop {
+            start: self.position(),
+            cleanup: None,
             breaks: vec![],
             continues: vec![],
         });
         self.block(body, DeclarationTiming::AtExecution)?;
         self.emit(Instruction::Jump(Target(start)), line);
-        self.patch(end, self.position());
+        for end in &ends {
+            self.patch(*end, self.position());
+        }
+        self.clear_condition_temporaries(&condition, line);
         self.loop_end(start);
 
         Ok(())

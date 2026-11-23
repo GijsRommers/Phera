@@ -127,3 +127,30 @@ async fn constant_cache_invalidates_namespace_fallbacks() {
     .await;
     assert_eq!((status, output), (0, b"12".to_vec()));
 }
+
+/// A long linked list of objects, with and without destructors, freed in the
+/// middle of the script and at its end, is released without Rust recursion:
+/// 300,000 nodes are far more than a test thread's stack could recurse
+/// through. (PHP itself overflows its C stack freeing a list of a million,
+/// so this is checked here rather than against PHP's output.)
+#[tokio::test(flavor = "current_thread")]
+async fn a_long_object_list_is_freed_without_recursion() {
+    let source = r#"<?php
+class Plain { public $next; }
+class Counted { public $next; public static $destructed = 0; function __destruct() { self::$destructed++; } }
+foreach (['Plain', 'Counted'] as $class) {
+    $head = null;
+    for ($i = 0; $i < 300000; $i++) { $node = new $class; $node->next = $head; $head = $node; }
+    $node = null;
+    $head = null;
+    echo $class, " ";
+}
+echo Counted::$destructed, " ";
+for ($i = 0; $i < 300000; $i++) { $node = new Counted; $node->next = $head; $head = $node; }
+$node = null;
+echo "end";
+"#;
+    let (status, output) = execute(source, 10).await;
+    assert_eq!(status, 0);
+    assert_eq!(output, b"Plain Counted 300000 end");
+}

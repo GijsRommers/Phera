@@ -1,6 +1,11 @@
 //! Slot-owned leases keep the reference index exact without retaining PHP values or objects.
 
-use std::{cell::RefCell, collections::HashMap, rc::Rc, rc::Weak};
+use std::{
+    cell::RefCell,
+    collections::{BTreeMap, HashMap},
+    rc::Rc,
+    rc::Weak,
+};
 
 use phera_extension_api::NativeError;
 use phera_value::{ArrayKey, Object, Value};
@@ -10,11 +15,10 @@ use crate::classes::class::PropertyDefault;
 /// The weak cell also keeps its allocation identity reserved until the last slot leaves.
 struct ReferenceEntry {
     reference: Weak<RefCell<Value>>,
-    holders: Vec<ReferenceHolder>,
+    holders: HashMap<u64, ReferenceHolder>,
 }
 
 struct ReferenceHolder {
-    identity: u64,
     object: Option<Weak<Object>>,
     key: ArrayKey,
 }
@@ -23,7 +27,8 @@ struct ReferenceHolder {
 #[derive(Default)]
 pub(crate) struct ReferenceHolders {
     entries: HashMap<usize, ReferenceEntry>,
-    pub(crate) constraints: HashMap<usize, Vec<(u64, Rc<PropertyDefault>)>>,
+    // Identity order preserves which property is checked first.
+    pub(crate) constraints: HashMap<usize, BTreeMap<u64, Rc<PropertyDefault>>>,
     next_identity: u64,
 }
 
@@ -44,13 +49,32 @@ struct ObjectReferences {
 pub(crate) struct StaticProperty {
     pub(crate) reference: RefCell<Rc<RefCell<Value>>>,
     binding: RefCell<Option<PropertyBinding>>,
+    /// Whether the default's initializer expression has run in this request.
+    pub(crate) initialized: std::cell::Cell<bool>,
+    /// Whether the property holds a value: a typed static without a
+    /// default has none until the first write.
+    pub(crate) value_initialized: std::cell::Cell<bool>,
 }
 
 impl StaticProperty {
-    pub(crate) fn new(value: Value) -> Rc<Self> {
+    pub(crate) fn new(value: Value, initialized: bool, value_initialized: bool) -> Rc<Self> {
         Rc::new(Self {
             reference: RefCell::new(Rc::new(RefCell::new(value))),
             binding: RefCell::new(None),
+            initialized: std::cell::Cell::new(initialized),
+            value_initialized: std::cell::Cell::new(value_initialized),
+        })
+    }
+
+    /// The fork's storage of a static property: its own cell, the same
+    /// flags. A typed static's reference bookkeeping is made again when the
+    /// fork first binds a reference to it.
+    pub(crate) fn forked(reference: Rc<RefCell<Value>>, original: &StaticProperty) -> Rc<Self> {
+        Rc::new(Self {
+            reference: RefCell::new(reference),
+            binding: RefCell::new(None),
+            initialized: original.initialized.clone(),
+            value_initialized: original.value_initialized.clone(),
         })
     }
 
@@ -83,6 +107,31 @@ impl StaticProperty {
     }
 }
 
+/// The properties bound to references, when an object's native state is
+/// that bookkeeping; a fork binds the same properties again in its own
+/// table (see `crate::snapshot`).
+pub(crate) fn bound_properties(state: &dyn std::any::Any) -> Option<Vec<ArrayKey>> {
+    let references = state.downcast_ref::<ObjectReferences>()?;
+    Some(references.slots.keys().cloned().collect())
+}
+
+/// Empty bookkeeping, for a fork's copy before it is bound again.
+pub(crate) fn empty_bookkeeping() -> Box<dyn std::any::Any> {
+    Box::new(ObjectReferences::default())
+}
+
+/// The property-reference bookkeeping also occupies the opaque object slot.
+pub(crate) fn has_extension_state(
+    object: &Object,
+) -> Result<bool, phera_extension_api::NativeError> {
+    let state = object
+        .native_payload()
+        .map_err(|_| internal_error!("borrowed native clone state"))?;
+    Ok(state
+        .as_ref()
+        .is_some_and(|state| !state.is::<ObjectReferences>()))
+}
+
 impl ReferenceHolders {
     #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {
@@ -101,7 +150,6 @@ impl ReferenceHolders {
         let identity = index.next_identity;
         index.next_identity += 1;
         let holder = ReferenceHolder {
-            identity,
             object: object.map(Rc::downgrade),
             key: key.clone(),
         };
@@ -110,10 +158,10 @@ impl ReferenceHolders {
             .entry(address)
             .or_insert_with(|| ReferenceEntry {
                 reference: Rc::downgrade(reference),
-                holders: Vec::new(),
+                holders: HashMap::new(),
             })
             .holders
-            .push(holder);
+            .insert(identity, holder);
         if let Some(property) = property.filter(|property| property.ty.is_some()) {
             let mut declaration = property.clone();
             // Metadata must never own the indexed cell, static slot, or default object graph.
@@ -124,7 +172,7 @@ impl ReferenceHolders {
                 .constraints
                 .entry(address)
                 .or_default()
-                .push((identity, Rc::new(declaration)));
+                .insert(identity, Rc::new(declaration));
         }
         PropertyBinding {
             table: Rc::downgrade(table),
@@ -146,7 +194,9 @@ impl ReferenceHolders {
         else {
             return Ok(false);
         };
-        let native = object.native.borrow();
+        let native = object
+            .native_payload()
+            .map_err(|_| internal_error!("property reference state"))?;
         let occupied = native
             .as_ref()
             .is_some_and(|payload| !payload.is::<ObjectReferences>());
@@ -187,7 +237,33 @@ impl ReferenceHolders {
             return Ok(());
         };
         let property = class.defaults.iter().find(|property| property.key == *key);
-        let mut native = object.native.borrow_mut();
+        Self::bind_object_property(table, object, key, reference, property)
+    }
+
+    /// Deserialization has already looked up the declaration for this key.
+    pub(crate) fn track_serialized_property(
+        table: &Rc<RefCell<Self>>,
+        object: &Rc<Object>,
+        key: &ArrayKey,
+        reference: &Rc<RefCell<Value>>,
+        property: Option<&PropertyDefault>,
+    ) -> Result<(), NativeError> {
+        if !Self::check_object_storage(object, key)? {
+            return Ok(());
+        }
+        Self::bind_object_property(table, object, key, reference, property)
+    }
+
+    fn bind_object_property(
+        table: &Rc<RefCell<Self>>,
+        object: &Rc<Object>,
+        key: &ArrayKey,
+        reference: &Rc<RefCell<Value>>,
+        property: Option<&PropertyDefault>,
+    ) -> Result<(), NativeError> {
+        let mut native = object
+            .native_payload_mut()
+            .map_err(|_| internal_error!("property reference state"))?;
         if native.is_none() {
             *native = Some(Box::<ObjectReferences>::default());
         }
@@ -207,11 +283,10 @@ impl ReferenceHolders {
     }
 
     pub(crate) fn untrack_object(object: &Object, key: &ArrayKey) {
-        if let Some(slots) = object
-            .native
-            .borrow_mut()
-            .as_mut()
-            .and_then(|native| native.downcast_mut::<ObjectReferences>())
+        if let Ok(mut payload) = object.native_payload_mut()
+            && let Some(slots) = payload
+                .as_mut()
+                .and_then(|native| native.downcast_mut::<ObjectReferences>())
         {
             slots.slots.remove(key);
         }
@@ -225,7 +300,7 @@ impl ReferenceHolders {
         if entry.holders.len() != 1 || !entry.reference.ptr_eq(&Rc::downgrade(reference)) {
             return None;
         }
-        let holder = entry.holders.first()?;
+        let holder = entry.holders.values().next()?;
         Some((holder.object.as_ref()?.upgrade()?, holder.key.clone()))
     }
 }
@@ -237,15 +312,13 @@ impl Drop for PropertyBinding {
         };
         let mut index = table.borrow_mut();
         if let Some(constraints) = index.constraints.get_mut(&self.reference) {
-            constraints.retain(|(identity, _)| *identity != self.identity);
+            constraints.remove(&self.identity);
             if constraints.is_empty() {
                 index.constraints.remove(&self.reference);
             }
         }
         if let Some(entry) = index.entries.get_mut(&self.reference) {
-            entry
-                .holders
-                .retain(|holder| holder.identity != self.identity);
+            entry.holders.remove(&self.identity);
             if entry.holders.is_empty() {
                 index.entries.remove(&self.reference);
             }

@@ -11,6 +11,11 @@ impl Analyzer<'_> {
         match name.to_ascii_lowercase().as_str() {
             "extract" | "parse_str" if arguments.len() == 1 => scope.unknown_writes(),
             "extract" => scope.unknown_writes(),
+            "assert" => {
+                if let Some(condition) = arguments.first() {
+                    self.refine(&condition.value, scope, true);
+                }
+            }
             "compact" => {
                 for argument in arguments {
                     let mut values = vec![&argument.value];

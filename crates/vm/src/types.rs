@@ -2,30 +2,12 @@
 
 use phera_bytecode::{Type, TypeMask};
 use phera_extension_api::{NativeError, NativeResult};
-use phera_value::{Value, to_bool, to_php_string};
+use phera_value::{Value, to_bool};
 use phera_value::{is_numeric, to_float, to_int};
 
 use crate::Vm;
 
-/// Only declarations containing relative class keywords depend on the callee scope.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DeclarationScope {
-    Absolute,
-    Relative,
-}
-
-/// This classification mirrors argument checking's keyword scan, once per declaration.
-pub(crate) fn declaration_scope(declaration: &Type) -> DeclarationScope {
-    if declaration
-        .display
-        .split(['|', '&', '?', '(', ')'])
-        .any(|name| matches!(name, "self" | "parent" | "static"))
-    {
-        DeclarationScope::Relative
-    } else {
-        DeclarationScope::Absolute
-    }
-}
+pub(crate) use phera_bytecode::DeclarationScope;
 
 /// Strict declarations reject scalar coercion except PHP's int-to-float widening.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -48,10 +30,19 @@ pub(crate) fn own_type(value: &Value) -> TypeMask {
         Value::Bool(false) => TypeMask::FALSE,
         Value::Int(_) => TypeMask::INT,
         Value::Float(_) => TypeMask::FLOAT,
-        Value::String(_) => TypeMask::STRING,
+        Value::InternedStr(_) | Value::String(_) => TypeMask::STRING,
         Value::Array(_) => TypeMask::ARRAY,
         Value::Object(_) => TypeMask::OBJECT,
         _ => TypeMask::default(),
+    }
+}
+
+/// Property diagnostics distinguish both boolean literals and hide anonymous class identities.
+pub(crate) fn property_value_type(value: &Value) -> String {
+    match &*value.deref() {
+        Value::Bool(value) => value.to_string(),
+        Value::Object(object) => phera_value::class_display_name(object.class.name()).to_owned(),
+        value => value.type_name(),
     }
 }
 
@@ -86,6 +77,17 @@ pub(crate) fn coerce(
     checking: TypeChecking,
     vm: &mut Vm,
 ) -> NativeResult {
+    coerce_in_scope(value, declaration_type, checking, vm, None)
+}
+
+/// Callable declarations use the declaring function's scope, even during argument binding.
+pub(crate) fn coerce_in_scope(
+    value: Value,
+    declaration_type: &Type,
+    checking: TypeChecking,
+    vm: &mut Vm,
+    scope: Option<&crate::classes::MethodContext>,
+) -> NativeResult {
     // Mirrors deref().clone() without a redundant retain/release for already
     // owned values. Reference cells still produce a detached value snapshot.
     let value = match value {
@@ -103,11 +105,15 @@ pub(crate) fn coerce(
         return Ok(value);
     }
     if mask.intersects(TypeMask::VOID) && value.is_null()
-        || mask.intersects(TypeMask::ITERABLE) && value.is_array()
+        || mask.intersects(TypeMask::ITERABLE) && value.is_iterable()
     {
         return Ok(value);
     }
-    if mask.intersects(TypeMask::CALLABLE) && vm.resolve_callable(&value).is_ok() {
+    if mask.intersects(TypeMask::CALLABLE)
+        && vm
+            .resolve_callable_for(&value, crate::callables::CallableUse::Type(scope))
+            .is_ok()
+    {
         return Ok(value);
     }
     let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(vm);
@@ -123,14 +129,31 @@ pub(crate) fn coerce(
     {
         return Ok(converted);
     }
+    let display = php_type_display(declaration_type);
+    let declared = diagnostic_type(&display);
     Err(NativeError::type_error(format!(
         "must be of type {}, {} given",
-        declaration_type.display,
+        declared,
         match &value {
             Value::Object(object) => object.class.name().to_owned(),
             _ => value.type_name(),
         }
     )))
+}
+
+/// PHP prints the anonymous class prefix in type errors, while matching its whole identity.
+fn diagnostic_type(declaration: &str) -> std::borrow::Cow<'_, str> {
+    if !declaration.contains('\0') {
+        return declaration.into();
+    }
+    let separators = ['|', '&', '?', '(', ')'];
+    let mut display = String::new();
+    for segment in declaration.split_inclusive(separators) {
+        let name = segment.trim_end_matches(separators);
+        display.push_str(name.split('\0').next().unwrap_or(name));
+        display.push_str(&segment[name.len()..]);
+    }
+    display.into()
 }
 
 /// PHP union coercion prefers numeric alternatives before strings and booleans.
@@ -141,7 +164,12 @@ fn coerce_scalar(
 ) -> Result<Option<Value>, NativeError> {
     let prefer_float = mask.intersects(TypeMask::INT)
         && mask.intersects(TypeMask::FLOAT)
-        && matches!(value,Value::String(string) if matches!(phera_value::parse_numeric(string.as_bytes()).value,Some(phera_value::NumVal::Float(_))));
+        && value.as_str_bytes().is_some_and(|bytes| {
+            matches!(
+                phera_value::parse_numeric(bytes).value,
+                Some(phera_value::NumVal::Float(_))
+            )
+        });
     for candidate in if prefer_float {
         ["float", "int", "string", "bool"]
     } else {
@@ -153,18 +181,34 @@ fn coerce_scalar(
             "string" => TypeMask::STRING,
             _ => TypeMask::BOOL,
         };
-        if !mask.intersects(wanted) {
+        // Only the whole `bool` type converts a value to a boolean. `false`
+        // or `true` alone in a union (`int|false`) accepts that one value;
+        // the string "x" is not turned into `true` for it.
+        let offered = if candidate == "bool" {
+            mask.contains(TypeMask::BOOL)
+        } else {
+            mask.intersects(wanted)
+        };
+        if !offered {
             continue;
         }
-        let numeric = match value {
-            Value::String(string) => is_numeric(string.as_bytes()),
-            _ => true,
+        let numeric = match value.as_str_bytes() {
+            Some(bytes) => is_numeric(bytes),
+            None => true,
         };
         let result = match candidate {
-            "int" if numeric => Some(Value::Int(to_int(value, diagnostics)?)),
+            "int" if numeric => weak_int(value, diagnostics)?,
             "float" if numeric => Some(Value::Float(to_float(value, diagnostics)?)),
-            "string" => Some(Value::String(to_php_string(value, diagnostics)?)),
-            "bool" => Some(Value::Bool(to_bool(value))),
+            "string" => Some(phera_value::to_string_value(value, diagnostics)?),
+            "bool" => {
+                if matches!(value, Value::Float(float) if float.is_nan()) {
+                    phera_value::Diagnostics::warning(
+                        diagnostics,
+                        "unexpected NAN value was coerced to bool".to_owned(),
+                    );
+                }
+                Some(Value::Bool(to_bool(value)))
+            }
             _ => None,
         };
         if let Some(value) = result {
@@ -172,4 +216,83 @@ fn coerce_scalar(
         }
     }
     Ok(None)
+}
+
+/// The integer a value becomes for an `int` declaration without
+/// `strict_types`, or `None` when it cannot become one.
+///
+/// ```php
+/// function f(int $n) {}
+/// f("7");    // 7
+/// f(2.0);    // 2
+/// f(1.5);    // 1, with "Implicit conversion from float 1.5 to int loses precision"
+/// f(1e30);   // TypeError: no integer is that large
+/// f(NAN);    // TypeError
+/// ```
+///
+/// This is not the `(int)` cast, which accepts every float and wraps
+/// around.
+fn weak_int(
+    value: &Value,
+    diagnostics: &mut phera_value::CollectDiagnostics,
+) -> Result<Option<Value>, NativeError> {
+    use phera_value::{Diagnostics, NumVal};
+
+    /// 2 to the power 63: the first float above every integer.
+    const LIMIT: f64 = 9_223_372_036_854_775_808.0;
+
+    let (float, written_as) = match value {
+        Value::Float(float) => (*float, None),
+        Value::InternedStr(_) | Value::String(_) => {
+            let text = value.str_ref().expect("checked string");
+            match phera_value::parse_numeric(text.as_bytes()).value {
+                Some(NumVal::Float(float)) => (float, Some(text)),
+                _ => return Ok(Some(Value::Int(to_int(value, diagnostics)?))),
+            }
+        }
+        _ => return Ok(Some(Value::Int(to_int(value, diagnostics)?))),
+    };
+    if !(-LIMIT..LIMIT).contains(&float) {
+        // Too large, infinite or not a number.
+        return Ok(None);
+    }
+    let int = float as i64;
+    if int as f64 != float {
+        diagnostics.deprecated(match written_as {
+            Some(string) => format!(
+                "Implicit conversion from float-string \"{}\" to int loses precision",
+                string.to_string_lossy()
+            ),
+            None => format!(
+                "Implicit conversion from float {} to int loses precision",
+                phera_value::float_repr(float)
+            ),
+        });
+    }
+    Ok(Some(Value::Int(int)))
+}
+
+/// PHP expands its iterable alias when reporting a type mismatch:
+/// `iterable|float` is reported as `Traversable|array|float`.
+pub(crate) fn php_type_display(declaration: &Type) -> std::borrow::Cow<'_, str> {
+    if !declaration.mask.intersects(TypeMask::ITERABLE) {
+        return declaration.display.as_str().into();
+    }
+    expanded_iterable_display(&declaration.display).into()
+}
+
+pub(crate) fn expanded_iterable_display(display: &str) -> String {
+    let nullable = display.starts_with('?');
+    let expanded = display
+        .trim_start_matches('?')
+        .split('|')
+        .flat_map(|name| match name {
+            "iterable" => ["Traversable", "array"],
+            name => [name, ""],
+        })
+        .chain(nullable.then_some("null"))
+        .filter(|name| !name.is_empty())
+        .collect::<Vec<_>>()
+        .join("|");
+    phera_bytecode::union_in_php_order(&expanded)
 }

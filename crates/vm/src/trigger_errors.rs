@@ -12,8 +12,7 @@ impl Vm {
                 "trigger_error() expects at least 1 argument, 0 given",
             )
         })?;
-        let message =
-            phera_value::to_php_string(message, &mut phera_value::NoDiagnostics)?.to_string_lossy();
+        let message = phera_value::to_php_string(message, &mut phera_value::NoDiagnostics)?;
         let level = arguments
             .get(1)
             .map(|value| phera_value::to_int(value, &mut phera_value::NoDiagnostics))
@@ -45,21 +44,22 @@ impl Vm {
                 arguments,
             )),
         };
-        let use_handler = !self.error_handlers.active
-            && self
-                .error_handlers
-                .error
-                .as_ref()
-                .is_some_and(|handler| handler.levels & level != 0);
-        if use_handler {
-            self.error_handlers.pending.push(event);
+        if level == 256 {
+            self.error_handlers.fatal_trace =
+                self.fatal_trace(event.native.as_ref(), &event.location);
+        } else {
+            self.error_handlers.fatal_trace = None;
+        }
+        if self.handles_diagnostic(level) {
+            self.enqueue_diagnostic(event);
             self.drain_error_handlers().await?;
         } else {
-            self.report_event(&event);
+            self.report_event(event);
             if level == 256 {
+                self.fiber_bailout = true;
                 self.status = 255;
                 return Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
-                    (),
+                    crate::request_end::FatalStop,
                 ))));
             }
         }

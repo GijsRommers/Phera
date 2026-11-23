@@ -8,9 +8,9 @@ use std::sync::Arc;
 use hyper_util::server::graceful::GracefulShutdown;
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::TcpListener;
-use tokio::sync::watch;
+use tokio::sync::{Semaphore, watch};
 
-use crate::config::ServerConfig;
+use crate::config::{ConnectionLimits, ServerConfig};
 use crate::connection::handle_connection;
 use crate::handler::HandlerFactory;
 
@@ -83,6 +83,7 @@ pub(super) fn run(
         // Built here, inside this worker's runtime, so its non-Send state
         // (Rc fields) never leaves this thread.
         let handler = factory.create(index);
+        handler.start().await;
         let listener = {
             // Tokio refuses to register a blocking socket.
             let listener = listener;
@@ -103,25 +104,29 @@ pub(super) fn run(
         let local_addr = listener
             .local_addr()
             .expect("listening socket has an address");
-        let max_body_bytes = config.max_body_bytes;
-        let header_read_timeout = config.header_read_timeout;
+        let limits = ConnectionLimits::from(&config);
+        let free_slots = Arc::new(Semaphore::new(config.max_connections_per_worker.max(1)));
         let graceful = GracefulShutdown::new();
         loop {
+            // A slot first, then a connection: beyond the limit, clients
+            // wait in the operating system's queue instead of being
+            // accepted and costing memory here.
+            let slot = tokio::select! {
+                _ = shutdown.changed() => break,
+                slot = free_slots.clone().acquire_owned() => slot,
+            };
+            let Ok(slot) = slot else { break };
             tokio::select! {
                 _ = shutdown.changed() => break,
                 accepted = listener.accept() => match accepted {
                     Ok((stream, peer)) => {
                         let handler = handler.clone();
                         let watcher = graceful.watcher();
-                        tokio::task::spawn_local(handle_connection(
-                            stream,
-                            peer,
-                            local_addr,
-                            handler,
-                            watcher,
-                            max_body_bytes,
-                            header_read_timeout,
-                        ));
+                        tokio::task::spawn_local(async move {
+                            handle_connection(stream, peer, local_addr, handler, watcher, limits)
+                                .await;
+                            drop(slot);
+                        });
                     }
                     // A client that hung up before we accepted it is normal.
                     Err(error) if error.kind() == io::ErrorKind::ConnectionAborted => continue,

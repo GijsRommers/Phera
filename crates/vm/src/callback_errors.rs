@@ -8,7 +8,8 @@ use crate::Vm;
 impl Vm {
     /// The resolver's Error text and callback APIs' reason text differ in PHP itself.
     pub(crate) fn callback_reason(&self, callable: &Value, error: NativeError) -> String {
-        let Value::String(name) = &*callable.deref() else {
+        let deref = callable.deref();
+        let Some(name) = deref.str_ref() else {
             return callback_detail(error);
         };
         if !name.as_bytes().contains(&b':') {
@@ -29,6 +30,9 @@ impl Vm {
         error: NativeError,
         nullable: bool,
     ) -> NativeError {
+        if crate::unsupported_items::is_unsupported(&error) {
+            return error;
+        }
         let detail = self.callback_reason(callable, error);
         let null = if nullable { " or null" } else { "" };
         NativeError::type_error(format!(
@@ -55,6 +59,9 @@ fn callback_detail(error: NativeError) -> String {
             let name = name.split_once("() from ").map_or(name, |(name, _)| name);
             return format!("cannot access {visibility} method {name}()");
         }
+    }
+    if let Some(keyword) = message.strip_prefix("Cannot access ") {
+        return format!("cannot access {keyword}");
     }
     if let Some(class) = message.strip_prefix("Class ") {
         return format!("class {class}");

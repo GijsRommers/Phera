@@ -8,7 +8,7 @@ use std::rc::Rc;
 use phera_extension_api::value::{float_to_string_precision14, to_php_string};
 use phera_extension_api::{
     ArrayKey, ClassEntry, ClassKind, ConstantValue, Context, MethodEntry, NativeResult, Object,
-    Param, ParamType, PhpArray, PropertyEntry, Registry, Value, Visibility, args,
+    Param, ParamType, PhpArray, PropertyEntry, PropertyType, Registry, Value, Visibility, args,
 };
 
 /// The two classes that declare the private properties. A method inherited
@@ -41,19 +41,28 @@ const ERROR_EXCEPTION_PARAMS: &[Param] = &[
 /// In PHP's declaration order, which is the order `var_dump` shows.
 const PROPERTIES: &[PropertyEntry] = &[
     PropertyEntry::new("message", ConstantValue::String(""), Visibility::Protected),
-    PropertyEntry::new("string", ConstantValue::String(""), Visibility::Private),
+    PropertyEntry::typed("string", PropertyType::String, Visibility::Private)
+        .with_default(ConstantValue::String("")),
     PropertyEntry::new("code", ConstantValue::Int(0), Visibility::Protected),
-    PropertyEntry::new("file", ConstantValue::String(""), Visibility::Protected),
-    PropertyEntry::new("line", ConstantValue::Int(0), Visibility::Protected),
-    PropertyEntry::new("trace", ConstantValue::EmptyArray, Visibility::Private),
-    PropertyEntry::new("previous", ConstantValue::Null, Visibility::Private),
+    PropertyEntry::typed("file", PropertyType::String, Visibility::Protected)
+        .with_default(ConstantValue::String("")),
+    PropertyEntry::typed("line", PropertyType::Int, Visibility::Protected)
+        .with_default(ConstantValue::Int(0)),
+    PropertyEntry::typed("trace", PropertyType::Array, Visibility::Private)
+        .with_default(ConstantValue::EmptyArray),
+    PropertyEntry::typed(
+        "previous",
+        PropertyType::NullableClass("Throwable"),
+        Visibility::Private,
+    )
+    .with_default(ConstantValue::Null),
 ];
 
-const SEVERITY: &[PropertyEntry] = &[PropertyEntry::new(
-    "severity",
-    ConstantValue::Int(1),
-    Visibility::Protected,
-)];
+const SEVERITY: &[PropertyEntry] =
+    &[
+        PropertyEntry::typed("severity", PropertyType::Int, Visibility::Protected)
+            .with_default(ConstantValue::Int(1)),
+    ];
 
 const THROWABLE_METHODS: &[MethodEntry] = &[
     MethodEntry::required("getMessage", NO_PARAMS),
@@ -79,6 +88,7 @@ const METHODS: &[MethodEntry] = &[
     MethodEntry::public("getPrevious", NO_PARAMS, get_previous).final_(),
     MethodEntry::public("getTraceAsString", NO_PARAMS, get_trace_as_string).final_(),
     MethodEntry::public("__toString", NO_PARAMS, to_string),
+    MethodEntry::public("__wakeup", NO_PARAMS, wakeup).tentative_return("void"),
 ];
 
 const ERROR_EXCEPTION_METHODS: &[MethodEntry] = &[
@@ -93,12 +103,15 @@ const ERROR_EXCEPTION_METHODS: &[MethodEntry] = &[
 /// Each class with its parent, parents first.
 const DERIVED: &[(&str, &str)] = &[
     ("TypeError", "Error"),
+    ("CompileError", "Error"),
+    ("ParseError", "CompileError"),
     ("ValueError", "Error"),
     ("ArithmeticError", "Error"),
     ("DivisionByZeroError", "ArithmeticError"),
     ("ArgumentCountError", "TypeError"),
     ("AssertionError", "Error"),
     ("UnhandledMatchError", "Error"),
+    ("RequestParseBodyException", "Exception"),
     ("RuntimeException", "Exception"),
     ("LogicException", "Exception"),
     ("BadFunctionCallException", "LogicException"),
@@ -127,7 +140,7 @@ pub(crate) fn register(registry: &mut Registry) {
     });
     for root in ROOTS {
         registry.class(ClassEntry {
-            interfaces: &["Throwable"],
+            interfaces: &["Stringable", "Throwable"],
             properties: PROPERTIES,
             methods: METHODS,
             ..ClassEntry::class(root)
@@ -145,6 +158,38 @@ pub(crate) fn register(registry: &mut Registry) {
             parent: Some(parent),
             ..ClassEntry::class(name)
         });
+    }
+}
+
+/// PHP checks the historical untyped fields after deserialization.
+fn wakeup(_: &mut dyn Context, this: Option<&Rc<Object>>, _: &[Value]) -> NativeResult {
+    if let Some(object) = this {
+        let message = Object::protected_key("message");
+        if object.get(&message).is_some_and(|value| {
+            !matches!(
+                value,
+                Value::InternedStr(_) | Value::String(_) | Value::Null
+            )
+        }) {
+            object.remove(&message);
+        }
+        let code = code_key(object);
+        if object
+            .get(&code)
+            .is_some_and(|value| !matches!(value, Value::Int(_) | Value::Null))
+        {
+            object.remove(&code);
+        }
+    }
+    Ok(Value::Null)
+}
+
+fn code_key(object: &Object) -> ArrayKey {
+    let public = ArrayKey::str("code");
+    if object.has(&public) {
+        public
+    } else {
+        Object::protected_key("code")
     }
 }
 
@@ -186,13 +231,10 @@ fn construct(
         return Ok(Value::Null);
     };
     if let Some(message) = args::string(arguments, 0) {
-        object.set(
-            Object::protected_key("message"),
-            Value::String(message.clone()),
-        );
+        object.set(Object::protected_key("message"), message.to_value());
     }
     if let Some(code) = args::int(arguments, 1) {
-        object.set(Object::protected_key("code"), Value::Int(code));
+        object.set(code_key(object), Value::Int(code));
     }
     if let Some(previous) = args::object(arguments, 2) {
         set_private(object, "previous", Value::Object(previous.clone()));
@@ -218,7 +260,12 @@ fn construct_error_exception(
     for (index, name) in fields {
         let value = args::value(arguments, index);
         if args::given(arguments, index) && !value.is_null() {
-            object.set(Object::protected_key(name), value.clone());
+            let key = if name == "code" {
+                code_key(object)
+            } else {
+                Object::protected_key(name)
+            };
+            object.set(key, value.clone());
         }
     }
     if let Some(previous) = args::object(arguments, 5) {
@@ -237,11 +284,21 @@ fn get_message(
 
 /// PDO can store a SQLSTATE string: `$exception->getCode()` must preserve `"42P01"`.
 fn get_code(
-    _context: &mut dyn Context,
+    context: &mut dyn Context,
     this: Option<&Rc<Object>>,
     _arguments: &[Value],
 ) -> NativeResult {
-    Ok(protected(this, "code"))
+    let Some(object) = this else {
+        return Ok(Value::Null);
+    };
+    if let Some(code) = object.get(&code_key(object)) {
+        return Ok(code);
+    }
+    context.warning(format!(
+        "Undefined property: {}::$code",
+        object.class.name()
+    ));
+    Ok(Value::Null)
 }
 
 fn get_file(
@@ -412,8 +469,9 @@ fn render_argument(value: &Value) -> Vec<u8> {
         Value::Bool(flag) => flag.to_string().into_bytes(),
         Value::Int(int) => int.to_string().into_bytes(),
         Value::Float(float) => float_to_string_precision14(*float).into_bytes(),
-        Value::String(string) => {
-            let bytes = string.as_bytes();
+        Value::InternedStr(_) | Value::String(_) => {
+            let bytes = value.deref();
+            let bytes = bytes.as_str_bytes().expect("checked string");
             let mut text = vec![b'\''];
             text.extend_from_slice(bytes.get(..SHOWN).unwrap_or(bytes));
             text.extend_from_slice(if bytes.len() > SHOWN { b"...'" } else { b"'" });

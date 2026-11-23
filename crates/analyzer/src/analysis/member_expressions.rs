@@ -2,6 +2,7 @@
 //! Uncertain facts become mixed rather than producing a guessed diagnostic.
 
 use super::*;
+use phera_source::deprecations::ItemKind;
 
 impl Analyzer<'_> {
     pub fn member_expressions(
@@ -11,21 +12,56 @@ impl Analyzer<'_> {
         quiet: bool,
     ) -> ValueType {
         match &expression.kind {
-            ExpressionKind::Property { target, name, .. } => {
+            ExpressionKind::Property {
+                target,
+                name,
+                nullsafe,
+            } => {
                 let ty = self.expression(target, scope, quiet);
                 if ty == ValueType::Never {
                     return ty;
                 }
-                self.property(
+                if self.level >= 2 && *nullsafe && ty == ValueType::Null {
+                    if let MemberName::Identifier(property) = name {
+                        self.property_receiver(&ty, &property.name, expression.span, quiet);
+                    }
+                    return ty;
+                }
+                let guarded = match name {
+                    MemberName::Identifier(name) if !scope.known.is_empty() => {
+                        crate::scope::Place::of(target).is_some_and(|receiver| {
+                            scope
+                                .known
+                                .contains(&Symbol::Property(receiver, name.name.clone()))
+                        })
+                    }
+                    _ => false,
+                };
+                if *nullsafe {
+                    self.check_nullsafe(
+                        "property access",
+                        target,
+                        name,
+                        &ty,
+                        scope,
+                        expression.span,
+                    );
+                }
+                let result = self.property(
                     &ty,
                     name,
                     scope,
                     expression.span,
-                    quiet,
+                    quiet || guarded,
                     Access::object(target),
-                )
+                );
+                if self.level >= 4 && *nullsafe && !ty.excludes_null() {
+                    result.join(&ValueType::Null)
+                } else {
+                    result
+                }
             }
-            ExpressionKind::StaticProperty { class, name } => {
+            ExpressionKind::StaticProperty { class, name, .. } => {
                 self.static_property(class, name, scope, expression.span, quiet)
             }
             ExpressionKind::ClassConstant { class, name } => {
@@ -91,27 +127,44 @@ impl Analyzer<'_> {
         {
             return ValueType::Never;
         }
+        if self.level >= 2
+            && let (Some(class), MemberName::Identifier(member)) = (&class, name)
+            && member.name.eq_ignore_ascii_case("class")
+        {
+            return ValueType::ClassString(std::sync::Arc::new(ValueType::Class(class.clone())));
+        }
         if let (Some(class), MemberName::Identifier(name)) = (class, name)
             && !name.name.eq_ignore_ascii_case("class")
-            && self.index.class(&class).is_some()
-            && self.index.complete(&class)
-            && !(late_static
-                && self
-                    .index
-                    .class(&class)
-                    .is_some_and(|c| c.modifiers.is_abstract))
             && !scope
                 .known
                 .contains(&Symbol::Constant(Symbol::constant_name(&format!(
                     "{class}::{}",
                     name.name
                 ))))
-            && !self.index.constant(&class, &name.name)
         {
-            self.report(
-                Finding::UnknownClassConstant(format!("{class}::{}", name.name)),
-                name.span,
-            );
+            if let Some(constant) = self.index.constant(&class, &name.name) {
+                return self.relative_type(constant.ty.clone(), &class);
+            }
+            if let Some(item) =
+                self.omitted_builtin_member(ItemKind::ClassConstant, &class, &name.name)
+            {
+                self.report(Finding::NotSupported(item), name.span);
+            } else if self
+                .index
+                .class(&class)
+                .is_some_and(|info| info.kind != ClassKind::Trait)
+                && self.index.complete(&class)
+                && !(late_static
+                    && self
+                        .index
+                        .class(&class)
+                        .is_some_and(|c| c.modifiers.is_abstract))
+            {
+                self.report(
+                    Finding::UnknownClassConstant(format!("{class}::{}", name.name)),
+                    name.span,
+                );
+            }
         }
         ValueType::Mixed
     }

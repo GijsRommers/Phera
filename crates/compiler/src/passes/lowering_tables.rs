@@ -5,7 +5,7 @@ use phera_bytecode::{BinaryOp, Function, Path, PathBase, PathId, StaticId, Step}
 use crate::{ir, passes::lower::Tables};
 
 /// Append an access path with evaluated keys; absent keys denote array append.
-pub(crate) fn path(tables: &mut Tables, function: &mut Function, place: ir::Place) -> PathId {
+pub(crate) fn path(tables: &mut Tables<'_>, function: &mut Function, place: ir::Place) -> PathId {
     let index = function.paths.len();
     function.paths.push(Path {
         base: match place.scope {
@@ -15,6 +15,15 @@ pub(crate) fn path(tables: &mut Tables, function: &mut Function, place: ir::Plac
             ir::PlaceScope::StaticProperty { name, scratch } => PathBase::StaticProperty {
                 class: place.base,
                 name,
+                scratch,
+            },
+            ir::PlaceScope::NamedStaticProperty {
+                class,
+                name,
+                scratch,
+            } => PathBase::NamedStaticProperty {
+                class: tables.symbol(&class, None, crate::policies::NameKind::Class),
+                name: tables.name(&name),
                 scratch,
             },
             ir::PlaceScope::Local => PathBase::Register(place.base),
@@ -68,7 +77,7 @@ pub(crate) fn binary(operator: ir::Binary) -> BinaryOp {
 }
 
 /// Reuse the function-local static slot for repeated occurrences of a name.
-pub(crate) fn static_id(tables: &mut Tables, function: &mut Function, name: &str) -> StaticId {
+pub(crate) fn static_id(tables: &mut Tables<'_>, function: &mut Function, name: &str) -> StaticId {
     let name = tables.name(name);
     let index = function
         .statics

@@ -83,13 +83,7 @@ impl Vm {
             })?;
         match function {
             ArgumentFunction::Count => Ok(Value::Int(frame.argument_count() as i64)),
-            ArgumentFunction::All => {
-                let mut result = PhpArray::new();
-                for index in 0..frame.argument_count() {
-                    result.push(frame.argument(&self.registers, index))?;
-                }
-                Ok(Value::Array(Rc::new(result)))
-            }
+            ArgumentFunction::All => self.argument_array(frame, 0),
             ArgumentFunction::One => (position < frame.argument_count() as i64)
                 .then(|| frame.argument(&self.registers, position as usize))
                 .ok_or_else(|| {
@@ -99,6 +93,19 @@ impl Vm {
                     )
                 }),
         }
+    }
+
+    /// `array_slice(func_get_args(), $start)` starts reading at the first wanted slot.
+    pub(crate) fn argument_array(
+        &self,
+        frame: crate::calls::frame_view::FrameView<'_>,
+        start: usize,
+    ) -> NativeResult {
+        let mut result = PhpArray::new();
+        for index in start..frame.argument_count() {
+            result.push(frame.argument(&self.registers, index))?;
+        }
+        Ok(Value::Array(Rc::new(result)))
     }
 }
 
@@ -117,43 +124,10 @@ impl Vm {
             ));
             return Err(error);
         }
-        let previous = if self.diagnostic_reporter.is_visible() {
-            self.error_handlers.reporting
-        } else {
-            self.error_handlers.reporting & 4437
-        };
+        let previous = self.error_handlers.reporting;
         if let Some(Value::Int(level)) = arguments.first() {
-            self.error_handlers.reporting = *level;
+            self.set_error_reporting(*level);
         }
         Ok(Value::Int(previous))
-    }
-}
-
-impl Vm {
-    /// This trace-only INI setting changes string rendering without altering stored arguments.
-    pub(crate) fn exception_ini_setting(
-        &mut self,
-        intrinsic: crate::intrinsics::Intrinsic,
-        arguments: &[Value],
-    ) -> NativeResult {
-        let Some(Value::String(name)) = arguments.first() else {
-            return Ok(Value::from("1"));
-        };
-        if name.as_bytes() != b"zend.exception_string_param_max_len" {
-            return Ok(Value::from("1"));
-        }
-        let previous = self.error_handlers.trace_string_limit;
-        if matches!(intrinsic, crate::intrinsics::Intrinsic::IniSet) {
-            let value = arguments.get(1).cloned().unwrap_or_default();
-            let text = phera_value::to_php_string(&value, &mut phera_value::NoDiagnostics)?;
-            let Ok(limit) = text.to_string_lossy().parse::<usize>() else {
-                return Ok(Value::Bool(false));
-            };
-            if limit > 1_000_000 {
-                return Ok(Value::Bool(false));
-            }
-            self.error_handlers.trace_string_limit = limit;
-        }
-        Ok(Value::from(previous.to_string()))
     }
 }
