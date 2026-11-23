@@ -1,14 +1,16 @@
 //! Request-local function table state kept separate from register execution.
 
-use std::{cell::RefCell, collections::HashMap};
+use std::{cell::RefCell, rc::Rc};
+
+use foldhash::{HashMap, HashMapExt};
 
 use crate::code_table::FunctionIndex;
 
 /// Owns the request state for function table.
 pub(crate) struct FunctionTable {
-    /// Request-owned functions.
-    functions: HashMap<String, FunctionIndex>,
-    order: Vec<FunctionIndex>,
+    /// Request-owned functions, shared copy-on-write across snapshot forks.
+    functions: Rc<HashMap<String, FunctionIndex>>,
+    order: Rc<Vec<FunctionIndex>>,
     /// Raw callable names retain resolved signatures until the declaration table changes.
     resolved: RefCell<HashMap<phera_value::PhpString, crate::calls::call_state::Callee>>,
 }
@@ -16,8 +18,8 @@ pub(crate) struct FunctionTable {
 impl FunctionTable {
     pub(crate) fn new() -> Self {
         Self {
-            functions: HashMap::new(),
-            order: Vec::new(),
+            functions: Rc::new(HashMap::new()),
+            order: Rc::new(Vec::new()),
             resolved: RefCell::new(HashMap::new()),
         }
     }
@@ -36,8 +38,8 @@ impl FunctionTable {
     /// Redeclaration checks stay at the caller because main and include differ.
     pub(crate) fn insert(&mut self, lowercase_name: String, function: FunctionIndex) {
         self.resolved.get_mut().clear();
-        self.functions.insert(lowercase_name, function);
-        self.order.push(function);
+        Rc::make_mut(&mut self.functions).insert(lowercase_name, function);
+        Rc::make_mut(&mut self.order).push(function);
     }
 
     pub(crate) fn declaration_order(&self) -> impl Iterator<Item = FunctionIndex> + '_ {

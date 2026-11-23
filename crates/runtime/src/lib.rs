@@ -51,6 +51,23 @@ pub use phera_vm::OutputSink;
 pub use preload::PreloadSummary;
 pub use snapshots::{remembered as snapshot_remembered, requests_from_the_top};
 
+/// Default cap on concurrently forked request VMs per worker thread.
+/// Extra HTTP requests stay parked as lightweight Tokio futures until an
+/// active VM drops, keeping memory bounded under high-concurrency spikes
+/// while keeping database connection pools saturated.
+const DEFAULT_MAX_CONCURRENT_REQUESTS_PER_WORKER: usize = 32;
+
+fn default_max_concurrent_requests_per_worker() -> Option<usize> {
+    match std::env::var("PHERA_MAX_CONCURRENT_REQUESTS_PER_WORKER") {
+        Ok(value) => match value.trim().parse::<usize>() {
+            Ok(0) => None,
+            Ok(limit) => Some(limit),
+            Err(_) => Some(DEFAULT_MAX_CONCURRENT_REQUESTS_PER_WORKER),
+        },
+        Err(_) => Some(DEFAULT_MAX_CONCURRENT_REQUESTS_PER_WORKER),
+    }
+}
+
 #[derive(Clone)]
 pub struct Runtime {
     registry: Arc<Registry>,
@@ -70,6 +87,9 @@ pub struct Runtime {
     /// Scripts that run PHP source Phera ships in place of the file (an
     /// adapter's entry script), by the script's path.
     entry_scripts: Arc<std::collections::HashMap<std::path::PathBuf, &'static str>>,
+    /// Maximum number of active request VMs running concurrently on one worker
+    /// thread (`None` means unbounded).
+    max_concurrent_requests_per_worker: Option<usize>,
 }
 
 /// A web worker links the process's native definitions once on its own
@@ -87,6 +107,8 @@ pub struct WebWorker {
     /// the background (`phera serve`); see [`WebWorker::with_background_boots`].
     background_boots: bool,
     code: Rc<WorkerCodeCache>,
+    /// Bounds concurrently forked request VMs on this worker thread.
+    active_requests: Option<Rc<tokio::sync::Semaphore>>,
 }
 
 impl WebWorker {
@@ -244,7 +266,15 @@ impl Runtime {
             class_warmup: true,
             include_policy: phera_vm::IncludeCachePolicy::default(),
             entry_scripts: Arc::default(),
+            max_concurrent_requests_per_worker: default_max_concurrent_requests_per_worker(),
         }
+    }
+
+    /// Caps how many request VMs may run concurrently on a single worker thread.
+    /// `None` removes the cap.
+    pub fn with_max_concurrent_requests_per_worker(mut self, limit: Option<usize>) -> Self {
+        self.max_concurrent_requests_per_worker = limit.filter(|&limit| limit > 0);
+        self
     }
 
     /// Runs `source` whenever a request goes to `script`, compiled under
@@ -377,6 +407,9 @@ impl Runtime {
             snapshots: Default::default(),
             background_boots: false,
             code: Rc::new(WorkerCodeCache::new(self.web_cache.clone())),
+            active_requests: self
+                .max_concurrent_requests_per_worker
+                .map(|limit| Rc::new(tokio::sync::Semaphore::new(limit))),
         }
     }
 
@@ -419,6 +452,11 @@ impl Runtime {
             }
             http::Boundary::Invalid(warning) => (None, Some(warning)),
             http::Boundary::OtherMediaType => (None, None),
+        };
+
+        let _vm_permit = match &worker.active_requests {
+            Some(semaphore) => semaphore.acquire().await.ok(),
+            None => None,
         };
 
         let (plan, reboot) =
@@ -519,10 +557,14 @@ impl Runtime {
             }
         }
         let head = vm.state_mut().take::<ResponseHead>().unwrap_or_default();
+        let body = std::mem::take(&mut vm.output);
+        // Free the forked VM before waking the next parked request.
+        drop(vm);
+        drop(_vm_permit);
         HttpResponse {
             status: head.status,
             headers: head.headers,
-            body: std::mem::take(&mut vm.output),
+            body,
         }
     }
 

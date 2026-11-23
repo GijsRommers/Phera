@@ -1,8 +1,9 @@
 //! Resolve constant symbols once, invalidating fallbacks when PHP defines names.
 
 use crate::code_table::FunctionIndex;
-use std::{collections::HashMap, rc::Rc, sync::Arc};
+use std::{rc::Rc, sync::Arc};
 
+use foldhash::{HashMap, HashMapExt};
 use phera_bytecode::{CompiledUnit, SymbolId};
 use phera_extension_api::NativeError;
 use phera_value::Value;
@@ -31,8 +32,8 @@ pub(crate) struct GlobalConstant {
 pub(crate) struct ConstantTable {
     native: Rc<NativeConstants>,
     values: HashMap<String, GlobalConstant>,
-    user_order: Vec<String>,
-    origins: HashMap<String, ConstantOrigin>,
+    user_order: Rc<Vec<String>>,
+    origins: Rc<HashMap<String, ConstantOrigin>>,
     resolved: HashMap<ConstantSite, ResolvedConstant>,
 }
 
@@ -81,8 +82,8 @@ impl ConstantTable {
         Self {
             native,
             values: HashMap::new(),
-            user_order: Vec::new(),
-            origins: HashMap::new(),
+            user_order: Rc::new(Vec::new()),
+            origins: Rc::new(HashMap::new()),
             resolved: HashMap::new(),
         }
     }
@@ -108,9 +109,9 @@ impl ConstantTable {
         deprecated: Option<String>,
     ) {
         self.resolved.clear();
-        self.user_order.push(name.clone());
+        Rc::make_mut(&mut self.user_order).push(name.clone());
         if let Some(origin) = origin {
-            self.origins.insert(name.clone(), origin);
+            Rc::make_mut(&mut self.origins).insert(name.clone(), origin);
         }
         self.values.insert(
             name,
