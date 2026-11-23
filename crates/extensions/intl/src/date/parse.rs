@@ -28,6 +28,10 @@ pub fn parse(
             Some(match &*value {
                 Value::Int(number) => *number,
                 Value::Float(number) => *number as i64,
+                Value::InternedStr(text) => std::str::from_utf8(text.as_bytes())
+                    .ok()
+                    .and_then(|text| text.parse::<i64>().ok())
+                    .unwrap_or(0),
                 Value::String(text) => std::str::from_utf8(text.as_bytes())
                     .ok()
                     .and_then(|text| text.parse::<i64>().ok())

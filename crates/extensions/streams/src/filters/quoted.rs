@@ -25,10 +25,8 @@ impl QuotedEncode {
             .and_then(|n| usize::try_from(n).ok())
             .filter(|n| *n >= 4)
             .unwrap_or(0);
-        let line_break = match field(params, "line-break-chars") {
-            Some(Value::String(value)) => {
-                value.as_bytes()[..value.as_bytes().len().min(MAX_BUCKET)].to_vec()
-            }
+        let line_break = match field(params, "line-break-chars").and_then(Value::as_str_bytes) {
+            Some(value) => value[..value.len().min(MAX_BUCKET)].to_vec(),
             _ => b"\r\n".to_vec(),
         };
         Self {
@@ -100,10 +98,8 @@ pub(super) struct QuotedDecode {
 
 impl QuotedDecode {
     pub fn new(params: &Value) -> Self {
-        let line_break = match field(params, "line-break-chars") {
-            Some(Value::String(value)) => {
-                value.as_bytes()[..value.as_bytes().len().min(MAX_BUCKET)].to_vec()
-            }
+        let line_break = match field(params, "line-break-chars").and_then(Value::as_str_bytes) {
+            Some(value) => value[..value.len().min(MAX_BUCKET)].to_vec(),
             _ => Vec::new(),
         };
         Self {

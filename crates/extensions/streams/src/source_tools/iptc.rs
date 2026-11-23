@@ -90,8 +90,9 @@ fn embed(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Na
         let file = args::bytes(&arguments, 1);
         check_path(FUNCTION, "#2 ($filename)", file)?;
         let stream = open_resource(context, FUNCTION, file, b"rb", false, &Value::Null).await?;
-        let Value::String(image) =
-            filtered_files::contents(context, stream, FUNCTION, 0, None).await?
+        let Some(image) = filtered_files::contents(context, stream, FUNCTION, 0, None)
+            .await?
+            .to_php_string()
         else {
             return Ok(Value::Bool(false));
         };

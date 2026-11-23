@@ -235,6 +235,15 @@ impl Registers {
         self.slots.get_mut(index).and_then(Option::take)
     }
 
+    /// Exchange what a slot holds with `value`, so that a value can be lent
+    /// out of the slot and back without a copy or a drop.
+    #[inline(always)]
+    pub(crate) fn swap_value(&mut self, index: usize, value: &mut Option<Value>) {
+        if let Some(slot) = self.slots.get_mut(index) {
+            std::mem::swap(slot, value);
+        }
+    }
+
     /// Store a value in a slot, dropping what it held.
     #[inline(always)]
     pub(crate) fn put(&mut self, index: usize, value: Value) {

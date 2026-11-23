@@ -25,7 +25,7 @@ impl ClassDefinitions {
                 identity: identity.clone(),
                 declaration_matches: std::cell::RefCell::new(std::collections::HashMap::new()),
                 ancestors: std::collections::HashSet::new(),
-                name_value: phera_value::Value::from("stdClass"),
+                name_value: phera_value::Value::interned(b"stdClass"),
                 name: "stdClass".into(),
                 parent: None,
                 interfaces: Vec::new(),
@@ -145,7 +145,7 @@ impl ClassDefinitions {
                 let key = match native_visibility(property.visibility) {
                     Visibility::Private => Object::private_key(entry.name, property.name),
                     Visibility::Protected => Object::protected_key(property.name),
-                    Visibility::Public => ArrayKey::str(property.name),
+                    Visibility::Public => ArrayKey::interned_str(property.name.as_bytes()),
                 };
                 let inherited = defaults.iter().position(|candidate| {
                     candidate.name == property.name
@@ -259,7 +259,7 @@ impl ClassDefinitions {
                     identity: identity.clone(),
                     declaration_matches: std::cell::RefCell::new(std::collections::HashMap::new()),
                     ancestors: super::class::ancestor_names(&parent, &interfaces),
-                    name_value: phera_value::Value::from(entry.name),
+                    name_value: phera_value::Value::interned(entry.name.as_bytes()),
                     name: entry.name.into(),
                     parent,
                     interfaces,

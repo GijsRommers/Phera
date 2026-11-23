@@ -26,7 +26,7 @@ impl ConstantValue {
             ConstantValue::Bool(value) => Value::Bool(*value),
             ConstantValue::Int(value) => Value::Int(*value),
             ConstantValue::Float(value) => Value::Float(*value),
-            ConstantValue::String(value) => Value::from(*value),
+            ConstantValue::String(value) => Value::interned(value.as_bytes()),
             ConstantValue::EmptyArray => Value::from(phera_value::PhpArray::new()),
         }
     }

@@ -479,6 +479,16 @@ worker, and the HTTP kernel replaces it before any application code runs.
 A step that throws is skipped. `phera serve --no-service-warmup` (in the
 adapters: `PHERA_SERVICE_WARMUP=0`) takes the snapshot right after the boot.
 
+What a Laravel developer must know of this: a model's `boot()` and
+`booted()` now run once per worker instead of once per request, unless they
+ask for the request or the signed-in user, in which case the model boots in
+the request as it always did. Code there that reads the clock, a cache,
+`$_SERVER` or `$_COOKIE` directly keeps the worker's answer for every
+request (`static::$bootedAt = now()` is the worker's boot time; the test
+application's `Stamp` model pins this down). Closures registered there
+(`addGlobalScope()`, `creating()`) still run per query or per save. With
+`--no-service-warmup` models boot per request again.
+
 A fork copies what the snapshot holds, so the warm-up makes every fork
 dearer and the requests that use what it built much cheaper. That is also a
 limit on what is worth building for every application: Doctrine's metadata

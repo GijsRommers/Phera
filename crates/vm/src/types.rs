@@ -2,7 +2,7 @@
 
 use phera_bytecode::{Type, TypeMask};
 use phera_extension_api::{NativeError, NativeResult};
-use phera_value::{Value, to_bool, to_php_string};
+use phera_value::{Value, to_bool};
 use phera_value::{is_numeric, to_float, to_int};
 
 use crate::Vm;
@@ -30,7 +30,7 @@ pub(crate) fn own_type(value: &Value) -> TypeMask {
         Value::Bool(false) => TypeMask::FALSE,
         Value::Int(_) => TypeMask::INT,
         Value::Float(_) => TypeMask::FLOAT,
-        Value::String(_) => TypeMask::STRING,
+        Value::InternedStr(_) | Value::String(_) => TypeMask::STRING,
         Value::Array(_) => TypeMask::ARRAY,
         Value::Object(_) => TypeMask::OBJECT,
         _ => TypeMask::default(),
@@ -164,7 +164,12 @@ fn coerce_scalar(
 ) -> Result<Option<Value>, NativeError> {
     let prefer_float = mask.intersects(TypeMask::INT)
         && mask.intersects(TypeMask::FLOAT)
-        && matches!(value,Value::String(string) if matches!(phera_value::parse_numeric(string.as_bytes()).value,Some(phera_value::NumVal::Float(_))));
+        && value.as_str_bytes().is_some_and(|bytes| {
+            matches!(
+                phera_value::parse_numeric(bytes).value,
+                Some(phera_value::NumVal::Float(_))
+            )
+        });
     for candidate in if prefer_float {
         ["float", "int", "string", "bool"]
     } else {
@@ -187,14 +192,14 @@ fn coerce_scalar(
         if !offered {
             continue;
         }
-        let numeric = match value {
-            Value::String(string) => is_numeric(string.as_bytes()),
-            _ => true,
+        let numeric = match value.as_str_bytes() {
+            Some(bytes) => is_numeric(bytes),
+            None => true,
         };
         let result = match candidate {
             "int" if numeric => weak_int(value, diagnostics)?,
             "float" if numeric => Some(Value::Float(to_float(value, diagnostics)?)),
-            "string" => Some(Value::String(to_php_string(value, diagnostics)?)),
+            "string" => Some(phera_value::to_string_value(value, diagnostics)?),
             "bool" => {
                 if matches!(value, Value::Float(float) if float.is_nan()) {
                     phera_value::Diagnostics::warning(
@@ -238,10 +243,13 @@ fn weak_int(
 
     let (float, written_as) = match value {
         Value::Float(float) => (*float, None),
-        Value::String(string) => match phera_value::parse_numeric(string.as_bytes()).value {
-            Some(NumVal::Float(float)) => (float, Some(string)),
-            _ => return Ok(Some(Value::Int(to_int(value, diagnostics)?))),
-        },
+        Value::InternedStr(_) | Value::String(_) => {
+            let text = value.str_ref().expect("checked string");
+            match phera_value::parse_numeric(text.as_bytes()).value {
+                Some(NumVal::Float(float)) => (float, Some(text)),
+                _ => return Ok(Some(Value::Int(to_int(value, diagnostics)?))),
+            }
+        }
         _ => return Ok(Some(Value::Int(to_int(value, diagnostics)?))),
     };
     if !(-LIMIT..LIMIT).contains(&float) {
