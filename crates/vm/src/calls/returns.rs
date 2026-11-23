@@ -240,7 +240,7 @@ impl Vm {
         } else {
             None
         };
-        self.call_stack.pop();
+        self.call_stack.pop_for_return();
         self.call_stack.abandon_calls_from(frame.start());
         self.registers.release_frame(frame.start(), frame.base());
         if frame.returns_to_native_loop() {
