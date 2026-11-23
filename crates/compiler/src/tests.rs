@@ -370,6 +370,29 @@ fn comparison_as_a_value_keeps_binary() {
     );
 }
 
+#[test]
+fn case_comparisons_branch_directly_inside_try() {
+    let code = function_instructions(
+        "<?php function f($subject, $case) {
+            try {
+                switch ($subject) { case $case: return 'switch'; }
+                return match ($subject) { $case => 'match', default => 'default' };
+            } finally {}
+        }",
+    );
+    for op in [BinaryOp::Equal, BinaryOp::Identical] {
+        assert_eq!(
+            count(&code, |instruction| matches!(
+                instruction,
+                Instruction::BinaryBranchIf { op: branch, .. } if *branch == op
+            )),
+            1,
+        );
+    }
+    assert_eq!(count(&code, |i| matches!(i, Instruction::Binary { .. })), 0);
+    assert_eq!(count(&code, |i| matches!(i, Instruction::JumpIf { .. })), 0);
+}
+
 /// `if ($o instanceof C)` is one branch instruction, no boolean temporary.
 #[test]
 fn instanceof_condition_is_one_branch() {

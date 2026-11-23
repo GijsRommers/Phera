@@ -33,7 +33,6 @@ impl Compiler<'_> {
                 for condition in conditions {
                     let mark = self.mark_temporaries();
                     let rhs = self.compile_expression(condition)?;
-                    let test = self.allocate_register()?;
                     let test_line = if Some(subject) == local {
                         let folded = checking_jump_table
                             .then(|| match_constant(condition))
@@ -59,22 +58,15 @@ impl Compiler<'_> {
                     } else {
                         line
                     };
-                    self.emit(
-                        Instruction::Binary {
-                            destination: test,
+                    jumps.push(self.emit(
+                        Instruction::BranchCompare {
                             operator: Binary::Identical,
                             left: subject,
                             right: rhs,
-                        },
-                        test_line,
-                    );
-                    jumps.push(self.emit(
-                        Instruction::Branch {
-                            value: test,
                             target: Target(0),
                             when: true,
                         },
-                        line,
+                        test_line,
                     ));
                     self.release_temporaries(mark);
                 }

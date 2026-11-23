@@ -30,21 +30,13 @@ impl Compiler<'_> {
             if let Some(expression) = &case.condition {
                 let mark = self.mark_temporaries();
                 let rhs = self.compile_expression(expression)?;
-                let dst = self.allocate_register()?;
-                self.emit(
-                    Instruction::Binary {
-                        destination: dst,
-                        operator: Binary::Equal,
-                        left: value,
-                        right: rhs,
-                    },
-                    line,
-                );
                 jumps.push(CaseJump {
                     case_index: i,
                     instruction: self.emit(
-                        Instruction::Branch {
-                            value: dst,
+                        Instruction::BranchCompare {
+                            operator: Binary::Equal,
+                            left: value,
+                            right: rhs,
                             target: Target(0),
                             when: true,
                         },
