@@ -54,26 +54,6 @@ impl PropertyEntry {
         self.read(object)
     }
 
-    /// Borrows a non-hooked, non-reference property value while running `read`,
-    /// so nested array indexing does not clone the outer `PhpArray` handle.
-    pub(crate) fn with_matching_value<R>(
-        &self,
-        object: &Object,
-        scope: Option<&Rc<crate::classes::Class>>,
-        read: impl FnOnce(&Value) -> Option<R>,
-    ) -> Option<R> {
-        if self.hooks.is_some() || !self.matches(object, scope) || !self.read_without_static_notice
-        {
-            return None;
-        }
-        crate::property_storage::with_known(object, self.known(), |value| {
-            if matches!(value, Value::Reference(_)) {
-                return None;
-            }
-            read(value)
-        })
-    }
-
     /// Stores `value` for a write from `scope` when this entry was made for
     /// the object's class and that scope and the value fits the declared
     /// type as it is, as [`Vm::write_property_site`] does; `false`, with
@@ -119,21 +99,6 @@ impl PropertyEntry {
             return None;
         }
         crate::property_storage::write_element_known(object, self.known(), keys, value)
-    }
-
-    /// `++` or `--` of an integer property, for an increment from `scope`,
-    /// as [`Vm::increment_property_site`] does: the expression's value, or
-    /// `None` with nothing changed.
-    pub(crate) fn increment_matching(
-        &self,
-        object: &Object,
-        scope: Option<&Rc<crate::classes::Class>>,
-        mode: phera_bytecode::IncDec,
-    ) -> Option<Value> {
-        if !self.matches(object, scope) {
-            return None;
-        }
-        self.increment(object, mode)
     }
 
     /// Whether this entry was made for the object's class and a read or
