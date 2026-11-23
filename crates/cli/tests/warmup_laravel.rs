@@ -137,11 +137,11 @@ fn the_warm_up_boots_the_models_and_leaves_nothing_of_a_request() {
     // its listener removed. No connection, session store or guard is left.
     assert_eq!(
         get(&laravel.warm, "/api/warmed", &[]).body,
-        r#"{"booted_models":["App\\Models\\Post","App\\Models\\User"],"note_boot_attempts":1,"note_listeners":0,"connections":{"sqlite":"not opened"},"has_session_store":false,"guards":[],"paginator_declared":false}"#
+        r#"{"booted_models":["App\\Models\\Post","App\\Models\\User"],"note_boot_attempts":1,"note_listeners":0,"connections":{"sqlite":"not opened"},"session_stores":0,"guards":[],"paginator_declared":false}"#
     );
     assert_eq!(
         get(&laravel.plain, "/api/warmed", &[]).body,
-        r#"{"booted_models":[],"note_boot_attempts":0,"note_listeners":0,"connections":[],"has_session_store":false,"guards":[],"paginator_declared":false}"#
+        r#"{"booted_models":[],"note_boot_attempts":0,"note_listeners":0,"connections":[],"session_stores":0,"guards":[],"paginator_declared":false}"#
     );
 
     // The model that needs a request boots in the request, once, with both

@@ -73,3 +73,35 @@ pub fn uses_symfony_runtime(document_root: &Path) -> bool {
             .is_file()
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{LARAVEL_ENTRY, LARAVEL_WARM_UP, SYMFONY_RUNTIME};
+
+    /// The shipped PHP is compiled when an application first needs it, in a
+    /// worker's boot. This repository's own tests hold no framework, so
+    /// without this test a syntax error would first show there.
+    #[test]
+    fn the_shipped_php_compiles() {
+        for (file, source) in [
+            ("laravel.php", LARAVEL_ENTRY),
+            (LARAVEL_WARM_UP.file, LARAVEL_WARM_UP.source),
+            (SYMFONY_RUNTIME.file, SYMFONY_RUNTIME.source),
+        ] {
+            if let Err(error) = phera_compiler::compile(source, file) {
+                panic!("{file} does not compile: {error:?}");
+            }
+        }
+    }
+
+    /// Laravel's own `public/index.php` calls `handleRequest()` on line 20,
+    /// and the entry is compiled under that file's name: a stack trace of
+    /// the application must name the line a developer finds in their file.
+    #[test]
+    fn laravel_handles_the_request_on_the_line_of_its_own_front_controller() {
+        let line = LARAVEL_ENTRY
+            .lines()
+            .position(|line| line.contains("$app->handleRequest("));
+        assert_eq!(line, Some(19), "counted from zero");
+    }
+}

@@ -49,7 +49,7 @@ final class WarmUp
             return;
         }
 
-        $hadSessionStore = $app->resolved('session.store');
+        $hadSessionStore = $app->resolved('session') && $app->make('session')->getDrivers() !== [];
 
         // Models first, while no request is bound: see bootModels().
         self::bootModels($app);
@@ -65,7 +65,8 @@ final class WarmUp
 
         // No session store is left behind either (see SERVICES), also not
         // one that a model's boot made on its way to the signed-in user.
-        if (! $hadSessionStore) {
+        if (! $hadSessionStore && $app->resolved('session')) {
+            $app->make('session')->forgetDrivers();
             $app->forgetInstance('session.store');
         }
     }

@@ -66,7 +66,7 @@ Route::get('/warmed', function () {
         'note_boot_attempts' => Note::$boots,
         'note_listeners' => count(app('events')->getRawListeners()['eloquent.creating: '.Note::class] ?? []),
         'connections' => $connections,
-        'has_session_store' => (fn () => isset($this->instances['session.store']))->call(app()),
+        'session_stores' => count(app('session')->getDrivers()),
         'guards' => (fn () => array_keys($this->guards))->call(app('auth')),
         'paginator_declared' => class_exists(Illuminate\Pagination\LengthAwarePaginator::class, false),
     ];

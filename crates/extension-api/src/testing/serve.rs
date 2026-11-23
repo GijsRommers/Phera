@@ -29,13 +29,27 @@ impl Server {
     /// Serves `root` on a free port with `workers` worker threads, with the
     /// extra `environment` variables set.
     pub fn start(phera: &Path, root: &Path, workers: usize, environment: &[(&str, &str)]) -> Self {
+        Self::start_with(phera, root, workers, environment, &[], Stdio::null())
+    }
+
+    /// Like `start`, with more `phera serve` options (`--dev`, ...) and the
+    /// server's log (its standard error) sent to `log`, a file for example.
+    pub fn start_with(
+        phera: &Path,
+        root: &Path,
+        workers: usize,
+        environment: &[(&str, &str)],
+        options: &[&str],
+        log: impl Into<Stdio>,
+    ) -> Self {
         let mut process = Command::new(phera)
             .args(["serve", "--listen", "127.0.0.1:0", "--workers"])
             .arg(workers.to_string())
+            .args(options)
             .arg(root)
             .envs(environment.iter().copied())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(log)
             .spawn()
             .expect("start phera serve");
         let mut banner = String::new();
