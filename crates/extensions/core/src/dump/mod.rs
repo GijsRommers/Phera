@@ -57,7 +57,9 @@ pub(crate) trait Style {
         ("", &[])
     }
 
-    fn before_debug(&mut self, _out: &mut Vec<u8>, _place: Place, _context: &mut dyn Context) {}
+    fn before_debug(&mut self, _out: &mut Vec<u8>, _place: Place) -> bool {
+        false
+    }
 
     fn property_purpose(&self) -> PropertyPurpose {
         PropertyPurpose::Debug
