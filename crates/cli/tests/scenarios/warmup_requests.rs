@@ -21,7 +21,7 @@ const FROM_FILE: &str = "[server]\nwarmup = [\"/api/posts?page=1\", \"/\"]\n";
 
 #[test]
 fn nothing_is_declared_by_default() {
-    let served = Served::start("warmup-none", &[("public/index.php", INDEX)]);
+    let served = Served::start("warmup-none", &[("index.php", INDEX)]);
     assert_eq!(served.get("/index.php"), (200, "not set".to_string()));
 }
 
