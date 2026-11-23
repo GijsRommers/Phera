@@ -456,7 +456,12 @@ impl Machine<'_> {
                 class,
                 method,
                 binding,
-            } => self.prepare_static(position, (class, method), binding),
+            } => self.prepare_static::<GUARDED>(position, (class, method), binding),
+            Instruction::StaticCall {
+                class,
+                method,
+                binding,
+            } => self.prepare_dynamic_static::<GUARDED>(position, class, method, binding),
             Instruction::CheckType { local, ty } => self.check_type(position, local, ty),
             Instruction::New { class } => self.new_object::<GUARDED>(position, class),
             Instruction::InitDynamicCall { callee } => self.prepare_closure(position, callee),
@@ -529,6 +534,7 @@ impl Machine<'_> {
             | Instruction::IterNextKeyed { .. }
             | Instruction::AppendLocal { .. }
             | Instruction::InitStaticCall { .. }
+            | Instruction::StaticCall { .. }
             | Instruction::CheckType { .. }
             | Instruction::New { .. }
             | Instruction::InitDynamicCall { .. }

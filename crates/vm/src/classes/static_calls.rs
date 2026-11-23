@@ -48,9 +48,22 @@ impl Vm {
         method: Reg,
         binding: ClassBinding,
     ) -> Result<(), NativeError> {
-        let class = self.class_target(class)?;
-        let method = self.method_name(method)?;
-        self.prepare_static_style(&class, &method, binding)
+        let class_value = self.read_local(class);
+        let class_name: std::borrow::Cow<'_, str> = match &class_value {
+            Value::Object(object) => std::borrow::Cow::Borrowed(object.class.name()),
+            Value::String(name) => String::from_utf8_lossy(name.as_bytes()),
+            _ => {
+                return Err(NativeError::error(
+                    "Class name must be a valid object or a string",
+                ));
+            }
+        };
+        let method_value = self.read_local(method);
+        let Value::String(method_ref) = &method_value else {
+            return Err(NativeError::error("Method name must be a string"));
+        };
+        let method_name = String::from_utf8_lossy(method_ref.as_bytes());
+        self.prepare_static_style(&class_name, &method_name, binding)
     }
 
     /// Resolve lookup scope separately from the late-bound scope saved on the pending call.
