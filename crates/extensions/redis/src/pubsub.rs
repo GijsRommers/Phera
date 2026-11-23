@@ -29,6 +29,9 @@ pub async fn subscribe(
         redis::RedisConnectionInfo::default().set_protocol(redis::ProtocolVersion::RESP3);
     let auth = s.auth.borrow().clone();
     match auth {
+        Value::InternedStr(password) => {
+            settings = settings.set_password(password.to_string_lossy())
+        }
         Value::String(password) => settings = settings.set_password(password.to_string_lossy()),
         Value::Array(values) => {
             let mut values = values.iter().map(|(_, v)| string(v));
@@ -47,6 +50,7 @@ pub async fn subscribe(
             values
                 .iter()
                 .map(|(_, v)| match v {
+                    Value::InternedStr(s) => s.as_bytes().to_vec(),
                     Value::String(s) => s.as_bytes().to_vec(),
                     _ => string(v).into_bytes(),
                 })
@@ -132,8 +136,8 @@ pub async fn unsubscribe(name: &str, s: &Session, a: &[Value]) -> NativeResult {
                     .iter()
                     .map(|(_, v)| {
                         let mut channel = s.options.borrow().prefix.clone();
-                        if let Value::String(s) = v {
-                            channel.extend_from_slice(s.as_bytes());
+                        if let Some(s) = v.as_str_bytes() {
+                            channel.extend_from_slice(s);
                         } else {
                             channel.extend_from_slice(string(v).as_bytes());
                         }

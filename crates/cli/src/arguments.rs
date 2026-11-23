@@ -17,6 +17,9 @@ Usage:
     --preload                             compile Composer files before listening
     --no-class-warmup                     do not declare in the snapshot the
                                           classes requests autoload
+    --no-service-warmup                   Laravel, Symfony: do not resolve the
+                                          framework's services before the
+                                          snapshot
     --no-process                          forbid starting external programs
     --request-timeout SECONDS             stop a request after this long
                                           (default 60; 0: never)
@@ -97,6 +100,9 @@ pub(crate) struct ServeOptions {
     /// Declare in the snapshot the classes requests autoload; on unless
     /// `--no-class-warmup` is given.
     pub class_warmup: bool,
+    /// Let the framework adapters resolve services before the snapshot; on
+    /// unless `--no-service-warmup` is given.
+    pub service_warmup: bool,
     /// `--compress`: gzip or brotli for clients that accept it. Off unless
     /// given, since the proxy in front usually compresses.
     pub compress: bool,
@@ -291,6 +297,7 @@ fn parse_serve(
         workers: None,
         preload: false,
         class_warmup: true,
+        service_warmup: true,
         compress: false,
         no_process: false,
         request_timeout: None,
@@ -324,6 +331,7 @@ fn parse_serve(
             "--compress" => options.compress = true,
             "--preload" => options.preload = true,
             "--no-class-warmup" => options.class_warmup = false,
+            "--no-service-warmup" => options.service_warmup = false,
             "--dev" => options.dev = true,
             "--no-process" => options.no_process = true,
             "--trusted-proxies" => {

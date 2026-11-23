@@ -265,7 +265,7 @@ impl Vm {
                     let value = array.get(&key).cloned().unwrap_or_default();
                     (PathKey::Index(Some(key)), value)
                 }
-                (Value::String(_), PathKey::Index(_)) => {
+                (Value::InternedStr(_) | Value::String(_), PathKey::Index(_)) => {
                     return Err(NativeError::error(
                         "Cannot create references to/from string offsets",
                     ));

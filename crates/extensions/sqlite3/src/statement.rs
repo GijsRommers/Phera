@@ -92,6 +92,20 @@ pub fn bind(_: &mut dyn Context, this: Option<&Rc<Object>>, arguments: &[Value])
     let handle = state.handle.as_ref().ok_or_else(closed)?;
     let index = match args::value(arguments, 0) {
         Value::Int(index) => usize::try_from(*index).ok(),
+        Value::InternedStr(name) => {
+            let name = name.to_string_lossy();
+            let name = if name.starts_with(':') || name.starts_with('@') {
+                name
+            } else {
+                format!(":{name}")
+            };
+            handle
+                .description
+                .parameters
+                .iter()
+                .position(|p| p.as_ref() == Some(&name))
+                .map(|i| i + 1)
+        }
         Value::String(name) => {
             let name = name.to_string_lossy();
             let name = if name.starts_with(':') || name.starts_with('@') {

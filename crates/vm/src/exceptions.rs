@@ -248,6 +248,7 @@ impl Vm {
                 .find(|property| name == phera_value::ArrayKey::str(property.name.as_str()));
             let Some(property) = property else {
                 let name = match name {
+                    phera_value::ArrayKey::Interned(name) => name.to_string_lossy(),
                     phera_value::ArrayKey::String(name) => name.to_string_lossy(),
                     phera_value::ArrayKey::Int(name) => name.to_string(),
                 };

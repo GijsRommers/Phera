@@ -28,6 +28,7 @@ pub(super) async fn build(
     let mut segments = Vec::new();
     for (key, value) in fields.iter() {
         let name = match key {
+            ArrayKey::Interned(text) => text.as_bytes().to_vec(),
             ArrayKey::String(text) => text.as_bytes().to_vec(),
             ArrayKey::Int(number) => number.to_string().into_bytes(),
         };
@@ -141,10 +142,10 @@ async fn part(
 }
 
 fn property(object: &Object, name: &str) -> Vec<u8> {
-    match object.get(&ArrayKey::str(name)) {
-        Some(Value::String(text)) => text.as_bytes().to_vec(),
-        _ => Vec::new(),
-    }
+    object
+        .get(&ArrayKey::str(name))
+        .and_then(|v| v.as_str_bytes().map(|b| b.to_vec()))
+        .unwrap_or_default()
 }
 
 fn file_header(output: &mut Vec<u8>, filename: &[u8], mime: &[u8]) -> Result<(), TransferError> {

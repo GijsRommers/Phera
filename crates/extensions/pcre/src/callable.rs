@@ -14,7 +14,7 @@ use phera_extension_api::{ArrayKey, PhpArray, Value};
 /// Why `callback` cannot be a callback, or `None` when its shape is right.
 pub(crate) fn invalid_reason(callback: &Value) -> Option<&'static str> {
     match &*callback.deref() {
-        Value::String(_) | Value::Object(_) => None,
+        Value::InternedStr(_) | Value::String(_) | Value::Object(_) => None,
         Value::Array(array) => invalid_array_reason(array),
         _ => Some("no array or string given"),
     }
@@ -24,7 +24,12 @@ pub(crate) fn invalid_reason(callback: &Value) -> Option<&'static str> {
 fn invalid_array_reason(array: &PhpArray) -> Option<&'static str> {
     let class = array.get(&ArrayKey::Int(0));
     let method = array.get(&ArrayKey::Int(1));
-    let is_class = |value: &Value| matches!(&*value.deref(), Value::String(_) | Value::Object(_));
+    let is_class = |value: &Value| {
+        matches!(
+            &*value.deref(),
+            Value::InternedStr(_) | Value::String(_) | Value::Object(_)
+        )
+    };
     if array.len() != 2 {
         Some("array callback must have exactly two members")
     } else if class.is_none() || method.is_none() {
