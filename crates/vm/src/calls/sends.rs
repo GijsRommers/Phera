@@ -113,6 +113,10 @@ impl Vm {
             self.store_sent_value(index, value)?;
             return Ok(true);
         }
+        // The loop sends the next one itself (`calls::fast_path_sends`).
+        if !reference && crate::property_chains::is_chain(place.steps()?) {
+            self.prepare_chain_site(&place)?;
+        }
         Ok(false)
     }
 

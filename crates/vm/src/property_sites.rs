@@ -197,6 +197,22 @@ impl Vm {
         object: &Object,
         name: NameId,
     ) -> Result<Option<Rc<PropertyEntry>>, NativeError> {
+        let entry = self.make_property_entry(object, name)?;
+        if let Some(entry) = &entry
+            && let Some(slot) = self.current().and_then(|frame| frame.site_cache())
+        {
+            *slot.borrow_mut() = crate::unit_caches::CachedSite::Property(entry.clone());
+        }
+        Ok(entry)
+    }
+
+    /// The entry for property `name` of `object`, read or written from the
+    /// running code's class scope, as a site records it.
+    pub(crate) fn make_property_entry(
+        &mut self,
+        object: &Object,
+        name: NameId,
+    ) -> Result<Option<Rc<PropertyEntry>>, NativeError> {
         if crate::properties::native_property_access(object).is_some() {
             return Ok(None);
         }
@@ -303,9 +319,6 @@ impl Vm {
                         .all(|property| property.name != *name)
                 }),
         });
-        if let Some(slot) = self.current().and_then(|frame| frame.site_cache()) {
-            *slot.borrow_mut() = crate::unit_caches::CachedSite::Property(entry.clone());
-        }
         Ok(Some(entry))
     }
 
@@ -319,6 +332,9 @@ impl Vm {
     #[cold]
     #[inline(never)]
     pub(crate) fn prepare_element_site(&mut self, place: &AccessPath) -> Result<(), NativeError> {
+        if crate::property_chains::is_chain(place.steps()?) {
+            return self.prepare_chain_site(place);
+        }
         let mut steps = place.steps()?;
         let (Some(Step::Property(name)), Some(Step::Index(_) | Step::Append)) =
             (steps.next(), steps.next())

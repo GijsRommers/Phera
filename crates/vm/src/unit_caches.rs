@@ -124,6 +124,9 @@ impl SiteRecord {
 pub(crate) enum CachedSite {
     Empty,
     Property(Rc<crate::property_sites::PropertyEntry>),
+    /// One entry per property step of a path that has several
+    /// (`$this->rsm->fieldMappings[$key]`, see `crate::property_chains`).
+    PropertyChain(Rc<[Rc<crate::property_sites::PropertyEntry>]>),
     /// A static property read (see `crate::static_sites`).
     Static(Rc<crate::static_sites::StaticEntry>),
     /// What an unqualified built-in call in a namespace found when it first
@@ -337,6 +340,7 @@ impl crate::snapshot::ForkCopy for CachedSite {
         match self {
             CachedSite::Empty => CachedSite::Empty,
             CachedSite::Property(entry) => CachedSite::Property(entry.clone()),
+            CachedSite::PropertyChain(entries) => CachedSite::PropertyChain(entries.clone()),
             CachedSite::Static(entry) => CachedSite::Static(entry.clone()),
             CachedSite::BuiltinGuard(resolution) => CachedSite::BuiltinGuard(*resolution),
             CachedSite::Function(linked) => CachedSite::Function(Box::new(linked.fork_copy(fork))),

@@ -72,16 +72,16 @@ impl Machine<'_> {
             .get(path.index())?;
         match (body.base, body.steps.as_slice()) {
             (_, [PathStep::Property(_)]) => self.cached_property(position, path),
-            (_, [PathStep::Property(_), PathStep::Index(_), ..]) => {
-                self.property_element(position, path, false)
-            }
+            (_, [PathStep::Property(_), PathStep::Index(_), ..]) => self
+                .property_element(position, path, false)
+                .or_else(|| self.property_chain(position, path, false)),
             (PathBase::Register(_), [PathStep::Index(_), ..]) => {
                 match self.local_element(position, path)?? {
                     Value::Reference(_) => None,
                     value => Some(value.clone()),
                 }
             }
-            _ => None,
+            _ => self.property_chain(position, path, false),
         }
     }
 }

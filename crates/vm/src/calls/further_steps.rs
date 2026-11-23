@@ -73,9 +73,18 @@ impl Machine<'_> {
                         dst,
                         (path, FetchMode::Read),
                     ) {
-                        Step::Slow => {
-                            self.fetch_static::<GUARDED>(position, dst, (path, FetchMode::Read))
-                        }
+                        Step::Slow => match self.fetch_static::<GUARDED>(
+                            position,
+                            dst,
+                            (path, FetchMode::Read),
+                        ) {
+                            Step::Slow => self.fetch_property_chain::<GUARDED>(
+                                position,
+                                dst,
+                                (path, FetchMode::Read),
+                            ),
+                            done => done,
+                        },
                         done => done,
                     },
                     done => done,
@@ -102,7 +111,15 @@ impl Machine<'_> {
                                 (path, mode),
                             ) {
                                 Step::Slow => {
-                                    self.fetch_static::<GUARDED>(position, dst, (path, mode))
+                                    match self.fetch_static::<GUARDED>(position, dst, (path, mode))
+                                    {
+                                        Step::Slow => self.fetch_property_chain::<GUARDED>(
+                                            position,
+                                            dst,
+                                            (path, mode),
+                                        ),
+                                        done => done,
+                                    }
                                 }
                                 done => done,
                             },
