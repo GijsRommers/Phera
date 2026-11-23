@@ -183,6 +183,30 @@ fn frees_on_drop(slot: &Option<Value>) -> bool {
     }
 }
 
+/// `(string) $value` for a value that is an integer or a string already:
+/// nothing to report. Any other operand (an array warns, an object may run
+/// `__toString`, a float follows the precision setting) converts in the
+/// general handler.
+#[inline(never)]
+fn cast_string_step<const GUARDED: bool, S: crate::calls::registers::Slots + ?Sized>(
+    slots: &mut S,
+    destination: Reg,
+    source: Reg,
+) -> ScalarStep {
+    let text = match slots.slot(source) {
+        Some(Some(Value::Int(integer))) => {
+            match phera_value::to_php_string(&Value::Int(*integer), &mut phera_value::NoDiagnostics)
+            {
+                Ok(text) => text,
+                Err(_) => return ScalarStep::Fallback,
+            }
+        }
+        Some(Some(Value::String(text))) => text.clone(),
+        _ => return ScalarStep::Fallback,
+    };
+    store::<GUARDED, _>(slots, destination, Value::String(text))
+}
+
 /// Builtins with no coercion can read the local directly.
 #[inline(never)]
 fn builtin_step<const GUARDED: bool, S: crate::calls::registers::Slots + ?Sized>(
@@ -319,6 +343,11 @@ pub(crate) fn scalar_step<const GUARDED: bool, S: crate::calls::registers::Slots
             let value = *value;
             store::<GUARDED, _>(slots, dst, Value::Bool(value))
         }
+        Instruction::Cast {
+            to: phera_bytecode::CastKind::String,
+            dst,
+            src,
+        } => cast_string_step::<GUARDED, _>(slots, dst, src),
         Instruction::Move { dst, src } => {
             if let Some(integer) = integer_at(slots, src) {
                 return store_integer::<GUARDED, _>(slots, dst, integer);
