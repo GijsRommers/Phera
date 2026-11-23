@@ -15,10 +15,10 @@ pub fn concat(a: &Value, b: &Value, d: &mut dyn Diagnostics) -> Result<Value, Op
         if sb.is_empty() {
             return Ok(a.clone());
         }
-        let mut out = Vec::with_capacity(sa.len() + sb.len());
-        out.extend_from_slice(sa.as_bytes());
-        out.extend_from_slice(sb.as_bytes());
-        return Ok(Value::String(PhpString::from(out)));
+        return Ok(Value::String(PhpString::from_pair(
+            sa.as_bytes(),
+            sb.as_bytes(),
+        )));
     }
     let a_val = crate::convert::to_string_value(a, d)?;
     let b_val = crate::convert::to_string_value(b, d)?;
@@ -31,8 +31,8 @@ pub fn concat(a: &Value, b: &Value, d: &mut dyn Diagnostics) -> Result<Value, Op
     if sb.is_empty() {
         return Ok(a_val);
     }
-    let mut out = Vec::with_capacity(sa.len() + sb.len());
-    out.extend_from_slice(sa.as_bytes());
-    out.extend_from_slice(sb.as_bytes());
-    Ok(Value::String(PhpString::from(out)))
+    Ok(Value::String(PhpString::from_pair(
+        sa.as_bytes(),
+        sb.as_bytes(),
+    )))
 }

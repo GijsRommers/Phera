@@ -49,3 +49,8 @@ rests on a process-wide seed. PHP uses no secret array-key seed.
 
 Only a hash of zero is recorded as one. The full width is retained for all
 other hashes. Caching and the inline-byte layout are measured separately.
+
+The final commit grows the shared allocation to 64 bytes and stores up to
+38 bytes inline. Borrowed short strings and short concatenations fit in one
+allocation. Existing owned vectors keep their capacity and larger strings
+still own a separate buffer. The final commit isolates this layout choice.
