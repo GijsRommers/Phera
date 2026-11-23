@@ -440,7 +440,10 @@ one query is built for it (no connection is opened), and the framework
 services Octane resolves in a new worker are resolved (the application's
 `octane.warm` list when it has one). For Symfony: the event dispatcher,
 with its listeners still created on first use. On the test applications a
-Laravel Eloquent route went from WARM_README. Two things to know:
+Laravel Eloquent route went from 106 to 55 million instructions per request
+and a Symfony route without a database from 14.0 to 13.2 million. Every
+worker boots a little longer (205 to 249 ms on that Laravel application)
+and holds what was built (9 MiB more). Two things to know:
 
 - A model's `boot()` and `booted()` run once per worker, not once per
   request, and without a request. A model whose boot asks for the request or

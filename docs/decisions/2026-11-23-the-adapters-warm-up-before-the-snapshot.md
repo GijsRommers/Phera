@@ -60,14 +60,22 @@ scratch copies of the test applications (2026-11-22); these are the product's
 adapters, same binary with the warm-up on and off, one worker, instructions
 per settled request (lowest of the pairs):
 
-| Route | Off | On | Change | PHP-FPM |
-|---|---:|---:|---:|---:|
-| Laravel `/api/posts?page=2` | LPOFF | LPON | LPCH | 16.7M |
-| Laravel `/api/hello` | LHOFF | LHON | LHCH | 7.4M |
-| Symfony `/api/ping` | SPOFF | SPON | SPCH | |
-| Symfony `/api/db-yardstick` | SDOFF | SDON | SDCH | 57.9M |
+| Route | Main `1fcc6383` | Off | On | Change | Times PHP-FPM |
+|---|---:|---:|---:|---:|---|
+| Laravel `/api/posts?page=2` | 106.45M | 106.31M | 54.97M | −48.3% | 6.4 to 3.3 (16.7M) |
+| Laravel `/api/hello` | 25.15M | 25.16M | 24.46M | −2.8% | 3.4 to 3.3 (7.4M) |
+| Symfony `/api/ping` | 14.00M | 14.01M | 13.16M | −6.0% | |
+| Symfony `/api/db-yardstick` | 441.72M | 441.78M | 441.37M | −0.1% | 7.6 (57.9M) |
 
-Where it comes from, each step alone (Laravel, main `1fcc6383`):
+`bin/gate.sh` against main, four pairs: `/api/hello` 25.10M to 24.45M
+(−2.6%), `/api/posts?page=2` 106.40M to 54.98M (−48.3%). The review's
+"no request" rows were 74.9M and 22.5M: posts is below it because all
+three models of the application are booted, not one; hello is above it
+because the booted models make its fork dearer (below) and the session
+store is not resolved (0.6M).
+
+Where it comes from, each step alone, tried in a scratch copy of the entry
+script before the adapter was written (Laravel, main `1fcc6383`):
 
 | Step | `/api/hello` | `/api/posts?page=2` |
 |---|---:|---:|
@@ -98,9 +106,33 @@ ends right after `Phera\snapshot()`):
 | ... and `services_resetter` run in every request | 15.04M | 428.13M | |
 
 The cost: a fork copies what the snapshot holds, so every request pays for
-what the warm-up built, whether it uses it or not. FORK_COST
+what the warm-up built, whether it uses it or not.
 
-The boot of a worker: BOOT_COST
+| | Off | On |
+|---|---:|---:|
+| Laravel: a request that ends right after `Phera\snapshot()` (the fork) | 4.95M | 7.54M |
+| Symfony: the same | 1.63M | 1.86M |
+| Laravel with 100 more models that no route uses: `/api/hello` | 25.11M | 25.87M |
+| ... `/api/posts?page=2` | 106.33M | 56.52M |
+| Laravel, boot of a worker | 205 ms, 324 files | 249 ms, 439 files |
+| ... process start until one worker has booted | 2,398M | 2,935M |
+| ... with the 100 models | 181 ms | 389 ms, 542 files |
+| Symfony, boot of a worker | 49 ms | 51 ms |
+| Laravel, memory of the process, one worker, after 200 requests | 102.1 MiB | 111.4 MiB |
+| ... four workers | 185.4 MiB | 203.2 MiB |
+| ... one worker, with the 100 models | 98 MiB | 155 MiB |
+| Symfony, memory, one worker | 28.2 MiB | 28.4 MiB |
+
+Each booted model adds about 16,000 instructions to every fork and, in this
+engine, 0.5 to 0.75 MiB to every worker: that is what a declared Eloquent
+model class costs, with or without the warm-up (a server with the warm-up
+off reaches the same 160 MiB once its requests have used all 100 models).
+The warm-up pays it for every model at the boot instead of for the models
+requests happen to use. On the test application no route costs more than
+before. An application with hundreds of models and routes that use none
+of them would see those routes rise by about 1.6M per hundred models;
+booting only the models a worker's requests have used (the class warm-up
+already keeps that list) is the way out if that shows up.
 
 ## Turned down
 
@@ -140,7 +172,8 @@ The boot of a worker: BOOT_COST
 - **Removing the stand-in request after the warm-up.** `Container::instance()`
   calls the rebinding callbacks only when the name was bound, so the URL
   generator would keep `APP_URL` as its host in every request.
-- **A list of models in configuration.** The directory scan costs SCAN_COST.
+- **A list of models in configuration.** Finding them costs 0.4 ms for
+  three files and 2 ms for 103; booting them is the cost, not the scan.
 
 ## Structure: was, is
 
