@@ -180,6 +180,8 @@ impl Vm {
             Self::check_factory_class(&class)?;
         }
         let object = object.unwrap_or_else(|| self.classes.allocate(class.clone()));
+        // PhpString's cached hash cell does not change Eq or Hash.
+        #[allow(clippy::mutable_key_type)]
         let properties: HashSet<_> = class
             .defaults
             .iter()

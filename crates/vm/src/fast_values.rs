@@ -32,7 +32,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use phera_bytecode::{BinaryOp, FetchMode, Instruction, Reg, Target, UnaryOp};
-use phera_value::{ArrayKey, Diagnostics, PhpArray, Value, to_bool};
+use phera_value::{Diagnostics, PhpArray, Value, to_bool};
 
 use crate::fast::{ScalarStep, store};
 
@@ -174,18 +174,19 @@ fn array_element(slots: &[Option<Value>], base: Reg, index: Reg, mode: FetchMode
         FetchMode::Quiet | FetchMode::Isset | FetchMode::Empty => true,
         FetchMode::Destructure => return None,
     };
-    let key = match slots.get(index.index())? {
-        Some(Value::Int(integer)) => ArrayKey::Int(*integer),
-        Some(Value::String(string)) => ArrayKey::from_string(string.clone()),
-        _ => return None,
-    };
+    let key = slots.get(index.index())?.as_ref()?;
     match slots.get(base.index())? {
-        Some(Value::Array(array)) => match array.get(&key) {
-            Some(value) => Some(value.deref().clone()),
-            None if quiet => Some(Value::Null),
-            None => None,
-        },
-        None | Some(Value::Null) if quiet => Some(Value::Null),
+        Some(Value::Array(array)) => {
+            let found = array.get_value_key(key)?;
+            match found {
+                Some(value) => Some(value.deref().clone()),
+                None if quiet => Some(Value::Null),
+                None => None,
+            }
+        }
+        None | Some(Value::Null) if quiet && matches!(key, Value::Int(_) | Value::String(_)) => {
+            Some(Value::Null)
+        }
         _ => None,
     }
 }

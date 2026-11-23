@@ -82,8 +82,18 @@ impl ArrayKey {
 /// `zend_handle_numeric_str_ex`: canonical decimal integer key. Rejects
 /// leading zeros (`"05"`, `"-0"`), `+`, whitespace, and anything that does
 /// not fit in `i64` (`"9223372036854775808"` stays a string).
-///
-fn numeric_string_key(bytes: &[u8]) -> Option<i64> {
+#[inline]
+pub(crate) fn numeric_string_key(bytes: &[u8]) -> Option<i64> {
+    let &first = bytes.first()?;
+    if !first.is_ascii_digit() && first != b'-' {
+        return None;
+    }
+    numeric_string_key_slow(bytes)
+}
+
+#[cold]
+#[inline(never)]
+fn numeric_string_key_slow(bytes: &[u8]) -> Option<i64> {
     let (digits, neg) = match bytes.split_first() {
         Some((b'-', rest)) => (rest, true),
         _ => (bytes, false),

@@ -71,6 +71,8 @@ async fn difference(context: &mut dyn Context, arguments: &[Value]) -> NativeRes
     if arguments.len() == 1 {
         return Ok(arguments[0].clone());
     }
+    // PhpString's cached hash cell does not change Eq or Hash.
+    #[allow(clippy::mutable_key_type)]
     let mut excluded = HashSet::new();
     for other in other_arrays(arguments) {
         for value in other.values() {
@@ -226,6 +228,8 @@ async fn unique(context: &mut dyn Context, arguments: &[Value]) -> NativeResult 
         return Ok(arguments[0].clone());
     }
     if flags == SORT_STRING {
+        // PhpString's cached hash cell does not change Eq or Hash.
+        #[allow(clippy::mutable_key_type)]
         let mut seen = HashSet::new();
         let mut result = PhpArray::new();
         for (key, value) in array.iter() {

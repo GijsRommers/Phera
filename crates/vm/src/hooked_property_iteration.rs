@@ -48,6 +48,8 @@ pub(crate) struct IterationGetter {
 
 impl HookedPropertyIterator {
     pub(crate) fn new(object: Rc<Object>, class: Rc<Class>, binding: Binding) -> Self {
+        // PhpString's cached hash cell does not change Eq or Hash.
+        #[allow(clippy::mutable_key_type)]
         let declared = class
             .defaults
             .iter()
