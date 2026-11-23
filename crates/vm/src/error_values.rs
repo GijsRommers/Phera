@@ -8,12 +8,7 @@ pub(crate) fn trace_argument(value: &Value, limit: usize) -> String {
         Value::Array(_) => "Array".into(),
         Value::Object(object)
             if object.class.is_enum()
-                && let Some(name) = object
-                    .get(&phera_value::ArrayKey::interned_str(b"name"))
-                    .and_then(|value| match value {
-                        Value::String(name) => Some(name.to_string_lossy()),
-                        _ => None,
-                    }) =>
+                && let Some(name) = crate::classes::enum_cases::case_name(object) =>
         {
             format!("{}::{name}", object.class.name())
         }

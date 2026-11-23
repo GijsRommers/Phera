@@ -17,11 +17,12 @@
 use std::{
     collections::{HashMap, HashSet},
     rc::Rc,
+    sync::OnceLock,
 };
 
 use phera_bytecode::EnumBacking;
 use phera_extension_api::NativeError;
-use phera_value::{ArrayKey, Object, Value};
+use phera_value::{ArrayKey, InternedStr, Object, PhpString, Value};
 
 use super::{
     Class, ClassIndex,
@@ -259,18 +260,23 @@ impl BackingBuilder {
     }
 }
 
-fn name_of(object: &Object) -> Result<String, NativeError> {
-    if let Some(name) = object
-        .get(&ArrayKey::interned_str(b"name"))
-        .and_then(|value| match value {
-            Value::String(name) => Some(name.to_string_lossy()),
-            _ => None,
-        })
-    {
-        Ok(name)
-    } else {
-        Err(internal_error!("enum case name"))
+/// The declared name of an enum case such as `Color::Red`.
+pub(crate) fn case_name(object: &Object) -> Option<String> {
+    static INTERNED_NAME: OnceLock<Option<&'static InternedStr>> = OnceLock::new();
+    thread_local! {
+        static NAME: ArrayKey = {
+            let name = *INTERNED_NAME.get_or_init(|| InternedStr::try_intern(b"name"));
+            ArrayKey::String(name.map_or_else(|| PhpString::from("name"), PhpString::from_interned))
+        };
     }
+    NAME.with(|key| match object.get(key) {
+        Some(Value::String(name)) => Some(name.to_string_lossy()),
+        _ => None,
+    })
+}
+
+fn name_of(object: &Object) -> Result<String, NativeError> {
+    case_name(object).ok_or_else(|| internal_error!("enum case name"))
 }
 
 pub(super) fn case_lookup(class: &Rc<Class>, name: &str) -> Result<CaseLookup, NativeError> {

@@ -3,11 +3,13 @@
 use std::{
     collections::{HashMap, HashSet},
     rc::Rc,
+    sync::OnceLock,
 };
 
 use crate::ArrayKey;
 use crate::Value;
 use crate::value::ClassHandle;
+use phera_value::{InternedStr, PhpString};
 
 /// The decoder's class allowlist and depth at entry into a native C: payload.
 #[derive(Clone, Default)]
@@ -200,12 +202,17 @@ pub const INCOMPLETE_CLASS_NAME: &str = "__PHP_Incomplete_Class_Name";
 
 /// All property and method handlers use the original class's name in this diagnostic.
 pub fn incomplete_object_message(object: &crate::Object, action: &str) -> String {
-    let name = match object.get(&crate::ArrayKey::interned_str(
-        INCOMPLETE_CLASS_NAME.as_bytes(),
-    )) {
+    static INTERNED_NAME: OnceLock<Option<&'static InternedStr>> = OnceLock::new();
+    thread_local! {
+        static NAME: ArrayKey = {
+            let name = *INTERNED_NAME.get_or_init(|| InternedStr::try_intern(INCOMPLETE_CLASS_NAME.as_bytes()));
+            ArrayKey::String(name.map_or_else(|| PhpString::from(INCOMPLETE_CLASS_NAME), PhpString::from_interned))
+        };
+    }
+    let name = NAME.with(|key| match object.get(key) {
         Some(Value::String(name)) => name.to_string_lossy(),
         _ => "unknown".into(),
-    };
+    });
     format!(
         "The script tried to {action} an incomplete object. Please ensure that the \
          class definition \"{name}\" of the object you are trying to operate on was loaded _before_ unserialize() \

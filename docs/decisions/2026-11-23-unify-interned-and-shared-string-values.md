@@ -10,6 +10,7 @@ literals and built strings.
 | String storage | A canonical pointer or an `Rc<Vec<u8>>` chosen by the value | The same two forms inside a private string representation |
 | String lookup in arrays | A function per representation | Borrow a `PhpString` and use its precomputed hash and numeric-key classification when it is interned |
 | String borrow | A separate `StrRef` wrapper | Borrow a `PhpString` |
+| Fixed keys in enum and unserialize diagnostics | Interner lookup at each use | One process lookup and a retained per-thread key, including full-table fallback |
 
 Canonical strings retain byte equality by pointer, precomputed truthiness, and
 the existing interner bounds. Mutation first makes writable storage so it
