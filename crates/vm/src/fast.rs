@@ -325,7 +325,7 @@ pub(crate) fn scalar_step<const GUARDED: bool, S: crate::calls::registers::Slots
                     store::<GUARDED, _>(slots, dst, Value::Float(value))
                 }
                 (CastKind::String, Some(Some(Value::InternedStr(value)))) => {
-                    store::<GUARDED, _>(slots, dst, Value::InternedStr(*value))
+                    store::<GUARDED, _>(slots, dst, Value::InternedStr(value))
                 }
                 (CastKind::String, Some(Some(Value::String(value)))) => {
                     let value = Value::String(value.clone());

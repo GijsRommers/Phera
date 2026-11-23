@@ -51,6 +51,7 @@ impl Vm {
         let class_value = self.read_local(class);
         let class_name: std::borrow::Cow<'_, str> = match &class_value {
             Value::Object(object) => std::borrow::Cow::Borrowed(object.class.name()),
+            Value::InternedStr(name) => String::from_utf8_lossy(name.as_bytes()),
             Value::String(name) => String::from_utf8_lossy(name.as_bytes()),
             _ => {
                 return Err(NativeError::error(
@@ -59,10 +60,10 @@ impl Vm {
             }
         };
         let method_value = self.read_local(method);
-        let Value::String(method_ref) = &method_value else {
+        let Some(method_bytes) = method_value.as_str_bytes() else {
             return Err(NativeError::error("Method name must be a string"));
         };
-        let method_name = String::from_utf8_lossy(method_ref.as_bytes());
+        let method_name = String::from_utf8_lossy(method_bytes);
         self.prepare_static_style(&class_name, &method_name, binding)
     }
 

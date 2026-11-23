@@ -16,7 +16,7 @@
 use std::rc::Rc;
 
 use phera_bytecode::{ConstId, Reg, SymbolId};
-use phera_value::{ArrayKey, NoDiagnostics, PhpArray, Value};
+use phera_value::{NoDiagnostics, PhpArray, Value};
 
 use crate::calls::execution_loop::{Machine, Position, Step};
 use crate::calls::sync_native::PureNative;
@@ -130,6 +130,7 @@ impl Machine<'_> {
 #[inline(always)]
 fn as_str_bytes(slot: &Option<Value>) -> Option<&[u8]> {
     match slot.as_ref()? {
+        Value::InternedStr(s) => Some(s.as_bytes()),
         Value::String(s) => Some(s.as_bytes()),
         _ => None,
     }
@@ -227,9 +228,14 @@ fn eval_pure_native(pure: PureNative, values: &[Option<Value>]) -> Option<Value>
                 return None;
             }
             let found = match needle {
-                Value::String(n) => haystack.values().any(
-                    |v| matches!(&*v.deref(), Value::String(o) if o.as_bytes() == n.as_bytes()),
-                ),
+                Value::InternedStr(n) => haystack.values().any(|v| match &*v.deref() {
+                    Value::InternedStr(o) => std::ptr::eq(*o, *n) || o.as_bytes() == n.as_bytes(),
+                    Value::String(o) => o.as_bytes() == n.as_bytes(),
+                    _ => false,
+                }),
+                Value::String(n) => haystack
+                    .values()
+                    .any(|v| v.deref().as_str_bytes() == Some(n.as_bytes())),
                 Value::Int(n) => haystack
                     .values()
                     .any(|v| matches!(&*v.deref(), Value::Int(o) if o == n)),
@@ -246,13 +252,14 @@ fn eval_pure_native(pure: PureNative, values: &[Option<Value>]) -> Option<Value>
             let [Some(key), Some(Value::Array(array))] = values else {
                 return None;
             };
-            let normalized = match key {
-                Value::Int(k) => ArrayKey::Int(*k),
-                Value::Bool(k) => ArrayKey::Int(i64::from(*k)),
-                Value::String(k) => ArrayKey::from_string(k.clone()),
+            let found = match key {
+                Value::Int(k) => array.get_int(*k).is_some(),
+                Value::Bool(k) => array.get_int(i64::from(*k)).is_some(),
+                Value::InternedStr(k) => array.contains_interned(k),
+                Value::String(k) => array.get_str(k).is_some(),
                 _ => return None,
             };
-            Some(Value::Bool(array.contains_key(&normalized)))
+            Some(Value::Bool(found))
         }
         PureNative::Implode => {
             let [glue, Some(Value::Array(array))] = values else {
@@ -268,6 +275,7 @@ fn eval_pure_native(pure: PureNative, values: &[Option<Value>]) -> Option<Value>
                     out.extend_from_slice(glue);
                 }
                 match &*value.deref() {
+                    Value::InternedStr(s) => out.extend_from_slice(s.as_bytes()),
                     Value::String(s) => out.extend_from_slice(s.as_bytes()),
                     Value::Int(n) => {
                         use std::io::Write;
@@ -368,10 +376,11 @@ fn eval_trim(values: &[Option<Value>], left: bool, right: bool) -> Option<Value>
         }
         _ => return None,
     };
-    let Value::String(original_str) = original_val else {
-        return None;
+    let original = match original_val {
+        Value::InternedStr(s) => s.as_bytes(),
+        Value::String(s) => s.as_bytes(),
+        _ => return None,
     };
-    let original = original_str.as_bytes();
     let mut trimmed = original;
     if left {
         let start = trimmed

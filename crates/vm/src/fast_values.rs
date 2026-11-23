@@ -32,7 +32,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use phera_bytecode::{BinaryOp, FetchMode, Instruction, Reg, Target, UnaryOp};
-use phera_value::{Diagnostics, PhpArray, Value, to_bool};
+use phera_value::{ArrayKey, Diagnostics, PhpArray, Value, to_bool};
 
 use crate::fast::{ScalarStep, store};
 
@@ -150,7 +150,10 @@ pub(crate) fn value_step<const GUARDED: bool>(
 fn array_set(slots: &mut [Option<Value>], array: Reg, key: Reg, src: Reg) -> ScalarStep {
     let array_key = match slots.get(key.index()) {
         Some(Some(Value::Int(integer))) => ArrayKey::Int(*integer),
-        Some(Some(Value::InternedStr(string))) => ArrayKey::from_interned(string),
+        Some(Some(Value::InternedStr(string))) => match string.numeric_key() {
+            Some(integer) => ArrayKey::Int(integer),
+            None => ArrayKey::Interned(string),
+        },
         Some(Some(Value::String(string))) => ArrayKey::from_string(string.clone()),
         _ => return ScalarStep::Fallback,
     };
@@ -295,7 +298,7 @@ fn string_offset_element(bytes: &[u8], key: &Value, quiet: bool) -> Option<Value
         .ok()
         .and_then(|pos| bytes.get(pos))
     {
-        Some(&byte) => Some(Value::InternedStr(phera_value::InternedStr::byte(byte))),
+        Some(&byte) => Some(Value::from(vec![byte])),
         None if quiet => Some(Value::Null),
         None => None,
     }

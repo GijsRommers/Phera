@@ -49,6 +49,9 @@ impl Vm {
         {
             let exact_key = match (backing, &*argument.deref()) {
                 (EnumBacking::Int, Value::Int(number)) => Some(ArrayKey::Int(*number)),
+                (EnumBacking::String, Value::InternedStr(string)) => {
+                    Some(ArrayKey::Interned(string))
+                }
                 (EnumBacking::String, Value::String(string)) => {
                     Some(ArrayKey::String(string.clone()))
                 }
