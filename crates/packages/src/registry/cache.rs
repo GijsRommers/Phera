@@ -10,7 +10,10 @@ use std::fs;
 use std::io::Write;
 
 pub(crate) fn fetch(store: &Store, network: &Network, url: &str, offline: bool) -> Result<Value> {
-    let key = format!("{:x}.json", Sha256::digest(url.as_bytes()));
+    let key = format!(
+        "{}.json",
+        base16ct::lower::encode_string(&Sha256::digest(url.as_bytes()))
+    );
     let path = store.directory.join("metadata").join(key);
     let cached: Option<Value> = fs::read(&path)
         .ok()

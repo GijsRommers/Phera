@@ -11,7 +11,6 @@
 //! meanwhile. Only owned bytes and options cross over; PHP values hold
 //! `Rc`s and must stay on their thread.
 
-use argon2::password_hash::SaltString;
 use argon2::{Argon2, Params, PasswordHash, PasswordHasher, PasswordVerifier, Version};
 use phera_extension_api::{
     ArrayKey, Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType,
@@ -130,9 +129,8 @@ fn hash_password(
         Some(ARGON2_OUTPUT_BYTES),
     )
     .map_err(|error| error.to_string())?;
-    let salt = SaltString::encode_b64(&salt).map_err(|error| error.to_string())?;
     Argon2::new(argon2, Version::V0x13, params)
-        .hash_password(password, &salt)
+        .hash_password_with_salt(password, &salt)
         .map(|hash| hash.to_string())
         .map_err(|error| error.to_string())
 }

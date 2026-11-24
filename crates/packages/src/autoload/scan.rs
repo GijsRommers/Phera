@@ -97,7 +97,10 @@ pub(super) fn classes(
             digest.update(b"class-map-v4");
             digest.update(env!("CARGO_PKG_VERSION"));
             digest.update(&text);
-            let key = format!("{:x}.json", digest.finalize());
+            let key = format!(
+                "{}.json",
+                base16ct::lower::encode_string(&digest.finalize())
+            );
             let cache_file = cache.join(key);
             let cached: Option<Vec<Vec<u8>>> = fs::read(&cache_file)
                 .ok()

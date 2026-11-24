@@ -66,19 +66,19 @@ impl Operation<'_> {
     fn oaep(&self, data: &[u8], algorithm: Algorithm) -> rsa::Result<Vec<u8>> {
         use rsa::sha2::{Sha224, Sha256, Sha384, Sha512, Sha512_224, Sha512_256};
         match algorithm {
-            Algorithm::Md5 => self.apply_oaep::<md5_rsa::Md5>(data),
-            Algorithm::Ripemd160 => self.apply_oaep::<ripemd_rsa::Ripemd160>(data),
-            Algorithm::Sha1 => self.apply_oaep::<sha1_rsa::Sha1>(data),
+            Algorithm::Md5 => self.apply_oaep::<md5::Md5>(data),
+            Algorithm::Ripemd160 => self.apply_oaep::<ripemd::Ripemd160>(data),
+            Algorithm::Sha1 => self.apply_oaep::<sha1::Sha1>(data),
             Algorithm::Sha224 => self.apply_oaep::<Sha224>(data),
             Algorithm::Sha256 => self.apply_oaep::<Sha256>(data),
             Algorithm::Sha384 => self.apply_oaep::<Sha384>(data),
             Algorithm::Sha512 => self.apply_oaep::<Sha512>(data),
             Algorithm::Sha512224 => self.apply_oaep::<Sha512_224>(data),
             Algorithm::Sha512256 => self.apply_oaep::<Sha512_256>(data),
-            Algorithm::Sha3_224 => self.apply_oaep::<sha3_rsa::Sha3_224>(data),
-            Algorithm::Sha3_256 => self.apply_oaep::<sha3_rsa::Sha3_256>(data),
-            Algorithm::Sha3_384 => self.apply_oaep::<sha3_rsa::Sha3_384>(data),
-            Algorithm::Sha3_512 => self.apply_oaep::<sha3_rsa::Sha3_512>(data),
+            Algorithm::Sha3_224 => self.apply_oaep::<sha3::Sha3_224>(data),
+            Algorithm::Sha3_256 => self.apply_oaep::<sha3::Sha3_256>(data),
+            Algorithm::Sha3_384 => self.apply_oaep::<sha3::Sha3_384>(data),
+            Algorithm::Sha3_512 => self.apply_oaep::<sha3::Sha3_512>(data),
         }
     }
 

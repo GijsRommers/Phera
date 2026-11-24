@@ -6,7 +6,7 @@ use mysql_async::{Conn, OptsBuilder};
 use rsa::pkcs8::{EncodePublicKey, LineEnding};
 use rsa::{Generate, Oaep, PrivateKey};
 use rustls::ServerConfig;
-use sha1_011::Sha1;
+use sha1::Sha1;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;

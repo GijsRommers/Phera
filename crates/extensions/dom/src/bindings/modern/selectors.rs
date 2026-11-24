@@ -117,7 +117,7 @@ fn find(
             id,
             html: state.document.settings.html,
         };
-        matches_selector_list(&selectors, &element, &mut context)
+        matches_selector_list(&selectors, element, &mut context)
     };
     let selected = match search {
         Search::All => arena

@@ -3,7 +3,7 @@
 use std::hash::Hasher;
 
 use blake2b_simd::Params;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use phera_extension_api::{
     ConstantValue, Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Value, args,
 };
