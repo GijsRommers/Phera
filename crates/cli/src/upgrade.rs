@@ -169,7 +169,7 @@ fn platform(os: &str, arch: &str, glibc: bool) -> Option<&'static str> {
 
 fn verify_checksum(sums: &str, name: &str, archive: &[u8]) -> Result<()> {
     let digest = archive_checksum(sums, name)?;
-    if !digest.eq_ignore_ascii_case(&format!("{:x}", Sha256::digest(archive))) {
+    if !digest.eq_ignore_ascii_case(&base16ct::lower::encode_string(&Sha256::digest(archive))) {
         return Err(format!("SHA-256 verification failed for {name}.").into());
     }
     Ok(())

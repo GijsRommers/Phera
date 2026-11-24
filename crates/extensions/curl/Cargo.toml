@@ -32,6 +32,7 @@ tower-service.workspace = true
 url.workspace = true
 
 [dev-dependencies]
+base16ct.workspace = true
 phera-runtime.workspace = true
 rcgen.workspace = true
 tempfile.workspace = true

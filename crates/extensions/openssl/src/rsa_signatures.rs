@@ -33,19 +33,19 @@ impl Operation<'_> {
     ) -> Option<Output> {
         use rsa::sha2::{Sha224, Sha256, Sha384, Sha512, Sha512_224, Sha512_256};
         match algorithm {
-            Algorithm::Md5 => self.run::<md5_rsa::Md5>(padding, data),
-            Algorithm::Ripemd160 => self.run::<ripemd_rsa::Ripemd160>(padding, data),
-            Algorithm::Sha1 => self.run::<sha1_rsa::Sha1>(padding, data),
+            Algorithm::Md5 => self.run::<md5::Md5>(padding, data),
+            Algorithm::Ripemd160 => self.run::<ripemd::Ripemd160>(padding, data),
+            Algorithm::Sha1 => self.run::<sha1::Sha1>(padding, data),
             Algorithm::Sha224 => self.run::<Sha224>(padding, data),
             Algorithm::Sha256 => self.run::<Sha256>(padding, data),
             Algorithm::Sha384 => self.run::<Sha384>(padding, data),
             Algorithm::Sha512 => self.run::<Sha512>(padding, data),
             Algorithm::Sha512224 => self.run::<Sha512_224>(padding, data),
             Algorithm::Sha512256 => self.run::<Sha512_256>(padding, data),
-            Algorithm::Sha3_224 => self.run::<sha3_rsa::Sha3_224>(padding, data),
-            Algorithm::Sha3_256 => self.run::<sha3_rsa::Sha3_256>(padding, data),
-            Algorithm::Sha3_384 => self.run::<sha3_rsa::Sha3_384>(padding, data),
-            Algorithm::Sha3_512 => self.run::<sha3_rsa::Sha3_512>(padding, data),
+            Algorithm::Sha3_224 => self.run::<sha3::Sha3_224>(padding, data),
+            Algorithm::Sha3_256 => self.run::<sha3::Sha3_256>(padding, data),
+            Algorithm::Sha3_384 => self.run::<sha3::Sha3_384>(padding, data),
+            Algorithm::Sha3_512 => self.run::<sha3::Sha3_512>(padding, data),
         }
     }
 

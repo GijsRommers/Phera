@@ -32,7 +32,7 @@ rcgen.workspace = true
 ring = "0.17"
 tempfile.workspace = true
 rsa.workspace = true
-sha1_011.workspace = true
+sha1.workspace = true
 
 [lints]
 workspace = true

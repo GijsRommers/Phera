@@ -50,7 +50,9 @@ pub(crate) fn compute(manifest: &Value) -> Result<String> {
             _ => encoded.push(character),
         }
     }
-    Ok(format!("{:x}", Md5::digest(encoded.as_bytes())))
+    Ok(base16ct::lower::encode_string(&Md5::digest(
+        encoded.as_bytes(),
+    )))
 }
 
 fn php_arrays(value: Value) -> Value {

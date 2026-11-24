@@ -68,7 +68,7 @@ impl Store {
         if path_dist {
             identity.extend_from_slice(project.as_os_str().as_encoded_bytes());
         }
-        let key = format!("{:x}", Sha256::digest(&identity));
+        let key = base16ct::lower::encode_string(&Sha256::digest(&identity));
         let guard = File::options()
             .read(true)
             .write(true)
@@ -119,7 +119,8 @@ impl Store {
                     network.bytes(url)?
                 };
                 if let Some(expected) = dist["shasum"].as_str().filter(|sum| !sum.is_empty())
-                    && format!("{:x}", Sha1::digest(&bytes)) != expected.to_ascii_lowercase()
+                    && base16ct::lower::encode_string(&Sha1::digest(&bytes))
+                        != expected.to_ascii_lowercase()
                 {
                     bail!(
                         "Checksum mismatch for {}; delete its cache and retry.",
@@ -128,7 +129,7 @@ impl Store {
                 }
                 crate::archive::extract(&bytes, kind, &extracted)
                     .with_context(|| format!("Cannot extract {}.", package.name))?;
-                format!("{:x}", Sha256::digest(&bytes))
+                base16ct::lower::encode_string(&Sha256::digest(&bytes))
             }
         } else {
             crate::git::export(package, project, self, network, offline, &extracted)?;
@@ -242,5 +243,5 @@ fn tree_digest(directory: &Path) -> Result<String> {
             hash.update(b"directory");
         }
     }
-    Ok(format!("{:x}", hash.finalize()))
+    Ok(base16ct::lower::encode_string(&hash.finalize()))
 }

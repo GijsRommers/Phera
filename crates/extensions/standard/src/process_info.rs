@@ -73,7 +73,9 @@ fn uname(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
 }
 
 fn load_average(_: &mut dyn Context, _: &[Value]) -> NativeResult {
-    let load = sysinfo::System::load_average();
+    let Ok(load) = sysinfo::System::load_average() else {
+        return Ok(Value::Bool(false));
+    };
     let mut result = PhpArray::new();
     for value in [load.one, load.five, load.fifteen] {
         result.push(Value::Float(value))?;
