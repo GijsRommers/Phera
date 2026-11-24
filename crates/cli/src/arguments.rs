@@ -490,3 +490,45 @@ fn parse_seconds_duration(
 pub(crate) fn is_warmup_path(path: &str) -> bool {
     path.starts_with('/') && !path.contains(char::is_whitespace)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_serve_websocket_flags() {
+        let cmd = parse(
+            [
+                "serve",
+                "--ws-max-connections",
+                "2000",
+                "--ws-max-message-size",
+                "65536",
+                "--ws-idle-timeout",
+                "0",
+                "--ws-ping-interval",
+                "20",
+                "--ws-send-queue",
+                "16",
+                "--ws-allowed-origins",
+                "https://a.test, https://b.test",
+                "public",
+            ]
+            .into_iter()
+            .map(str::to_owned),
+        )
+        .expect("parse serve");
+        let Command::Serve(options) = cmd else {
+            panic!("expected Serve");
+        };
+        assert_eq!(options.ws_max_connections, Some(2000));
+        assert_eq!(options.ws_max_message_size, Some(65536));
+        assert_eq!(options.ws_idle_timeout, Some(Duration::ZERO));
+        assert_eq!(options.ws_ping_interval, Some(Duration::from_secs(20)));
+        assert_eq!(options.ws_send_queue, Some(16));
+        assert_eq!(
+            options.ws_allowed_origins.as_deref(),
+            Some(["https://a.test".to_owned(), "https://b.test".to_owned()].as_slice())
+        );
+    }
+}

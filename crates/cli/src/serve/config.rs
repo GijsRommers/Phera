@@ -192,3 +192,51 @@ fn non_negative_u64(path: &Path, key: &str, value: &toml::Value) -> Result<u64, 
         )),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_websocket_toml_settings() {
+        let dir = std::env::temp_dir().join(format!("phera-ws-cfg-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        std::fs::write(
+            dir.join("phera.toml"),
+            r#"
+[server.websocket]
+max_connections = 1234
+max_message_size = 4096
+idle_timeout = 0
+ping_interval = 15
+send_queue = 32
+send_queue_bytes = 65536
+allowed_origins = ["https://app.example.test", "http://localhost:3000"]
+"#,
+        )
+        .expect("write");
+
+        let parsed = read(&dir).expect("valid config");
+        assert_eq!(parsed.websocket.max_connections, Some(1234));
+        assert_eq!(parsed.websocket.max_message_size, Some(4096));
+        assert_eq!(parsed.websocket.idle_timeout, Some(Duration::ZERO));
+        assert_eq!(
+            parsed.websocket.ping_interval,
+            Some(Duration::from_secs(15))
+        );
+        assert_eq!(parsed.websocket.send_queue, Some(32));
+        assert_eq!(parsed.websocket.send_queue_bytes, Some(65536));
+        assert_eq!(
+            parsed.websocket.allowed_origins.as_deref(),
+            Some(
+                [
+                    "https://app.example.test".to_owned(),
+                    "http://localhost:3000".to_owned()
+                ]
+                .as_slice()
+            )
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
