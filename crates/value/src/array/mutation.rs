@@ -10,10 +10,13 @@
 //! $a[] = 'd';        // key 7 again: pop does give it back
 //! ```
 
+use super::key::numeric_string_key;
 use super::lookup::list_position;
 use super::storage::{Entry, Storage};
 use super::{ArrayKey, PhpArray};
 use crate::error::OpError;
+use crate::intern::InternedStr;
+use crate::string::PhpString;
 use crate::value::Value;
 
 /// The entries of an array being built by [`PhpArray::build_distinct`].
@@ -168,12 +171,82 @@ impl PhpArray {
         Ok(ArrayKey::Int(key))
     }
 
+    /// Replaces the value of an existing integer key in place, or appends it.
+    #[inline]
+    pub fn insert_int(&mut self, index: i64, value: Value) -> Option<Value> {
+        self.note_int_key(index);
+        match &mut self.storage {
+            Storage::List(values) => {
+                if let Ok(position) = usize::try_from(index) {
+                    if let Some(slot) = values.get_mut(position) {
+                        if let Some(existing) = slot.as_mut() {
+                            return Some(std::mem::replace(existing, value));
+                        }
+                    } else if position == values.len() {
+                        values.push(Some(value));
+                        self.maybe_compact();
+                        return None;
+                    }
+                }
+                self.storage.as_map().append(ArrayKey::Int(index), value);
+                self.maybe_compact();
+                None
+            }
+            Storage::Map(map) => {
+                let replaced = map.insert(ArrayKey::Int(index), value);
+                if replaced.is_none() {
+                    self.maybe_compact();
+                }
+                replaced
+            }
+        }
+    }
+
     /// `unset($a[$key])`: leaves a hole, so later slots keep their positions.
     /// It never compacts, because a running foreach may hold one of them.
     pub fn remove(&mut self, key: &ArrayKey) -> Option<Value> {
         let value = match &mut self.storage {
             Storage::List(values) => values.get_mut(list_position(key)?)?.take()?,
             Storage::Map(map) => map.remove(key)?,
+        };
+        self.dead += 1;
+        Some(value)
+    }
+
+    /// `unset($a[$int_key])` without constructing an `ArrayKey`.
+    #[inline]
+    pub fn remove_int(&mut self, key: i64) -> Option<Value> {
+        let value = match &mut self.storage {
+            Storage::List(values) => values.get_mut(usize::try_from(key).ok()?)?.take()?,
+            Storage::Map(map) => map.remove_int(key)?,
+        };
+        self.dead += 1;
+        Some(value)
+    }
+
+    /// `unset($a[$interned_key])` without cloning an `ArrayKey`.
+    #[inline]
+    pub fn remove_interned(&mut self, key: &'static InternedStr) -> Option<Value> {
+        if let Some(int_key) = key.numeric_key() {
+            return self.remove_int(int_key);
+        }
+        let value = match &mut self.storage {
+            Storage::List(_) => return None,
+            Storage::Map(map) => map.remove_interned(key)?,
+        };
+        self.dead += 1;
+        Some(value)
+    }
+
+    /// `unset($a[$str_key])` without cloning an `ArrayKey`.
+    #[inline]
+    pub fn remove_str(&mut self, key: &PhpString) -> Option<Value> {
+        if let Some(int_key) = numeric_string_key(key.as_bytes()) {
+            return self.remove_int(int_key);
+        }
+        let value = match &mut self.storage {
+            Storage::List(_) => return None,
+            Storage::Map(map) => map.remove_str_bytes(key.as_bytes())?,
         };
         self.dead += 1;
         Some(value)

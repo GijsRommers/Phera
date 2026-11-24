@@ -35,7 +35,24 @@ pub fn execute_named<'a>(
         if let Some(params) = arguments.first().filter(|value| !value.is_null()) {
             let mut statement = state.borrow_mut();
             let bindings = match (&statement.prepared, statement.sql.parameters.first()) {
-                (Prepared::Emulated, Some(Parameter::Position(_))) => Bindings::packed(params),
+                (
+                    Prepared::Emulated
+                    | Prepared::Mysql(_)
+                    | Prepared::Postgres { .. }
+                    | Prepared::PostgresDeferred { .. }
+                    | Prepared::PostgresUnnamed,
+                    Some(Parameter::Position(_)),
+                ) if !(matches!(statement.prepared, Prepared::Emulated)
+                    && statement.connection.name == DriverName::Mysql
+                    && statement.sql.has_only_unterminated_markers())
+                    && statement
+                        .sql
+                        .parameters
+                        .iter()
+                        .all(|parameter| matches!(parameter, Parameter::Position(_))) =>
+                {
+                    Bindings::packed(params)
+                }
                 _ => None,
             };
             statement.bindings = match bindings {
@@ -47,10 +64,24 @@ pub fn execute_named<'a>(
             let statement = state.borrow();
             let values = match &statement.bindings {
                 Bindings::Packed(array) => {
-                    if !array.is_empty() && array.len() != statement.sql.parameters.len() {
-                        Err(DbError::parameter(
-                            "number of bound variables does not match number of tokens",
-                        ))
+                    let expected = statement.sql.parameters.len();
+                    let mismatch = match statement.prepared {
+                        Prepared::Emulated => !array.is_empty() && array.len() != expected,
+                        Prepared::Mysql(_) => array.len() != expected,
+                        _ => array.len() > expected,
+                    };
+                    if mismatch {
+                        let detail = match (&statement.prepared, statement.connection.name) {
+                            (Prepared::Mysql(_), DriverName::Mysql) => "",
+                            (
+                                Prepared::Postgres { .. }
+                                | Prepared::PostgresDeferred { .. }
+                                | Prepared::PostgresUnnamed,
+                                DriverName::Postgres,
+                            ) => "parameter was not defined",
+                            _ => "number of bound variables does not match number of tokens",
+                        };
+                        Err(DbError::parameter(detail))
                     } else {
                         Ok(parameters::read_packed(context, array)?)
                     }

@@ -54,24 +54,35 @@ impl Machine<'_> {
         }
         let arguments = self.registers.window(from, count);
         let mut typed = facts.typed_parameters();
-        for (index, (argument, mask)) in arguments
-            .iter()
-            .zip(facts.parameter_masks.iter())
-            .enumerate()
-        {
-            let Some(value) = argument else {
-                return Step::Slow;
-            };
-            if value.is_reference()
-                || (typed & 1 != 0
-                    && !mask.intersects(crate::types::own_type(value))
-                    && !self.code.function(function).parameters[index]
-                        .ty
-                        .is_some_and(|declared| self.class_type_matches(function, declared, value)))
-            {
-                return Step::Slow;
+        if typed == 0 {
+            for argument in arguments {
+                match argument {
+                    Some(value) if !value.is_reference() => {}
+                    _ => return Step::Slow,
+                }
             }
-            typed >>= 1;
+        } else {
+            for (index, (argument, mask)) in arguments
+                .iter()
+                .zip(facts.parameter_masks.iter())
+                .enumerate()
+            {
+                let Some(value) = argument else {
+                    return Step::Slow;
+                };
+                if value.is_reference()
+                    || (typed & 1 != 0
+                        && !mask.intersects(crate::types::own_type(value))
+                        && !self.code.function(function).parameters[index]
+                            .ty
+                            .is_some_and(|declared| {
+                                self.class_type_matches(function, declared, value)
+                            }))
+                {
+                    return Step::Slow;
+                }
+                typed >>= 1;
+            }
         }
         self.registers.grow_to(base + size);
         for index in 0..count {
@@ -95,10 +106,11 @@ impl Machine<'_> {
     /// return type's bit test: write the value (for a constructor, the new
     /// object) into the caller's register and empty the callee's.
     #[inline(always)]
-    pub(super) fn leave_plain<const GUARDED: bool>(&mut self, source: Option<Reg>) -> Step {
-        let Some(frame) = self.stack.current().copied() else {
-            return Step::Slow;
-        };
+    pub(super) fn leave_plain<const GUARDED: bool>(
+        &mut self,
+        frame: Frame,
+        source: Option<Reg>,
+    ) -> Step {
         let Some(destination) = frame.destination() else {
             return if frame.discards_result() {
                 self.leave_discarded(frame, source)

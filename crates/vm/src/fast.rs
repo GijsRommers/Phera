@@ -110,6 +110,41 @@ fn overwrite_integer<S: crate::calls::registers::Slots + ?Sized>(
     ScalarStep::Complete
 }
 
+/// Stores a float result, updating in-place when the register already holds a float.
+#[inline(always)]
+fn store_float<const GUARDED: bool, S: crate::calls::registers::Slots + ?Sized>(
+    slots: &mut S,
+    register: Reg,
+    float: f64,
+) -> ScalarStep {
+    match slots.slot_mut(register) {
+        Some(Some(Value::Float(target))) => *target = float,
+        Some(slot) if GUARDED && owns_heap_values(slot) => {
+            return replace(slot, Value::Float(float));
+        }
+        Some(slot) => {
+            unlikely();
+            *slot = Some(Value::Float(float));
+        }
+        None => return ScalarStep::Fallback,
+    }
+    ScalarStep::Complete
+}
+
+/// Stores a scalar result, taking in-place paths for integers and floats.
+#[inline(always)]
+fn store_scalar<const GUARDED: bool, S: crate::calls::registers::Slots + ?Sized>(
+    slots: &mut S,
+    register: Reg,
+    value: Value,
+) -> ScalarStep {
+    match value {
+        Value::Int(integer) => store_integer::<GUARDED, _>(slots, register, integer),
+        Value::Float(float) => store_float::<GUARDED, _>(slots, register, float),
+        other => store::<GUARDED, _>(slots, register, other),
+    }
+}
+
 /// Stores any result, dropping what the register held before.
 #[inline(always)]
 pub(crate) fn store<const GUARDED: bool, S: crate::calls::registers::Slots + ?Sized>(
@@ -302,14 +337,19 @@ pub(crate) fn scalar_step<const GUARDED: bool, S: crate::calls::registers::Slots
             op: phera_bytecode::UnaryOp::Negate,
             dst,
             src,
-        } => {
-            let Some(negative) = integer_at(slots, src).and_then(i64::checked_neg) else {
-                return ScalarStep::Fallback;
-            };
-            store_integer::<GUARDED, _>(slots, dst, negative)
-        }
+        } => match slots.slot(src) {
+            Some(Some(Value::Int(value))) => match value.checked_neg() {
+                Some(negative) => store_integer::<GUARDED, _>(slots, dst, negative),
+                None => ScalarStep::Fallback,
+            },
+            Some(Some(Value::Float(value))) => {
+                let negative = -*value;
+                store_float::<GUARDED, _>(slots, dst, negative)
+            }
+            _ => ScalarStep::Fallback,
+        },
         Instruction::Cast { to, dst, src } => {
-            // Identity casts need no conversion and cannot warn.
+            // Identity casts and warning-free numeric casts need no diagnostics.
             use phera_bytecode::CastKind;
             match (to, slots.slot(src)) {
                 (CastKind::Bool, Some(Some(Value::Bool(value)))) => {
@@ -320,9 +360,21 @@ pub(crate) fn scalar_step<const GUARDED: bool, S: crate::calls::registers::Slots
                     let value = *value;
                     store_integer::<GUARDED, _>(slots, dst, value)
                 }
+                (CastKind::Int, Some(Some(Value::Float(value))))
+                    if value.is_finite()
+                        && *value >= -9223372036854775808.0
+                        && *value < 9223372036854775808.0 =>
+                {
+                    let value = *value as i64;
+                    store_integer::<GUARDED, _>(slots, dst, value)
+                }
                 (CastKind::Float, Some(Some(Value::Float(value)))) => {
                     let value = *value;
-                    store::<GUARDED, _>(slots, dst, Value::Float(value))
+                    store_float::<GUARDED, _>(slots, dst, value)
+                }
+                (CastKind::Float, Some(Some(Value::Int(value)))) => {
+                    let value = *value as f64;
+                    store_float::<GUARDED, _>(slots, dst, value)
                 }
                 (CastKind::String, Some(Some(Value::InternedStr(value)))) => {
                     store::<GUARDED, _>(slots, dst, Value::InternedStr(value))
@@ -411,7 +463,7 @@ pub(crate) fn scalar_step<const GUARDED: bool, S: crate::calls::registers::Slots
                 return ScalarStep::Fallback;
             };
             match fast_binary(op, left, &Value::Int(right)) {
-                Some(value) => store::<GUARDED, _>(slots, dst, value),
+                Some(value) => store_scalar::<GUARDED, _>(slots, dst, value),
                 None => ScalarStep::Fallback,
             }
         }
@@ -425,7 +477,7 @@ pub(crate) fn scalar_step<const GUARDED: bool, S: crate::calls::registers::Slots
                 return ScalarStep::Fallback;
             };
             match fast_binary(op, left, right) {
-                Some(value) => store::<GUARDED, _>(slots, dst, value),
+                Some(value) => store_scalar::<GUARDED, _>(slots, dst, value),
                 None => ScalarStep::Fallback,
             }
         }
@@ -457,7 +509,7 @@ pub(crate) fn scalar_step<const GUARDED: bool, S: crate::calls::registers::Slots
                 return ScalarStep::Fallback;
             };
             match fast_binary(op, left, right) {
-                Some(value) => store::<GUARDED, _>(slots, local, value),
+                Some(value) => store_scalar::<GUARDED, _>(slots, local, value),
                 None => ScalarStep::Fallback,
             }
         }
@@ -692,6 +744,22 @@ pub(crate) fn assign_literal<const GUARDED: bool, S: crate::calls::registers::Sl
     }
 }
 
+/// `LoadConst` inside `run_simple`: avoids leaving the scalar loop for float
+/// and string constants in tight loops.
+#[inline(always)]
+pub(crate) fn load_const_step<const GUARDED: bool, S: crate::calls::registers::Slots + ?Sized>(
+    destination: Reg,
+    constant: phera_bytecode::ConstId,
+    constants: &[Value],
+    slots: &mut S,
+) -> ScalarStep {
+    let Some(value) = constants.get(constant.index()) else {
+        return ScalarStep::Fallback;
+    };
+    let copied = duplicate(value);
+    store_scalar::<GUARDED, _>(slots, destination, copied)
+}
+
 /// Keep this out of scalar_step's arithmetic dispatch; every failed guard uses
 /// the normal PHP offset/reference/diagnostic handler.
 #[inline]
@@ -701,26 +769,32 @@ pub(crate) fn array_index_step<const GUARDED: bool, S: crate::calls::registers::
     index: Reg,
     slots: &mut S,
 ) -> ScalarStep {
-    let Some(Some(Value::Array(array))) = slots.slot(base) else {
-        return ScalarStep::Fallback;
-    };
     let Some(Some(Value::Int(index))) = slots.slot(index) else {
         return ScalarStep::Fallback;
     };
-    let Some(value) = crate::array_slots::read_integer(array, *index) else {
-        return ScalarStep::Fallback;
+    let index = *index;
+    let value = match slots.slot(base) {
+        Some(Some(Value::Array(array))) => {
+            let Some(value) = array.get_int(index) else {
+                return ScalarStep::Fallback;
+            };
+            duplicate(&value.deref())
+        }
+        Some(Some(Value::Reference(cell))) => {
+            let Ok(borrowed) = cell.try_borrow() else {
+                return ScalarStep::Fallback;
+            };
+            let Value::Array(array) = &*borrowed else {
+                return ScalarStep::Fallback;
+            };
+            let Some(value) = array.get_int(index) else {
+                return ScalarStep::Fallback;
+            };
+            duplicate(&value.deref())
+        }
+        _ => return ScalarStep::Fallback,
     };
-    let value = duplicate(&value.deref());
-    let Some(target) = slots.slot_mut(destination) else {
-        return ScalarStep::Fallback;
-    };
-    let released = GUARDED && frees_on_drop(target);
-    *target = Some(value);
-    if released {
-        ScalarStep::Released
-    } else {
-        ScalarStep::Complete
-    }
+    store_scalar::<GUARDED, _>(slots, destination, value)
 }
 
 /// Runs a simple store that fell back only because the register it writes

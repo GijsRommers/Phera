@@ -16,7 +16,7 @@ use crate::errors::{DbError, ErrorMode};
 use crate::fetch::FetchMode;
 use crate::statement_class::StatementClass;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ColumnCase {
     Natural,
     Upper,

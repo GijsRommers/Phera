@@ -45,7 +45,7 @@ impl<'a> Layout<'a> {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 struct Naming {
     case: ColumnCase,
     table_names: bool,
@@ -57,13 +57,26 @@ pub struct Key {
 }
 
 impl ColumnKeys {
-    pub fn describe(&mut self, columns: &[Column], attributes: &Attributes) {
-        if !columns.is_empty() {
-            self.naming.get_or_insert(Naming {
-                case: attributes.case,
-                table_names: attributes.mysql_table_names,
-            });
+    pub fn describe(&mut self, previous: &[Column], columns: &[Column], attributes: &Attributes) {
+        if columns.is_empty() {
+            self.keys.take();
+            return;
         }
+        let next_naming = Naming {
+            case: attributes.case,
+            table_names: attributes.mysql_table_names,
+        };
+        if self.keys.get().is_some()
+            && self.naming.is_some_and(|naming| !naming.table_names)
+            && previous.len() == columns.len()
+            && previous
+                .iter()
+                .zip(columns)
+                .all(|(old, new)| old.name == new.name)
+        {
+            return;
+        }
+        self.naming.get_or_insert(next_naming);
         self.keys.take();
     }
 
@@ -167,7 +180,7 @@ mod tests {
             .collect();
         let mut column_keys = ColumnKeys::default();
         let attributes = default_attributes();
-        column_keys.describe(&columns, &attributes);
+        column_keys.describe(&[], &columns, &attributes);
 
         let layout = column_keys.get(&columns);
         assert!(layout.distinct);
@@ -209,7 +222,7 @@ mod tests {
         columns.push(col("col_3"));
         let mut column_keys = ColumnKeys::default();
         let attributes = default_attributes();
-        column_keys.describe(&columns, &attributes);
+        column_keys.describe(&[], &columns, &attributes);
 
         let layout = column_keys.get(&columns);
         assert!(!layout.distinct);
@@ -260,19 +273,19 @@ mod tests {
         let attributes = default_attributes();
         let cols_64: Vec<_> = (0..64).map(|i| col(format!("c_{i}"))).collect();
         let mut keys_64 = ColumnKeys::default();
-        keys_64.describe(&cols_64, &attributes);
+        keys_64.describe(&[], &cols_64, &attributes);
         assert!(keys_64.get(&cols_64).distinct);
 
         let cols_65: Vec<_> = (0..65).map(|i| col(format!("c_{i}"))).collect();
         let mut keys_65 = ColumnKeys::default();
-        keys_65.describe(&cols_65, &attributes);
+        keys_65.describe(&[], &cols_65, &attributes);
         assert!(!keys_65.get(&cols_65).distinct);
 
         let exact_128 = "a".repeat(MAX_INTERNED_COLUMN_LEN);
         let over_128 = "b".repeat(MAX_INTERNED_COLUMN_LEN + 1);
         let cols = vec![col(exact_128), col(over_128)];
         let mut keys = ColumnKeys::default();
-        keys.describe(&cols, &attributes);
+        keys.describe(&[], &cols, &attributes);
         let layout = keys.get(&cols);
         assert!(layout.distinct);
         assert!(matches!(layout.keys[0].array, ArrayKey::Interned(_)));
@@ -289,8 +302,29 @@ mod tests {
         attributes.case = ColumnCase::Lower;
 
         let mut keys = ColumnKeys::default();
-        keys.describe(&columns, &attributes);
+        keys.describe(&[], &columns, &attributes);
         let layout = keys.get(&columns);
         assert!(!layout.distinct);
+    }
+
+    #[test]
+    fn reuses_layout_when_columns_match_and_invalidates_on_change() {
+        let cols = vec![col("id"), col("randomNumber")];
+        let attributes = default_attributes();
+        let mut keys = ColumnKeys::default();
+        keys.describe(&[], &cols, &attributes);
+        let first = keys.get(&cols);
+        assert_eq!(first.keys[1].array, ArrayKey::interned(b"randomNumber"));
+
+        // Same columns reuse the cached layout.
+        keys.describe(&cols, &cols, &attributes);
+        let reused = keys.get(&cols);
+        assert_eq!(reused.keys[1].array, ArrayKey::interned(b"randomNumber"));
+
+        // Different column names invalidate the cache and recompute keys.
+        let other = vec![col("id"), col("message")];
+        keys.describe(&cols, &other, &attributes);
+        let updated = keys.get(&other);
+        assert_eq!(updated.keys[1].array, ArrayKey::interned(b"message"));
     }
 }

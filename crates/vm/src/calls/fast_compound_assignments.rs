@@ -23,13 +23,15 @@
 //! loop, where the old value let go of could leave a destructor due.
 
 use phera_bytecode::{BinaryOp, IncDec, NameId, PathBase, PathId, Reg, Step as PathStep};
-use phera_value::Value;
+use phera_value::{PhpArray, PhpString, Value};
+use std::rc::Rc;
 
 use crate::calls::execution_loop::{Machine, Position, Step};
 use crate::calls::fast_properties::write_slot_direct;
 use crate::element_writes::{Target, writable, write};
-use crate::fast::store;
+use crate::fast::{duplicate, store};
 use crate::fast_values::quiet_binary;
+use crate::operators::fast_binary;
 
 /// What an update stores in the place and what the expression gives:
 /// the same value for `+=`, the old one for `$x++`.
@@ -54,13 +56,14 @@ impl Machine<'_> {
             .registers
             .window(position.frame.base() + source.index(), 1)
         {
-            [Some(value)] => value.deref().clone(),
+            [Some(value)] => duplicate(&value.deref()),
             _ => return Step::Slow,
         };
         self.update_place(position, destination, path, |left| {
-            let value = quiet_binary(operator, left, &right)?;
+            let value = fast_binary(operator, left, &right)
+                .or_else(|| quiet_binary(operator, left, &right))?;
             Some(Update {
-                stored: value.clone(),
+                stored: duplicate(&value),
                 result: value,
             })
         })
@@ -183,6 +186,27 @@ impl Machine<'_> {
         steps: &[PathStep],
         update: impl FnOnce(&Value) -> Option<Update>,
     ) -> Option<Value> {
+        // Fast path for single-index `$arr[$k] op= $v`: one lookup, no
+        // `ArrayKey` clone, no redundant `writable()` re-walk, and supports
+        // reference-wrapped arrays (`&$arr`).
+        if let [PathStep::Index(key_reg)] = steps {
+            let key = read_fast_key(
+                self.registers
+                    .window(position.frame.base() + key_reg.index(), 1),
+            )?;
+            let slot = position.frame.base() + root.index();
+            return match self.registers.window_mut(slot, 1) {
+                [Some(Value::Array(array))] => update_single_array(array, key, update),
+                [Some(Value::Reference(cell))] => {
+                    let mut borrowed = cell.try_borrow_mut().ok()?;
+                    match &mut *borrowed {
+                        Value::Array(array) => update_single_array(array, key, update),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            };
+        }
         let keys = self.write_keys(position, steps)?;
         let slot = position.frame.base() + root.index();
         let [Some(Value::Array(array))] = self.registers.window_mut(slot, 1) else {
@@ -237,6 +261,66 @@ impl Machine<'_> {
         drop(old);
         Some(result)
     }
+}
+
+enum FastKey {
+    Int(i64),
+    Interned(&'static phera_value::InternedStr),
+    String(PhpString),
+}
+
+#[inline(always)]
+fn read_fast_key(window: &[Option<Value>]) -> Option<FastKey> {
+    let [Some(value)] = window else {
+        return None;
+    };
+    match &*value.deref() {
+        Value::Int(integer) => Some(FastKey::Int(*integer)),
+        Value::InternedStr(string) => Some(FastKey::Interned(string)),
+        Value::String(string) => Some(FastKey::String(string.clone())),
+        _ => None,
+    }
+}
+
+#[inline(always)]
+fn update_single_array(
+    array: &mut Rc<PhpArray>,
+    key: FastKey,
+    update: impl FnOnce(&Value) -> Option<Update>,
+) -> Option<Value> {
+    if Rc::strong_count(array) == 1 {
+        let target = Rc::make_mut(array);
+        let slot = match &key {
+            FastKey::Int(i) => target.get_mut_int(*i)?,
+            FastKey::Interned(s) => target.get_mut_interned(s)?,
+            FastKey::String(s) => target.get_mut_str(s)?,
+        };
+        if slot.is_reference() {
+            return None;
+        }
+        let Update { stored, result } = update(slot)?;
+        let old = std::mem::replace(slot, stored);
+        drop(old);
+        return Some(result);
+    }
+    let existing = match &key {
+        FastKey::Int(i) => array.get_int(*i)?,
+        FastKey::Interned(s) => array.get_interned(s)?,
+        FastKey::String(s) => array.get_str(s)?,
+    };
+    if existing.is_reference() {
+        return None;
+    }
+    let Update { stored, result } = update(existing)?;
+    let target = Rc::make_mut(array);
+    let slot = match &key {
+        FastKey::Int(i) => target.get_mut_int(*i)?,
+        FastKey::Interned(s) => target.get_mut_interned(s)?,
+        FastKey::String(s) => target.get_mut_str(s)?,
+    };
+    let old = std::mem::replace(slot, stored);
+    drop(old);
+    Some(result)
 }
 
 /// The element at `keys`, when every level is an array, the element

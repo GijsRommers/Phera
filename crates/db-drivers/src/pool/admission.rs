@@ -12,6 +12,7 @@ use super::worker::{Idle, WorkerId};
 pub(super) struct Admission {
     limit: usize,
     open: AtomicUsize,
+    waiter_count: AtomicUsize,
     state: Mutex<State>,
 }
 
@@ -50,8 +51,20 @@ impl Admission {
         Self {
             limit,
             open: AtomicUsize::new(0),
+            waiter_count: AtomicUsize::new(0),
             state: Mutex::new(State::default()),
         }
+    }
+
+    #[inline]
+    pub(super) fn has_waiters_fast(&self) -> bool {
+        self.waiter_count.load(Ordering::SeqCst) > 0
+    }
+
+    #[inline]
+    fn sync_waiters(&self, state: &State) {
+        self.waiter_count
+            .store(state.waiters.len(), Ordering::SeqCst);
     }
 
     fn state(&self) -> MutexGuard<'_, State> {
@@ -78,6 +91,7 @@ impl Admission {
             }
             state.remove_cancelled();
             if state.waiters.is_empty() && self.open.load(Ordering::Relaxed) < self.limit {
+                self.sync_waiters(&state);
                 self.open.fetch_add(1, Ordering::Relaxed);
                 state.inc_open(worker);
                 return Some(Grant::Open(Permit {
@@ -87,6 +101,7 @@ impl Admission {
             }
             let (grant, receiver) = oneshot::channel();
             state.waiters.push_back(Waiter { worker, key, grant });
+            self.sync_waiters(&state);
             state.wake_workers();
             receiver
         };
@@ -102,11 +117,18 @@ impl Admission {
                 break;
             };
             match waiter.grant.send(Grant::Idle(idle)) {
-                Ok(()) => return None,
+                Ok(()) => {
+                    self.sync_waiters(&state);
+                    return None;
+                }
                 Err(Grant::Idle(returned)) => idle = returned,
-                Err(Grant::Open(_)) => return None,
+                Err(Grant::Open(_)) => {
+                    self.sync_waiters(&state);
+                    return None;
+                }
             }
         }
+        self.sync_waiters(&state);
         if !state.waiters.is_empty() {
             state.wake_workers();
         }
@@ -116,6 +138,7 @@ impl Admission {
     pub(super) fn reclaim(self: &Arc<Self>) -> Option<Reclaim> {
         let mut state = self.state();
         state.remove_cancelled();
+        self.sync_waiters(&state);
         if state.reclaiming || state.waiters.is_empty() {
             return None;
         }
@@ -134,7 +157,9 @@ impl Admission {
         key: &Key,
     ) -> Option<Reclaim> {
         let mut state = self.state();
-        if !state.should_reclaim_immediately(worker, key, self.limit) || state.reclaiming {
+        let should = state.should_reclaim_immediately(worker, key, self.limit);
+        self.sync_waiters(&state);
+        if !should || state.reclaiming {
             return None;
         }
         state.reclaiming = true;
@@ -144,6 +169,7 @@ impl Admission {
     pub(super) fn has_waiters(&self) -> bool {
         let mut state = self.state();
         state.remove_cancelled();
+        self.sync_waiters(&state);
         !state.waiters.is_empty()
     }
 
@@ -155,6 +181,7 @@ impl Admission {
         let mut state = self.state();
         state.closed = true;
         state.waiters.clear();
+        self.sync_waiters(&state);
         state.wake_workers();
     }
 
@@ -170,6 +197,7 @@ impl Admission {
             })) {
                 Ok(()) => {
                     state.inc_open(next_worker);
+                    self.sync_waiters(&state);
                     state.wake_workers();
                     return;
                 }
@@ -180,6 +208,7 @@ impl Admission {
                 Err(Grant::Idle(_)) => {}
             }
         }
+        self.sync_waiters(&state);
         self.open.fetch_sub(1, Ordering::Relaxed);
     }
 }

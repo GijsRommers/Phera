@@ -42,8 +42,11 @@ pub struct Statement {
 
 impl Statement {
     pub fn set_rows(&mut self, rows: Rows) {
-        self.keys
-            .describe(&rows.columns, &self.connection.attributes.borrow());
+        self.keys.describe(
+            &self.rows.columns,
+            &rows.columns,
+            &self.connection.attributes.borrow(),
+        );
         self.rows = rows;
         self.cursor = 0;
     }

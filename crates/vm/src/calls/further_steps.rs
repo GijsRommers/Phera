@@ -49,10 +49,15 @@ impl Machine<'_> {
                 done => done,
             },
             Instruction::Binary { .. }
+            | Instruction::BinaryInt { .. }
             | Instruction::BinaryBranch { .. }
             | Instruction::BinaryBranchIf { .. }
             | Instruction::BinaryIntBranch { .. }
             | Instruction::BinaryIntBranchIf { .. }
+            | Instruction::AssignOp {
+                op: phera_bytecode::BinaryOp::Concat,
+                ..
+            }
             | Instruction::Unary { .. }
             | Instruction::Cast {
                 to: phera_bytecode::CastKind::String,
@@ -153,6 +158,7 @@ impl Machine<'_> {
                     done => done,
                 }
             }
+            Instruction::UnsetPath { path } => self.unset_element::<GUARDED>(position, path),
             Instruction::InitCall { function } => self.prepare_named_call(position, function),
             Instruction::FetchNamedClassConstant { dst, class, name } => {
                 self.fetch_named_class_constant::<GUARDED>(position, dst, (class, name))

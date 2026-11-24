@@ -174,6 +174,66 @@ impl Vm {
 
     /// Append directly to strings, including referenced strings, to retain amortized growth.
     pub(crate) fn assign_concat(&mut self, local: Reg, source: Reg) -> Result<bool, NativeError> {
+        // Fast path: when source is already a plain string and distinct from local,
+        // avoid allocating a temporary `PhpString` via `to_php_string`.
+        if local != source {
+            let frame = self.current();
+            if let Some(frame) = frame {
+                let slots = frame.slots(&self.registers);
+                let src_is_plain = matches!(
+                    slots.get(source.index()),
+                    Some(Some(Value::InternedStr(_) | Value::String(_)))
+                );
+                let dst_is_plain = matches!(
+                    slots.get(local.index()),
+                    Some(Some(Value::InternedStr(_) | Value::String(_)))
+                );
+                if src_is_plain && dst_is_plain {
+                    let base = frame.base();
+                    let slots = self.registers.tail_mut(base);
+                    if let Some(Some(src_val)) = slots.get(source.index()) {
+                        let interned: Option<&'static [u8]> = match src_val {
+                            Value::InternedStr(s) => Some(s.as_bytes()),
+                            _ => None,
+                        };
+                        if let Some(bytes) = interned {
+                            if let Some(Some(target)) = slots.get_mut(local.index()) {
+                                match target {
+                                    Value::InternedStr(existing) => {
+                                        let mut owned = existing.to_php_string();
+                                        owned.push_bytes(bytes);
+                                        *target = Value::String(owned);
+                                        return Ok(true);
+                                    }
+                                    Value::String(existing) => {
+                                        existing.push_bytes(bytes);
+                                        return Ok(true);
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        } else if let Value::String(src_str) = src_val {
+                            let src_cloned = src_str.clone();
+                            if let Some(Some(target)) = slots.get_mut(local.index()) {
+                                match target {
+                                    Value::InternedStr(existing) => {
+                                        let mut owned = existing.to_php_string();
+                                        owned.push_bytes(src_cloned.as_bytes());
+                                        *target = Value::String(owned);
+                                        return Ok(true);
+                                    }
+                                    Value::String(existing) => {
+                                        existing.push_bytes(src_cloned.as_bytes());
+                                        return Ok(true);
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         let source = to_php_string(&diagnostics.vm.operand(source), &mut diagnostics.buffer)?;
         let target = diagnostics
@@ -220,8 +280,8 @@ impl Vm {
 #[inline(always)]
 pub(crate) fn fast_binary(operator: BinaryOp, left: &Value, right: &Value) -> Option<Value> {
     use BinaryOp::{
-        Add, Equal, Greater, GreaterEqual, Identical, Less, LessEqual, Modulo, Multiply, NotEqual,
-        NotIdentical, Subtract,
+        Add, Divide, Equal, Greater, GreaterEqual, Identical, Less, LessEqual, Modulo, Multiply,
+        NotEqual, NotIdentical, Subtract,
     };
     match (left, right) {
         (Value::Int(left), Value::Int(right)) => Some(match operator {
@@ -237,6 +297,15 @@ pub(crate) fn fast_binary(operator: BinaryOp, left: &Value, right: &Value) -> Op
                 .checked_mul(*right)
                 .map(Value::Int)
                 .unwrap_or_else(|| overflow_value(OverflowOperation::Multiply, *left, *right)),
+            Divide if *right != 0 => {
+                if *left == i64::MIN && *right == -1 {
+                    Value::Float(-(*left as f64))
+                } else if *left % *right == 0 {
+                    Value::Int(*left / *right)
+                } else {
+                    Value::Float(*left as f64 / *right as f64)
+                }
+            }
             Modulo if *right != 0 => Value::Int(if *right == -1 { 0 } else { left % right }),
             Less => Value::Bool(left < right),
             LessEqual => Value::Bool(left <= right),
@@ -250,12 +319,51 @@ pub(crate) fn fast_binary(operator: BinaryOp, left: &Value, right: &Value) -> Op
             Add => Value::Float(left + right),
             Subtract => Value::Float(left - right),
             Multiply => Value::Float(left * right),
+            Divide if *right != 0.0 => Value::Float(left / right),
             Less => Value::Bool(left < right),
             LessEqual => Value::Bool(left <= right),
             Greater => Value::Bool(left > right),
             GreaterEqual => Value::Bool(left >= right),
+            Equal | Identical => Value::Bool(left == right),
+            NotEqual | NotIdentical => Value::Bool(left != right),
             _ => return None,
         }),
+        (Value::Float(left), Value::Int(right)) => {
+            let right = *right as f64;
+            Some(match operator {
+                Add => Value::Float(left + right),
+                Subtract => Value::Float(left - right),
+                Multiply => Value::Float(left * right),
+                Divide if right != 0.0 => Value::Float(left / right),
+                Less => Value::Bool(*left < right),
+                LessEqual => Value::Bool(*left <= right),
+                Greater => Value::Bool(*left > right),
+                GreaterEqual => Value::Bool(*left >= right),
+                Equal => Value::Bool(*left == right),
+                NotEqual => Value::Bool(*left != right),
+                Identical => Value::Bool(false),
+                NotIdentical => Value::Bool(true),
+                _ => return None,
+            })
+        }
+        (Value::Int(left), Value::Float(right)) => {
+            let left = *left as f64;
+            Some(match operator {
+                Add => Value::Float(left + right),
+                Subtract => Value::Float(left - right),
+                Multiply => Value::Float(left * right),
+                Divide if *right != 0.0 => Value::Float(left / right),
+                Less => Value::Bool(left < *right),
+                LessEqual => Value::Bool(left <= *right),
+                Greater => Value::Bool(left > *right),
+                GreaterEqual => Value::Bool(left >= *right),
+                Equal => Value::Bool(left == *right),
+                NotEqual => Value::Bool(left != *right),
+                Identical => Value::Bool(false),
+                NotIdentical => Value::Bool(true),
+                _ => return None,
+            })
+        }
         _ => None,
     }
 }

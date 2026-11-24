@@ -75,6 +75,21 @@ pub(crate) fn value_step<const GUARDED: bool>(
                 None => ScalarStep::Fallback,
             }
         }
+        Instruction::BinaryInt { op, dst, lhs, rhs } => {
+            let Some(Some(left)) = slots.get(lhs.index()) else {
+                return ScalarStep::Fallback;
+            };
+            let result = quiet_binary(op, &left.deref(), &Value::Int(i64::from(rhs)));
+            match result {
+                Some(value) => store::<GUARDED, _>(slots, dst, value),
+                None => ScalarStep::Fallback,
+            }
+        }
+        Instruction::AssignOp {
+            op: BinaryOp::Concat,
+            local,
+            src,
+        } if local != src => assign_concat_plain(slots, local, src),
         Instruction::BinaryBranch {
             op,
             lhs,
@@ -172,6 +187,56 @@ pub(crate) fn value_step<const GUARDED: bool>(
             }
         }
         _ => ScalarStep::Fallback,
+    }
+}
+
+/// `$local .= $src` in-place for plain non-reference strings without leaving
+/// `Machine::run` or allocating a temporary string copy of `$src`.
+#[inline(always)]
+fn assign_concat_plain(slots: &mut [Option<Value>], local: Reg, src: Reg) -> ScalarStep {
+    let interned: Option<&'static [u8]> = match slots.get(src.index()) {
+        Some(Some(Value::InternedStr(s))) => Some(s.as_bytes()),
+        Some(Some(Value::String(_))) => None,
+        _ => return ScalarStep::Fallback,
+    };
+    if let Some(bytes) = interned {
+        match slots.get_mut(local.index()) {
+            Some(Some(slot @ Value::InternedStr(_))) => {
+                let Value::InternedStr(existing) = *slot else {
+                    unreachable!()
+                };
+                let mut owned = existing.to_php_string();
+                owned.push_bytes(bytes);
+                *slot = Value::String(owned);
+                ScalarStep::Complete
+            }
+            Some(Some(Value::String(existing))) => {
+                existing.push_bytes(bytes);
+                ScalarStep::Complete
+            }
+            _ => ScalarStep::Fallback,
+        }
+    } else {
+        let Some(Some(Value::String(src_str))) = slots.get(src.index()) else {
+            return ScalarStep::Fallback;
+        };
+        let src_cloned = src_str.clone();
+        match slots.get_mut(local.index()) {
+            Some(Some(slot @ Value::InternedStr(_))) => {
+                let Value::InternedStr(existing) = *slot else {
+                    unreachable!()
+                };
+                let mut owned = existing.to_php_string();
+                owned.push_bytes(src_cloned.as_bytes());
+                *slot = Value::String(owned);
+                ScalarStep::Complete
+            }
+            Some(Some(Value::String(existing))) => {
+                existing.push_bytes(src_cloned.as_bytes());
+                ScalarStep::Complete
+            }
+            _ => ScalarStep::Fallback,
+        }
     }
 }
 
@@ -288,17 +353,12 @@ fn array_element(slots: &[Option<Value>], base: Reg, index: Reg, mode: FetchMode
         return None;
     }
     match slots.get(base.index())? {
-        Some(Value::Array(array)) => {
-            let found = match key {
-                Value::Int(integer) => array.get_int(*integer),
-                Value::InternedStr(string) => array.get_interned(string),
-                Value::String(string) => array.get_str(string),
-                _ => unreachable!("checked above"),
-            };
-            match found {
-                Some(value) => Some(value.deref().clone()),
-                None if quiet => Some(Value::Null),
-                None => None,
+        Some(Value::Array(array)) => array_lookup_key(array, key, quiet),
+        Some(Value::Reference(cell)) => {
+            let borrowed = cell.try_borrow().ok()?;
+            match &*borrowed {
+                Value::Array(array) => array_lookup_key(array, key, quiet),
+                _ => None,
             }
         }
         Some(Value::InternedStr(string)) if mode != FetchMode::Destructure => {
@@ -309,6 +369,21 @@ fn array_element(slots: &[Option<Value>], base: Reg, index: Reg, mode: FetchMode
         }
         None | Some(Value::Null) if quiet => Some(Value::Null),
         _ => None,
+    }
+}
+
+#[inline(always)]
+fn array_lookup_key(array: &PhpArray, key: &Value, quiet: bool) -> Option<Value> {
+    let found = match key {
+        Value::Int(integer) => array.get_int(*integer),
+        Value::InternedStr(string) => array.get_interned(string),
+        Value::String(string) => array.get_str(string),
+        _ => unreachable!("checked above"),
+    };
+    match found {
+        Some(value) => Some(crate::fast::duplicate(&value.deref())),
+        None if quiet => Some(Value::Null),
+        None => None,
     }
 }
 

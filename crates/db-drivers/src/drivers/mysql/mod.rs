@@ -32,6 +32,11 @@ pub struct Mysql {
     /// Set whenever the request ran `select_db` or SQL containing `USE`, so
     /// clean queries skip the redundant `USE` statement after `COM_RESET_CONNECTION`.
     db_changed: bool,
+    /// Set whenever the connection may have modified MySQL session state
+    /// (transactions, SET, USE, user vars, temp tables, locks, AUTO_INCREMENT
+    /// LAST_INSERT_ID, errors, or non-allowlisted SQL). Clean DML-only requests
+    /// skip `COM_RESET_CONNECTION` + `SET NAMES` and keep `stmt_cache` warm.
+    session_dirty: bool,
     /// Pre-built multi-statement post-reset SQL including `USE` + `SET NAMES` + options.
     reset_sql_with_db: String,
     /// Pre-built multi-statement post-reset SQL when the current database did not change.
@@ -52,7 +57,35 @@ impl Mysql {
         }
     }
 
+    /// Whether returning this connection to the pool requires a network
+    /// `COM_RESET_CONNECTION` round-trip to restore session isolation.
+    pub fn needs_reset(&self) -> bool {
+        self.session_dirty
+            || self.db_changed
+            || self.pending_exec_rows
+            || self.active.is_some()
+            || self.transaction_state() == Some(true)
+            || self.options.init.is_some()
+            || !self.options.autocommit
+            || (self.options.restore_empty_database && self.database.is_empty())
+    }
+
+    /// Resets per-request local driver state for a verified-clean connection
+    /// without issuing any network round-trip.
+    pub fn reset_clean_local(&mut self) {
+        self.last_insert_id = 0;
+        self.pending_exec_rows = false;
+    }
+
     pub async fn reset(&mut self) -> Result<(), DbError> {
+        if !self.needs_reset() {
+            // Clean DML-only session: a 5-byte COM_PING verifies the socket was
+            // not killed while borrowed, without running COM_RESET_CONNECTION,
+            // re-sending SET NAMES, or flushing mysql_async's stmt_cache.
+            self.connection()?.ping().await.map_err(error)?;
+            self.reset_clean_local();
+            return Ok(());
+        }
         self.finish_stream().await;
         let connection = self.connection.as_mut().ok_or_else(Self::closed)?;
         // COM_CHANGE_USER also restores a connection opened without a database.
@@ -83,6 +116,7 @@ impl Mysql {
         self.last_insert_id = 0;
         self.pending_exec_rows = false;
         self.db_changed = false;
+        self.session_dirty = false;
         Ok(())
     }
 
@@ -96,6 +130,7 @@ impl Mysql {
 
     pub async fn set_autocommit(&mut self, enabled: bool) -> Result<(), DbError> {
         self.check_pending().await?;
+        self.session_dirty = true;
         self.connection()?
             .query_drop(if enabled {
                 "SET autocommit=1"
@@ -108,10 +143,17 @@ impl Mysql {
 
     pub async fn prepare(&mut self, sql: &Sql) -> Result<Statement, DbError> {
         self.check_pending().await?;
-        self.connection()?
-            .prep(sql.render(|_| "?".into()))
-            .await
-            .map_err(error)
+        if !self.session_dirty && !is_clean_dml_sql(sql.source.as_bytes()) {
+            self.session_dirty = true;
+        }
+        let rendered = sql.render(|_| "?".into());
+        match self.connection()?.prep(rendered).await {
+            Ok(stmt) => Ok(stmt),
+            Err(cause) => {
+                self.session_dirty = true;
+                Err(error(cause))
+            }
+        }
     }
 
     pub async fn execute(
@@ -124,20 +166,36 @@ impl Mysql {
         self.check_pending().await?;
         match prepared {
             Prepared::Mysql(statement) => {
+                if !self.session_dirty && !is_clean_dml_sql(sql.source.as_bytes()) {
+                    self.session_dirty = true;
+                }
                 let params = Params::Positional(values.iter().map(parameter).collect());
                 if let Some(owner) = &options.mysql_stream {
+                    self.session_dirty = true;
                     return self
                         .stream(stream::Query::Binary(statement.clone(), params), owner)
                         .await?
                         .rows
                         .into_php();
                 }
-                let result = self
-                    .connection()?
-                    .exec_iter(statement, params)
-                    .await
-                    .map_err(error)?;
-                let (rows, insert_id) = buffered(result).await?;
+                let result = match self.connection()?.exec_iter(statement, params).await {
+                    Ok(result) => result,
+                    Err(cause) => {
+                        self.session_dirty = true;
+                        return Err(error(cause));
+                    }
+                };
+                let (rows, insert_id) = match buffered(result).await {
+                    Ok(done) => done,
+                    Err(cause) => {
+                        self.session_dirty = true;
+                        return Err(cause);
+                    }
+                };
+                if insert_id != 0 {
+                    // Server-side LAST_INSERT_ID() is now non-zero for this session.
+                    self.session_dirty = true;
+                }
                 self.last_insert_id = insert_id;
                 Ok(rows)
             }
@@ -181,18 +239,37 @@ impl Mysql {
         if !self.db_changed && contains_use_keyword(sql.as_bytes()) {
             self.db_changed = true;
         }
+        if !self.session_dirty && !is_clean_dml_sql(sql.as_bytes()) {
+            self.session_dirty = true;
+        }
         if !self.options.multiple {
             require_single_statement(self.connection()?, sql).await?;
         }
         if let Some(owner) = owner {
+            self.session_dirty = true;
             return self
                 .stream(stream::Query::Text(sql.as_bytes().to_vec()), owner)
                 .await?
                 .rows
                 .into_php();
         }
-        let result = self.connection()?.query_iter(sql).await.map_err(error)?;
-        let (rows, insert_id) = buffered(result).await?;
+        let result = match self.connection()?.query_iter(sql).await {
+            Ok(result) => result,
+            Err(cause) => {
+                self.session_dirty = true;
+                return Err(error(cause));
+            }
+        };
+        let (rows, insert_id) = match buffered(result).await {
+            Ok(done) => done,
+            Err(cause) => {
+                self.session_dirty = true;
+                return Err(cause);
+            }
+        };
+        if insert_id != 0 {
+            self.session_dirty = true;
+        }
         self.last_insert_id = insert_id;
         Ok(rows)
     }
@@ -286,9 +363,20 @@ impl Mysql {
 }
 
 async fn buffered<P: Protocol>(mut result: QueryResult<'_, '_, P>) -> Result<(Rows, u64), DbError> {
+    if result.columns_ref().is_empty() {
+        let affected = result.affected_rows();
+        let insert_id = result.last_insert_id().unwrap_or(0);
+        result.drop_result().await.map_err(error)?;
+        return Ok((
+            Rows {
+                affected,
+                ..Rows::default()
+            },
+            insert_id,
+        ));
+    }
     let columns = result.columns_ref().to_vec();
-    let initial_rows = if columns.is_empty() { 0 } else { 16 };
-    let mut values = RowBuffer::with_capacity(columns.len(), initial_rows);
+    let mut values = RowBuffer::with_capacity(columns.len(), 4);
     while let Some(row) = result.next().await.map_err(error)? {
         values::push_pdo_row(&mut values, row, &columns);
     }
@@ -296,6 +384,73 @@ async fn buffered<P: Protocol>(mut result: QueryResult<'_, '_, P>) -> Result<(Ro
     let insert_id = result.last_insert_id().unwrap_or(0);
     result.drop_result().await.map_err(error)?;
     Ok((values::finish(columns, values, affected), insert_id))
+}
+
+/// Strictly conservative allowlist for single-statement DML (`SELECT`, `INSERT`,
+/// `UPDATE`, `DELETE`, `REPLACE`) that cannot mutate MySQL session state.
+/// Any multi-statement, comment, user variable (`@`), locking/session function,
+/// or non-DML statement returns `false`, forcing full `COM_RESET_CONNECTION`.
+pub(super) fn is_clean_dml_sql(sql: &[u8]) -> bool {
+    let mut rest = sql;
+    while let Some(&b) = rest.first() {
+        if b.is_ascii_whitespace() {
+            rest = &rest[1..];
+        } else {
+            break;
+        }
+    }
+    let first_len = rest.iter().take_while(|b| b.is_ascii_alphabetic()).count();
+    let first = &rest[..first_len];
+    let after_first = rest.get(first_len).copied();
+    let starts_dml = after_first.is_some_and(|b| b.is_ascii_whitespace())
+        && (first.eq_ignore_ascii_case(b"SELECT")
+            || first.eq_ignore_ascii_case(b"INSERT")
+            || first.eq_ignore_ascii_case(b"UPDATE")
+            || first.eq_ignore_ascii_case(b"DELETE")
+            || first.eq_ignore_ascii_case(b"REPLACE"));
+    if !starts_dml {
+        return false;
+    }
+    // Reject multi-statements, user/system variables, and SQL comments.
+    for (i, &b) in rest.iter().enumerate() {
+        match b {
+            b';' | b'@' | b'#' => return false,
+            b'/' if rest.get(i + 1) == Some(&b'*') => return false,
+            b'-' if rest.get(i + 1) == Some(&b'-') => return false,
+            _ => {}
+        }
+    }
+    // Scan identifier tokens for session-mutating clauses or functions.
+    let mut i = first_len;
+    while i < rest.len() {
+        if is_ident_byte(rest[i]) {
+            let start = i;
+            while i < rest.len() && is_ident_byte(rest[i]) {
+                i += 1;
+            }
+            let word = &rest[start..i];
+            if word.eq_ignore_ascii_case(b"OUTFILE")
+                || word.eq_ignore_ascii_case(b"DUMPFILE")
+                || word.eq_ignore_ascii_case(b"GET_LOCK")
+                || word.eq_ignore_ascii_case(b"RELEASE_LOCK")
+                || word.eq_ignore_ascii_case(b"RELEASE_ALL_LOCKS")
+                || word.eq_ignore_ascii_case(b"SQL_CALC_FOUND_ROWS")
+                || word.eq_ignore_ascii_case(b"FOUND_ROWS")
+                || word.eq_ignore_ascii_case(b"ROW_COUNT")
+                || word.eq_ignore_ascii_case(b"LAST_INSERT_ID")
+                || word.eq_ignore_ascii_case(b"TEMPORARY")
+                || word.eq_ignore_ascii_case(b"PREPARE")
+                || word.eq_ignore_ascii_case(b"DEALLOCATE")
+                || word.eq_ignore_ascii_case(b"LOCK")
+                || word.eq_ignore_ascii_case(b"UNLOCK")
+            {
+                return false;
+            }
+        } else {
+            i += 1;
+        }
+    }
+    true
 }
 
 pub(super) fn build_reset_sql(
@@ -401,5 +556,47 @@ pub fn error(error: mysql_async::Error) -> DbError {
             code: Some(2002),
             detail: error.to_string(),
         },
+    }
+}
+
+#[cfg(test)]
+mod clean_sql_tests {
+    use super::is_clean_dml_sql;
+
+    #[test]
+    fn allows_plain_single_statement_dml() {
+        assert!(is_clean_dml_sql(
+            b"SELECT id, randomNumber FROM World WHERE id = ?"
+        ));
+        assert!(is_clean_dml_sql(b"  select id, message from Fortune"));
+        assert!(is_clean_dml_sql(
+            b"UPDATE World SET randomNumber = ? WHERE id = ?"
+        ));
+        assert!(is_clean_dml_sql(
+            b"DELETE FROM sessions WHERE expires_at < ?"
+        ));
+        assert!(is_clean_dml_sql(b"INSERT INTO logs (msg) VALUES (?)"));
+        assert!(is_clean_dml_sql(b"REPLACE INTO cache (k, v) VALUES (?, ?)"));
+    }
+
+    #[test]
+    fn rejects_session_mutating_and_ambiguous_sql() {
+        assert!(!is_clean_dml_sql(b"SET @x = 1"));
+        assert!(!is_clean_dml_sql(b"SET NAMES utf8mb4"));
+        assert!(!is_clean_dml_sql(b"USE other_db"));
+        assert!(!is_clean_dml_sql(b"BEGIN"));
+        assert!(!is_clean_dml_sql(b"START TRANSACTION"));
+        assert!(!is_clean_dml_sql(b"CREATE TEMPORARY TABLE t (id INT)"));
+        assert!(!is_clean_dml_sql(b"SELECT 1; SET @x = 2"));
+        assert!(!is_clean_dml_sql(b"SELECT @x := 1"));
+        assert!(!is_clean_dml_sql(b"SELECT @@session.sql_mode"));
+        assert!(!is_clean_dml_sql(b"SELECT GET_LOCK('k', 1)"));
+        assert!(!is_clean_dml_sql(b"SELECT SQL_CALC_FOUND_ROWS id FROM t"));
+        assert!(!is_clean_dml_sql(b"SELECT LAST_INSERT_ID()"));
+        assert!(!is_clean_dml_sql(b"SELECT * FROM t INTO OUTFILE '/tmp/x'"));
+        assert!(!is_clean_dml_sql(b"SELECT 1 /* comment */"));
+        assert!(!is_clean_dml_sql(b"SELECT 1 -- comment"));
+        assert!(!is_clean_dml_sql(b"SELECT 1 # comment"));
+        assert!(!is_clean_dml_sql(b"SELECT 1 FROM t LOCK IN SHARE MODE"));
     }
 }
