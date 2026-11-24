@@ -11,7 +11,7 @@ use phera_extension_api::{
 };
 
 use crate::class::{NAME_PROPERTY, reflect_class, target_class};
-use crate::{UNCLONEABLE, allocate, bind, engine, exception, load, receiver};
+use crate::{UNCLONEABLE, allocate, bind, engine, exception, inspect, load, receiver};
 
 #[derive(Clone)]
 pub(crate) struct ReflectedParameter {
@@ -46,13 +46,16 @@ pub(crate) fn register(registry: &mut Registry) {
                 ),
                 MethodEntry::public("getName", &[], |_, o, _| {
                     data(o, |p| Value::from(p.name.as_str()))
-                }),
+                })
+                .with_direct(|o, a| direct(o, a, |p| Value::from(p.name.as_str()))),
                 MethodEntry::public("getPosition", &[], |_, o, _| {
                     data(o, |p| Value::Int(p.position as i64))
-                }),
+                })
+                .with_direct(|o, a| direct(o, a, |p| Value::Int(p.position as i64))),
                 MethodEntry::public("hasType", &[], |_, o, _| {
                     data(o, |p| Value::Bool(p.declared_type.is_some()))
-                }),
+                })
+                .with_direct(|o, a| direct(o, a, |p| Value::Bool(p.declared_type.is_some()))),
                 MethodEntry::public("getType", &[], |c, o, _| {
                     crate::types::make(c, parameter(o)?.info()?.declared_type.as_deref())
                 }),
@@ -64,38 +67,56 @@ pub(crate) fn register(registry: &mut Registry) {
                                 .is_none_or(crate::types::allows_null),
                         )
                     })
+                })
+                .with_direct(|o, a| {
+                    direct(o, a, |p| {
+                        Value::Bool(
+                            p.declared_type
+                                .as_deref()
+                                .is_none_or(crate::types::allows_null),
+                        )
+                    })
                 }),
                 MethodEntry::public("isOptional", &[], |_, o, _| {
                     data(o, |p| Value::Bool(p.optional))
-                }),
+                })
+                .with_direct(|o, a| direct(o, a, |p| Value::Bool(p.optional))),
                 MethodEntry::public("isVariadic", &[], |_, o, _| {
                     data(o, |p| Value::Bool(p.variadic))
-                }),
+                })
+                .with_direct(|o, a| direct(o, a, |p| Value::Bool(p.variadic))),
                 MethodEntry::public("isPassedByReference", &[], |_, o, _| {
                     data(o, |p| Value::Bool(p.by_reference))
-                }),
+                })
+                .with_direct(|o, a| direct(o, a, |p| Value::Bool(p.by_reference))),
                 MethodEntry::public("canBePassedByValue", &[], |_, o, _| {
                     data(o, |p| Value::Bool(p.can_pass_by_value))
-                }),
+                })
+                .with_direct(|o, a| direct(o, a, |p| Value::Bool(p.can_pass_by_value))),
                 MethodEntry::public("isPromoted", &[], |_, o, _| {
                     data(o, |p| Value::Bool(p.promoted))
-                }),
+                })
+                .with_direct(|o, a| direct(o, a, |p| Value::Bool(p.promoted))),
                 MethodEntry::public("isDefaultValueAvailable", &[], |_, o, _| {
                     data(o, |p| Value::Bool(p.default.is_some()))
-                }),
+                })
+                .with_direct(|o, a| direct(o, a, |p| Value::Bool(p.default.is_some()))),
                 MethodEntry::public_async("getDefaultValue", &[], default_value),
                 MethodEntry::public("isDefaultValueConstant", &[], |_, o, _| {
-                    let parameter = parameter(o)?;
-                    let parameter = require_default(&parameter)?;
-                    Ok(Value::Bool(parameter.default_constant.is_some()))
-                }),
+                    inspect(o, |parameter: &ReflectedParameter| {
+                        let parameter = require_default(parameter)?;
+                        Ok(Value::Bool(parameter.default_constant.is_some()))
+                    })?
+                })
+                .with_direct(direct_is_default_value_constant),
                 MethodEntry::public("getDefaultValueConstantName", &[], |_, o, _| {
-                    let parameter = parameter(o)?;
-                    let parameter = require_default(&parameter)?;
-                    Ok(parameter
-                        .default_constant
-                        .as_ref()
-                        .map_or(Value::Null, |name| Value::from(name.as_str())))
+                    inspect(o, |parameter: &ReflectedParameter| {
+                        let parameter = require_default(parameter)?;
+                        Ok(parameter
+                            .default_constant
+                            .as_ref()
+                            .map_or(Value::Null, |name| Value::from(name.as_str())))
+                    })?
                 }),
                 MethodEntry::public("getDeclaringFunction", &[], |c, o, _| {
                     crate::function::make(c, parameter(o)?.function.target.clone())
@@ -154,7 +175,39 @@ fn parameter(
 }
 
 fn data(this: Option<&Rc<Object>>, read: impl FnOnce(&ParameterInfo) -> Value) -> NativeResult {
-    Ok(read(parameter(this)?.info()?))
+    inspect(this, |parameter: &ReflectedParameter| {
+        Ok(read(parameter.info()?))
+    })?
+}
+
+fn direct_opt(
+    object: &Object,
+    arguments: &[Option<Value>],
+    read: impl FnOnce(&ParameterInfo) -> Option<Value>,
+) -> Option<Value> {
+    if !arguments.is_empty() {
+        return None;
+    }
+    let native = object.native.try_borrow().ok()?;
+    let parameter = native.as_ref()?.downcast_ref::<ReflectedParameter>()?;
+    let info = parameter.function.parameters.get(parameter.position)?;
+    read(info)
+}
+
+fn direct(
+    object: &Object,
+    arguments: &[Option<Value>],
+    read: impl FnOnce(&ParameterInfo) -> Value,
+) -> Option<Value> {
+    direct_opt(object, arguments, |info| Some(read(info)))
+}
+
+fn direct_is_default_value_constant(object: &Object, arguments: &[Option<Value>]) -> Option<Value> {
+    direct_opt(object, arguments, |p| {
+        p.default
+            .as_ref()
+            .map(|_| Value::Bool(p.default_constant.is_some()))
+    })
 }
 
 pub(crate) fn make(
@@ -164,9 +217,15 @@ pub(crate) fn make(
 ) -> NativeResult {
     let value = ReflectedParameter { function, position };
     let name = value.info()?.name.clone();
-    let reflected = allocate(context, "ReflectionParameter", Some(&name), value.clone())?;
-    if let Value::Object(object) = &reflected {
-        crate::function::keep_closure(object, &value.function.target);
+    let closure = match &value.function.target {
+        FunctionTarget::Closure(closure) | FunctionTarget::ClosureInvoke(closure) => {
+            closure.upgrade()
+        }
+        _ => None,
+    };
+    let reflected = allocate(context, "ReflectionParameter", Some(&name), value)?;
+    if let (Some(closure), Value::Object(object)) = (closure, &reflected) {
+        crate::keep(object, Value::Object(closure));
     }
     Ok(reflected)
 }
