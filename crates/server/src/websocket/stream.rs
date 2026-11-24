@@ -18,6 +18,7 @@ use tokio::sync::{Notify, OwnedSemaphorePermit, mpsc, oneshot, watch};
 use tokio::time::Instant;
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Utf8Bytes;
+use tokio_tungstenite::tungstenite::error::ProtocolError;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::tungstenite::protocol::{
     CloseFrame, Message as WsMessage, Role, WebSocketConfig as TungsteniteConfig,
@@ -284,6 +285,12 @@ async fn drive_io<S: AsyncRead + AsyncWrite + Unpin>(
                         .await;
                         return Some((1007, "invalid UTF-8".to_string()));
                     }
+                    // The peer went away without a close frame (a dropped TCP
+                    // socket, a reset HTTP/2 stream): RFC 6455 section 7.1.5
+                    // calls that 1006, and there is nobody left to send 1002 to.
+                    Some(Err(tokio_tungstenite::tungstenite::Error::Protocol(
+                        ProtocolError::ResetWithoutClosingHandshake,
+                    ))) => return Some((1006, String::new())),
                     Some(Err(tokio_tungstenite::tungstenite::Error::Protocol(_))) => {
                         send_close(
                             ws_stream,
