@@ -13,10 +13,11 @@
 
 use std::rc::Rc;
 
+use foldhash::HashSet;
 use phera_value::{Fork, Value};
 
-use super::ForkCopy;
 use super::natives::VmNatives;
+use super::{CodeRecycle, ForkCopy, RecycledTables};
 use crate::Vm;
 
 /// Why the state could not be copied: the class (or kind of state), the
@@ -40,8 +41,19 @@ impl SnapshotRefusal {
 }
 
 impl Vm {
+    /// A copy of this VM used to freeze a snapshot, along with the addresses
+    /// of transitively pure arrays that future forks can share in O(1).
+    pub(crate) fn fork_vm_for_snapshot(&self) -> Result<(Vm, HashSet<usize>), SnapshotRefusal> {
+        self.fork_vm_with(None, None, None)
+    }
+
     /// A copy of this VM that shares nothing a script can change with it.
-    pub(crate) fn fork_vm(&self) -> Result<Vm, SnapshotRefusal> {
+    pub(crate) fn fork_vm_with(
+        &self,
+        recycled: Option<RecycledTables>,
+        pure_arrays: Option<&HashSet<usize>>,
+        code_recycle: Option<CodeRecycle>,
+    ) -> Result<(Vm, HashSet<usize>), SnapshotRefusal> {
         self.check_forkable()?;
         // Generators the boot made are released into the fork's own queue.
         let generator_releases = self.generator_releases.as_ref().map(|_| Rc::default());
@@ -53,8 +65,16 @@ impl Vm {
                 .map(Rc::downgrade)
                 .unwrap_or_default(),
         };
-        let mut fork =
-            Fork::with_object_hint(self.classes.ids(), &natives, self.classes.objects.len());
+        let mut fork = Fork::with_snapshot_hints(
+            self.classes.ids(),
+            &natives,
+            self.classes.objects.len(),
+            pure_arrays,
+        );
+        let (recycled_code, recycled_local_classes) = match recycled {
+            Some(tables) => (Some(tables.code), Some(tables.local_classes)),
+            None => (None, None),
+        };
         let globals = self.globals.fork_copy(&mut fork);
         let registers = self.registers.fork_copy(&mut fork);
         let call_stack = self.call_stack.fork_copy(&mut fork);
@@ -66,7 +86,10 @@ impl Vm {
         let request_callbacks = self.request_callbacks.fork_copy(&mut fork);
         let autoload = self.autoload.fork_copy(&mut fork);
         let output_writer = self.output_writer.fork_copy(&mut fork);
-        let code = self.code.fork_copy(&mut fork);
+        let code = match recycled_code {
+            Some(code) => code,
+            None => self.code.fork_copy(&mut fork),
+        };
         let unset_typed_properties = self.unset_typed_properties.fork_copy(&mut fork);
         let extension_values = self.extension_values.fork_copy(&mut fork);
         let websocket_resolver = self
@@ -110,76 +133,86 @@ impl Vm {
         if std::env::var_os("PHERA_FORK_FOOTPRINT").is_some() {
             super::footprint::report(&fork, &code, &registers, &class_states);
         }
-        let copies = fork.finish().map_err(|refusal| SnapshotRefusal {
+        let discovered_pure = if pure_arrays.is_none() {
+            fork.pure_arrays_seen()
+        } else {
+            HashSet::default()
+        };
+        let objects = fork.finish_weak().map_err(|refusal| SnapshotRefusal {
             class: refusal.class,
             reason: refusal.reason,
             address: refusal.address,
         })?;
-        let objects = copies.iter().map(Rc::downgrade).collect();
-        let classes = self.classes.forked(ids.clone(), objects);
-        Ok(Vm {
-            classes,
-            object_ids: ids,
-            enum_cases,
-            native_callback_sites: Vec::new(),
-            debug_objects: self.debug_objects.clone(),
-            property_guards: Vec::new(),
-            unset_typed_properties,
-            extension_values,
-            clone_scopes: Default::default(),
-            closure_captures: Vec::new(),
-            initializer_scope: None,
-            initializer_class: None,
-            argument_origin: self.argument_origin,
-            native_called_class: None,
-            pending_dimension: None,
-            returned_hook: None,
-            native_view_depth: None,
-            prelinked_classes: self.prelinked_classes.clone(),
-            function_table: self.function_table.forked(),
-            code,
-            class_states,
-            globals,
-            static_variables,
-            diagnostic_reporter: crate::diagnostic_reporter::DiagnosticReporter::new(),
-            diagnostic_location: None,
-            include_state: self.include_state.forked(),
-            call_stack,
-            finally_stack: Vec::new(),
-            generator_suspension: None,
-            generator_traces: Vec::new(),
-            generator_releases,
-            draining_generators: false,
-            closing_generator: None,
-            executed_instructions: 0,
-            registry: self.registry.clone(),
-            output: Vec::new(),
-            output_writer,
-            request_callbacks,
-            registers,
-            constants,
-            frame_limit: self.frame_limit,
-            status: 0,
-            error_handlers,
-            pending_callbacks: false,
-            failed_native: None,
-            missed_native: None,
-            state,
-            reflection_cache: None,
-            property_references,
-            autoload,
-            request_end: self.request_end.clone(),
-            cycles: self.cycles.clone(),
-            ini_overrides: self.ini_overrides.clone(),
-            execution_time: Rc::new(self.execution_time.forked()),
-            active_fiber: None,
-            fiber_bailout: false,
-            suspended_fibers: Default::default(),
-            snapshot: self.snapshot.forked(),
-            websocket_sink: self.websocket_sink.clone(),
-            websocket_resolver,
-            websocket_is_event: false,
-        })
+        let classes = self
+            .classes
+            .forked(ids.clone(), objects, recycled_local_classes);
+        Ok((
+            Vm {
+                classes,
+                object_ids: ids,
+                enum_cases,
+                native_callback_sites: Vec::new(),
+                debug_objects: self.debug_objects.clone(),
+                property_guards: Vec::new(),
+                unset_typed_properties,
+                extension_values,
+                clone_scopes: Default::default(),
+                closure_captures: Vec::new(),
+                initializer_scope: None,
+                initializer_class: None,
+                argument_origin: self.argument_origin,
+                native_called_class: None,
+                pending_dimension: None,
+                returned_hook: None,
+                native_view_depth: None,
+                prelinked_classes: self.prelinked_classes.clone(),
+                function_table: self.function_table.forked(),
+                code,
+                class_states,
+                globals,
+                static_variables,
+                diagnostic_reporter: crate::diagnostic_reporter::DiagnosticReporter::new(),
+                diagnostic_location: None,
+                include_state: self.include_state.forked(),
+                call_stack,
+                finally_stack: Vec::new(),
+                generator_suspension: None,
+                generator_traces: Vec::new(),
+                generator_releases,
+                draining_generators: false,
+                closing_generator: None,
+                executed_instructions: 0,
+                registry: self.registry.clone(),
+                output: Vec::new(),
+                output_writer,
+                request_callbacks,
+                registers,
+                constants,
+                frame_limit: self.frame_limit,
+                status: 0,
+                error_handlers,
+                pending_callbacks: false,
+                failed_native: None,
+                missed_native: None,
+                state,
+                reflection_cache: None,
+                property_references,
+                autoload,
+                request_end: self.request_end.clone(),
+                cycles: self.cycles.clone(),
+                ini_overrides: self.ini_overrides.clone(),
+                execution_time: Rc::new(self.execution_time.forked()),
+                active_fiber: None,
+                fiber_bailout: false,
+                suspended_fibers: Default::default(),
+                snapshot: self.snapshot.forked(),
+                websocket_sink: self.websocket_sink.clone(),
+                websocket_resolver,
+                websocket_is_event: false,
+                code_recycle,
+            },
+            discovered_pure,
+        ))
     }
 
     /// Refuses a copy in the middle of an operation that a fork could not
