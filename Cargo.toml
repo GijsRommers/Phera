@@ -47,7 +47,7 @@ futures-util = { version = "0.3", default-features = false, features = ["alloc",
 rcgen = { version = "0.14", default-features = false, features = ["ring", "pem"] }
 rsa = { version = "0.10", features = ["pkcs1v15"] }
 sha1_011 = { package = "sha1", version = "0.11" }
-redis = { version = "=1.0.5", default-features = false, features = ["tokio-comp"] }
+redis = { version = "=1.8.2", default-features = false, features = ["tokio-comp"] }
 phera-ext-reflection = { path = "crates/extensions/reflection" }
 phera-ext-redis = { path = "crates/extensions/redis" }
 phera-db-drivers = { path = "crates/db-drivers" }
