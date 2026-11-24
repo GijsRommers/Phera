@@ -210,17 +210,18 @@ impl Vm {
             let slot = slot_for(index);
             self.registers.grow_to(slot + 1);
             self.registers.put(slot, value);
-            if let Some(extra_name) = named_extra {
-                self.call_stack
-                    .top_details_mut()?
-                    .extra_named
-                    .push((index, extra_name));
-            }
             call.mark_sent(index, !extra);
             if was_named {
                 call.flags.insert(CallFlags::NAMED);
             }
             *self.call_stack.top_call_mut()? = call;
+            if let Some(extra_name) = named_extra {
+                self.call_stack
+                    .top_details_mut()?
+                    .extra_named
+                    .push((index, extra_name));
+                call.flags.insert(CallFlags::DETAILS);
+            }
         }
         Ok(())
     }
