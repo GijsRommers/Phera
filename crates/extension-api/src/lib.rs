@@ -93,4 +93,5 @@ pub trait Extension {
 pub mod fiber;
 pub mod ini;
 pub mod reflection;
+pub mod websocket;
 pub mod zend_sort;

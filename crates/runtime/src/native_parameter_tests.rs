@@ -8,7 +8,14 @@ use phera_extension_api::{Param, Registry, native_parameters::signature};
 #[test]
 fn native_parameter_tables_match_php_stubs() {
     let runtime = super::Runtime::new();
-    let mut audit = Audit::default();
+    let ws_stubs = websocket_stubs();
+    let mut audit = Audit {
+        functions: 0,
+        methods: 0,
+        missing: Vec::new(),
+        messages: Vec::new(),
+        ws_stubs: &ws_stubs,
+    };
     audit.registry(&runtime.web_registry);
     for function in runtime.registry.functions() {
         if runtime.web_registry.get_function(function.name).is_none()
@@ -45,15 +52,56 @@ fn native_parameter_tables_match_php_stubs() {
     assert!(audit.messages.is_empty(), "{}", audit.messages.join("\n"));
 }
 
-#[derive(Default)]
-struct Audit {
+type StubSignature = Vec<(String, bool, bool, bool)>;
+
+fn websocket_stubs() -> std::collections::HashMap<String, StubSignature> {
+    let unit = phera_compiler::compile(
+        include_str!("websocket/stubs.php"),
+        "crates/runtime/src/websocket/stubs.php",
+    )
+    .expect("websocket stubs compile");
+    let extract = |params: &[phera_bytecode::Parameter]| -> StubSignature {
+        params
+            .iter()
+            .map(|p| {
+                let name = unit.names[p.name.index()].clone();
+                (
+                    name,
+                    p.has_default || p.variadic,
+                    p.by_reference,
+                    p.variadic,
+                )
+            })
+            .collect()
+    };
+    let mut map = std::collections::HashMap::new();
+    for function in &unit.functions {
+        if !function.name.contains('{') {
+            map.insert(function.name.clone(), extract(&function.parameters));
+        }
+    }
+    for class in &unit.classes {
+        for method in &class.methods {
+            let method_name = &unit.names[method.name.index()];
+            let function = &unit.functions[method.function.index()];
+            map.insert(
+                format!("{}::{method_name}", class.name),
+                extract(&function.parameters),
+            );
+        }
+    }
+    map
+}
+
+struct Audit<'a> {
     functions: usize,
     methods: usize,
     missing: Vec<String>,
     messages: Vec<String>,
+    ws_stubs: &'a std::collections::HashMap<String, StubSignature>,
 }
 
-impl Audit {
+impl Audit<'_> {
     fn registry(&mut self, registry: &Registry) {
         for function in registry.functions() {
             if self.compare(function.name, function.params) {
@@ -70,6 +118,31 @@ impl Audit {
     }
 
     fn compare(&mut self, name: &str, parameters: &[Param]) -> bool {
+        if name.starts_with("Phera\\WebSocket\\") {
+            let Some(declared) = self.ws_stubs.get(name) else {
+                self.messages.push(format!(
+                    "{name}: missing declaration in websocket/stubs.php"
+                ));
+                return false;
+            };
+            let actual: StubSignature = parameters
+                .iter()
+                .map(|parameter| {
+                    (
+                        parameter.name.to_owned(),
+                        parameter.optional,
+                        parameter.by_ref,
+                        parameter.variadic,
+                    )
+                })
+                .collect();
+            if &actual != declared {
+                self.messages.push(format!(
+                    "{name} (websocket/stubs.php):\n  registered {actual:?}\n  stubs      {declared:?}"
+                ));
+            }
+            return true;
+        }
         let Some(stub) = signature(name) else {
             self.missing.push(name.to_owned());
             assert!(

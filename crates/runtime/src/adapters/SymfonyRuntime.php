@@ -56,6 +56,13 @@ final class SnapshotRunner implements RunnerInterface
             $this->handleWarmUpRequests($this->kernel, $paths);
         }
 
+        if ($this->kernel instanceof KernelInterface && \function_exists('Phera\\WebSocket\\resolveUsing')) {
+            $container = $this->kernel->getContainer();
+            \Phera\WebSocket\resolveUsing(static function (string $class) use ($container): object {
+                return $container->has($class) ? $container->get($class) : new $class();
+            });
+        }
+
         \Phera\snapshot();
 
         $request = Request::createFromGlobals();

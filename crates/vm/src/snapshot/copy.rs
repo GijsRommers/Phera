@@ -69,6 +69,10 @@ impl Vm {
         let code = self.code.fork_copy(&mut fork);
         let unset_typed_properties = self.unset_typed_properties.fork_copy(&mut fork);
         let extension_values = self.extension_values.fork_copy(&mut fork);
+        let websocket_resolver = self
+            .websocket_resolver
+            .as_ref()
+            .map(|resolver| fork.value(resolver));
         // Extensions' state may look objects up by identity: every object
         // reachable from the VM is copied first.
         fork.drain();
@@ -172,6 +176,9 @@ impl Vm {
             fiber_bailout: false,
             suspended_fibers: Default::default(),
             snapshot: self.snapshot.forked(),
+            websocket_sink: self.websocket_sink.clone(),
+            websocket_resolver,
+            websocket_is_event: false,
         })
     }
 

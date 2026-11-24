@@ -12,6 +12,7 @@ use tokio::sync::watch;
 use crate::config::ServerConfig;
 use crate::handler::HandlerFactory;
 use crate::shutdown::spawn_signal_watcher;
+use crate::websocket::WebSocketHub;
 use crate::worker;
 
 /// A server ready to run.
@@ -22,6 +23,7 @@ use crate::worker;
 pub struct Server {
     config: ServerConfig,
     factory: Arc<dyn HandlerFactory>,
+    ws_hub: Arc<WebSocketHub>,
     listeners: Vec<StdListener>,
     local_addr: SocketAddr,
     shutdown: watch::Sender<bool>,
@@ -33,6 +35,19 @@ impl Server {
     /// When the port in `config.addr` is 0 the kernel picks one for the first
     /// socket and every other worker binds to that same port.
     pub fn bind(config: ServerConfig, factory: impl HandlerFactory) -> io::Result<Server> {
+        let ws_hub = Arc::new(WebSocketHub::new(
+            config.websocket.send_queue_len,
+            config.websocket.send_queue_bytes,
+        ));
+        Self::bind_with_hub(config, factory, ws_hub)
+    }
+
+    /// Bind using an explicit process-wide [`WebSocketHub`].
+    pub fn bind_with_hub(
+        config: ServerConfig,
+        factory: impl HandlerFactory,
+        ws_hub: Arc<WebSocketHub>,
+    ) -> io::Result<Server> {
         let workers = config.workers.max(1);
         let first = worker::bind_listener(config.addr)?;
         let local_addr = first.local_addr()?;
@@ -45,10 +60,16 @@ impl Server {
         Ok(Server {
             config,
             factory: Arc::new(factory),
+            ws_hub,
             listeners,
             local_addr,
             shutdown,
         })
+    }
+
+    /// Process-wide WebSocket connection and room hub.
+    pub fn websocket_hub(&self) -> Arc<WebSocketHub> {
+        self.ws_hub.clone()
     }
 
     /// The address the first listening socket is bound to.
@@ -87,6 +108,7 @@ fn run_supervisor(mut server: Server, with_signals: bool) -> io::Result<()> {
     let mut workers = Vec::new();
     for (index, listener) in server.listeners.drain(..).enumerate() {
         let factory = Arc::clone(&server.factory);
+        let ws_hub = Arc::clone(&server.ws_hub);
         let config = server.config.clone();
         let shutdown = server.shutdown.subscribe();
         let done_tx = done_tx.clone();
@@ -94,7 +116,7 @@ fn run_supervisor(mut server: Server, with_signals: bool) -> io::Result<()> {
         let worker = std::thread::Builder::new()
             .name(format!("phera-worker-{index}"))
             .spawn(move || {
-                worker::run(index, listener, factory, config, shutdown);
+                worker::run(index, listener, factory, ws_hub, config, shutdown);
                 let _ = done_tx.send(());
             })
             .unwrap_or_else(|error| panic!("failed to spawn worker {workers_count}: {error}"));

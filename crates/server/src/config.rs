@@ -4,6 +4,8 @@
 use std::net::SocketAddr;
 use std::time::Duration;
 
+use crate::websocket::WebSocketConfig;
+
 /// The configuration of a server ([`ServerConfig`]).
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
@@ -29,6 +31,8 @@ pub struct ServerConfig {
     /// in the operating system's queue until a connection closes.
     pub max_connections_per_worker: usize,
     pub shutdown_timeout: Duration,
+    /// WebSocket limits, timeouts, and Origin allowlist.
+    pub websocket: WebSocketConfig,
 }
 
 impl Default for ServerConfig {
@@ -48,6 +52,7 @@ impl Default for ServerConfig {
             request_timeout: Some(Duration::from_secs(60)),
             max_connections_per_worker: 10_000,
             shutdown_timeout: Duration::from_secs(30),
+            websocket: WebSocketConfig::default(),
         }
     }
 }

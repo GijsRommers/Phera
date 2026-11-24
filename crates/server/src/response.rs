@@ -2,6 +2,8 @@
 
 use std::fs::File;
 
+use crate::websocket::WebSocketUpgrade;
+
 /// An HTTP response. Repeated header names (Set-Cookie) are allowed and
 /// sent in order.
 #[derive(Debug, Default)]
@@ -9,6 +11,8 @@ pub struct Response {
     pub status: u16,
     pub headers: Vec<(String, Vec<u8>)>,
     pub body: Body,
+    /// Present only when the handler accepted a WebSocket upgrade.
+    pub upgrade: Option<Box<WebSocketUpgrade>>,
 }
 
 /// What a response sends after its headers.
@@ -42,7 +46,14 @@ impl Response {
             status,
             headers: Vec::new(),
             body: Body::default(),
+            upgrade: None,
         }
+    }
+
+    /// Mark this response as accepting a WebSocket upgrade.
+    pub fn with_websocket_upgrade(mut self, upgrade: WebSocketUpgrade) -> Self {
+        self.upgrade = Some(Box::new(upgrade));
+        self
     }
 
     /// Add a header. The name is sent as given, so use lower-case for a
