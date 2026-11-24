@@ -81,15 +81,7 @@ pub struct Description {
 impl Description {
     pub(crate) fn read(statement: &rusqlite::Statement<'_>) -> Self {
         Self {
-            columns: statement
-                .columns()
-                .zip(statement.columns_with_metadata())
-                .map(|(column, metadata)| Column {
-                    name: column.name().into(),
-                    declared: column.decl_type().map(str::to_owned),
-                    table: metadata.table_name().map(str::to_owned),
-                })
-                .collect(),
+            columns: read_columns(statement),
             parameters: (1..=statement.parameter_count())
                 .map(|index| statement.parameter_name(index).map(str::to_owned))
                 .collect(),
@@ -97,6 +89,28 @@ impl Description {
             explain: statement.is_explain(),
         }
     }
+
+    /// Reads column metadata on execute without re-allocating parameter names.
+    pub(crate) fn read_columns_only(statement: &rusqlite::Statement<'_>) -> Self {
+        Self {
+            columns: read_columns(statement),
+            parameters: Vec::new(),
+            readonly: statement.readonly(),
+            explain: statement.is_explain(),
+        }
+    }
+}
+
+fn read_columns(statement: &rusqlite::Statement<'_>) -> Vec<Column> {
+    statement
+        .columns()
+        .zip(statement.columns_with_metadata())
+        .map(|(column, metadata)| Column {
+            name: column.name().into(),
+            declared: column.decl_type().map(str::to_owned),
+            table: metadata.table_name().map(str::to_owned),
+        })
+        .collect()
 }
 
 #[derive(Debug)]

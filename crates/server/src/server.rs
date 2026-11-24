@@ -4,16 +4,16 @@ use std::io;
 use std::net::{SocketAddr, TcpListener as StdListener};
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::mpsc;
+use std::sync::atomic::AtomicUsize;
 use std::thread::JoinHandle;
 
-use tokio::sync::watch;
+use tokio::sync::{Notify, mpsc, oneshot, watch};
 
 use crate::config::ServerConfig;
 use crate::handler::HandlerFactory;
 use crate::shutdown::spawn_signal_watcher;
 use crate::websocket::WebSocketHub;
-use crate::worker;
+use crate::worker::{self, WorkerSlot};
 
 /// A server ready to run.
 ///
@@ -24,16 +24,13 @@ pub struct Server {
     config: ServerConfig,
     factory: Arc<dyn HandlerFactory>,
     ws_hub: Arc<WebSocketHub>,
-    listeners: Vec<StdListener>,
+    listener: StdListener,
     local_addr: SocketAddr,
     shutdown: watch::Sender<bool>,
 }
 
 impl Server {
-    /// Bind one listening socket per worker and prepare the server.
-    ///
-    /// When the port in `config.addr` is 0 the kernel picks one for the first
-    /// socket and every other worker binds to that same port.
+    /// Bind the listening socket and prepare the server.
     pub fn bind(config: ServerConfig, factory: impl HandlerFactory) -> io::Result<Server> {
         let ws_hub = Arc::new(WebSocketHub::new(
             config.websocket.send_queue_len,
@@ -48,20 +45,14 @@ impl Server {
         factory: impl HandlerFactory,
         ws_hub: Arc<WebSocketHub>,
     ) -> io::Result<Server> {
-        let workers = config.workers.max(1);
-        let first = worker::bind_listener(config.addr)?;
-        let local_addr = first.local_addr()?;
-        let mut listeners = Vec::with_capacity(workers);
-        listeners.push(first);
-        for _ in 1..workers {
-            listeners.push(worker::extra_listener(&listeners[0], config.addr)?);
-        }
+        let listener = worker::bind_listener(config.addr)?;
+        let local_addr = listener.local_addr()?;
         let (shutdown, _) = watch::channel(false);
         Ok(Server {
             config,
             factory: Arc::new(factory),
             ws_hub,
-            listeners,
+            listener,
             local_addr,
             shutdown,
         })
@@ -72,7 +63,7 @@ impl Server {
         self.ws_hub.clone()
     }
 
-    /// The address the first listening socket is bound to.
+    /// The address the listening socket is bound to.
     pub fn local_addr(&self) -> SocketAddr {
         self.local_addr
     }
@@ -102,40 +93,89 @@ impl Server {
     }
 }
 
-/// Start the workers, wait for a shutdown signal, and join everything.
-fn run_supervisor(mut server: Server, with_signals: bool) -> io::Result<()> {
-    let (done_tx, done_rx) = mpsc::channel::<()>();
-    let mut workers = Vec::new();
-    for (index, listener) in server.listeners.drain(..).enumerate() {
-        let factory = Arc::clone(&server.factory);
-        let ws_hub = Arc::clone(&server.ws_hub);
-        let config = server.config.clone();
-        let shutdown = server.shutdown.subscribe();
-        let done_tx = done_tx.clone();
-        let workers_count = workers.len();
-        let worker = std::thread::Builder::new()
-            .name(format!("phera-worker-{index}"))
-            .spawn(move || {
-                worker::run(index, listener, factory, ws_hub, config, shutdown);
-                let _ = done_tx.send(());
-            })
-            .unwrap_or_else(|error| panic!("failed to spawn worker {workers_count}: {error}"));
-        workers.push(worker);
-    }
-    drop(done_tx);
+/// Start the workers, accept/dispatch connections, wait for shutdown, and join
+/// everything.
+fn run_supervisor(server: Server, with_signals: bool) -> io::Result<()> {
+    let Server {
+        config,
+        factory,
+        ws_hub,
+        listener,
+        local_addr,
+        shutdown,
+    } = server;
 
     // Never joined: it only wakes on a signal, and the workers can also stop
     // for other reasons. It dies with the process.
     if with_signals {
-        spawn_signal_watcher(server.shutdown.clone());
+        spawn_signal_watcher(shutdown.clone());
     }
 
-    for _ in 0..workers.len() {
-        let _ = done_rx.recv();
+    let worker_count = config.workers.max(1);
+    if worker_count == 1 {
+        let shutdown_rx = shutdown.subscribe();
+        let worker = std::thread::Builder::new()
+            .name("phera-worker-0".to_string())
+            .spawn(move || {
+                worker::run_direct(0, listener, factory, ws_hub, config, shutdown_rx);
+            })
+            .unwrap_or_else(|error| panic!("failed to spawn worker 0: {error}"));
+        return join_workers(vec![worker], Ok(()));
     }
-    let mut result = Ok(());
+
+    let slot_freed = Arc::new(Notify::new());
+    let max_per_worker = config.max_connections_per_worker.max(1);
+    let mut workers = Vec::with_capacity(worker_count);
+    let mut slots = Vec::with_capacity(worker_count);
+    let mut ready_rxs = Vec::with_capacity(worker_count);
+
+    for index in 0..worker_count {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let (ready_tx, ready_rx) = oneshot::channel();
+        let active = Arc::new(AtomicUsize::new(0));
+        slots.push(WorkerSlot { tx, active });
+        ready_rxs.push(ready_rx);
+
+        let factory = Arc::clone(&factory);
+        let ws_hub = Arc::clone(&ws_hub);
+        let config = config.clone();
+        let slot_freed = Arc::clone(&slot_freed);
+        let shutdown_rx = shutdown.subscribe();
+        let worker = std::thread::Builder::new()
+            .name(format!("phera-worker-{index}"))
+            .spawn(move || {
+                worker::run_dispatched(
+                    index,
+                    local_addr,
+                    rx,
+                    ready_tx,
+                    slot_freed,
+                    factory,
+                    ws_hub,
+                    config,
+                    shutdown_rx,
+                );
+            })
+            .unwrap_or_else(|error| panic!("failed to spawn worker {index}: {error}"));
+        workers.push(worker);
+    }
+
+    let accept_result = worker::run_acceptor(
+        listener,
+        slots,
+        ready_rxs,
+        slot_freed,
+        max_per_worker,
+        shutdown.subscribe(),
+    );
+
+    join_workers(workers, accept_result)
+}
+
+fn join_workers(workers: Vec<JoinHandle<()>>, accept_result: io::Result<()>) -> io::Result<()> {
+    let mut result = accept_result;
     for worker in workers {
-        if worker.join().is_err() {
+        if worker.join().is_err() && result.is_ok() {
             result = Err(io::Error::other("a phera-server worker thread panicked"));
         }
     }
@@ -158,7 +198,7 @@ impl ServerHandle {
     /// Stop accepting, let in-flight requests finish up to the shutdown
     /// timeout, and join the worker threads. Blocks until they are gone.
     pub fn shutdown(&self) {
-        let _ = self.shutdown.send(true);
+        self.shutdown.send_replace(true);
         if let Some(supervisor) = self.supervisor.lock().unwrap().take() {
             let _ = supervisor.join();
         }

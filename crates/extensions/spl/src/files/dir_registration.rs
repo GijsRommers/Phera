@@ -35,6 +35,7 @@ const CONSTANTS: &[(&str, ConstantValue)] = &[
 ];
 
 const DIRECTORY_HOOKS: ClassHooks = ClassHooks {
+    clone: Some(NativeClone::AsyncCopy(d::clone_state)),
     iterator: Some(d::create),
     ..ClassHooks::EMPTY
 };

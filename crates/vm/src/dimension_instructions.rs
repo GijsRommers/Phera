@@ -48,17 +48,52 @@ impl Vm {
 
     #[cold]
     pub(crate) fn prepare_dimension(&mut self, place: &AccessPath) -> Result<bool, NativeError> {
-        if !place.steps()?.any(|step| {
-            matches!(
-                step,
+        if !self.classes.has_dimensions {
+            return Ok(false);
+        }
+        let mut steps = place.steps()?;
+        let Some(first) = steps.next() else {
+            return Ok(false);
+        };
+        let second = steps.next();
+        if second.is_none()
+            && !matches!(
+                first,
                 phera_bytecode::Step::Index(_) | phera_bytecode::Step::Append
             )
-        }) {
+        {
+            return Ok(false);
+        }
+        if second.is_some()
+            && !matches!(
+                first,
+                phera_bytecode::Step::Index(_) | phera_bytecode::Step::Append
+            )
+            && !matches!(
+                second,
+                Some(phera_bytecode::Step::Index(_) | phera_bytecode::Step::Append)
+            )
+            && !steps.any(|step| {
+                matches!(
+                    step,
+                    phera_bytecode::Step::Index(_) | phera_bytecode::Step::Append
+                )
+            })
+        {
             return Ok(false);
         }
         let Some(register) = self.base_register(place, Creation::Existing, Missing::Silent)? else {
             return Ok(false);
         };
+        // Fast zero-clone exit for the overwhelmingly common `$arr[$k]` / `$arr[]`
+        // single-step access on a plain `Value::Array` (never an `ArrayAccess` object).
+        if second.is_none()
+            && let Some(frame) = self.current()
+            && let Some(Some(slot)) = frame.slots(&self.registers).get(register.index())
+            && matches!(slot, Value::Array(_))
+        {
+            return Ok(false);
+        }
         self.pending_dimension = self.find_dimension(self.get(register), place.steps()?)?;
         Ok(self.pending_dimension.is_some())
     }

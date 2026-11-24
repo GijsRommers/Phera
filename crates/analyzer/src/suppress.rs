@@ -9,8 +9,13 @@ enum Directive<'a> {
     Identifiers(&'a str),
 }
 
-pub fn filter(file: &ParsedFile, diagnostics: &mut Vec<Diagnostic>) {
-    if diagnostics.is_empty()
+pub fn filter(
+    file: &ParsedFile,
+    diagnostics: &mut Vec<Diagnostic>,
+    report_unmatched: bool,
+    unverified_internal: &std::collections::BTreeSet<usize>,
+) {
+    if (diagnostics.is_empty() && !report_unmatched)
         || !file.source.contains("-ignore") && !file.source.contains("@psalm-suppress")
     {
         return;
@@ -18,6 +23,7 @@ pub fn filter(file: &ParsedFile, diagnostics: &mut Vec<Diagnostic>) {
     // A file with many diagnostics still needs just one walk over its tokens.
     let mut lines = std::collections::BTreeMap::<usize, Vec<Directive<'_>>>::new();
     let mut ranges = Vec::new();
+    let mut phpstan_ignores = Vec::new();
     let mut lexer = Lexer::new(&file.source);
     let mut end = 0;
     while let Ok(token) = lexer.next_token() {
@@ -37,8 +43,14 @@ pub fn filter(file: &ParsedFile, diagnostics: &mut Vec<Diagnostic>) {
                     .entry(comment_line + 1)
                     .or_default()
                     .push(Directive::All);
+                if report_unmatched {
+                    phpstan_ignores.push((comment_line + 1, None));
+                }
             } else if line.contains("@phpstan-ignore-line") {
                 lines.entry(comment_line).or_default().push(Directive::All);
+                if report_unmatched {
+                    phpstan_ignores.push((comment_line, None));
+                }
             } else if let Some((_, identifiers)) = line.split_once("@phpstan-ignore") {
                 let start = file.source[..offset]
                     .rfind('\n')
@@ -51,6 +63,18 @@ pub fn filter(file: &ParsedFile, diagnostics: &mut Vec<Diagnostic>) {
                     .entry(target)
                     .or_default()
                     .push(Directive::Identifiers(identifiers));
+                if report_unmatched {
+                    phpstan_ignores.extend(
+                        identifiers
+                            .split('(')
+                            .next()
+                            .unwrap_or_default()
+                            .split(',')
+                            .filter_map(|item| item.split_whitespace().next())
+                            .filter(|id| id.contains('.'))
+                            .map(|id| (target, Some(id))),
+                    );
+                }
             } else if let Some((_, identifiers)) = line.split_once("@phera-ignore") {
                 for target in [comment_line, next_line] {
                     let directive = if identifiers.trim().trim_end_matches("*/").is_empty() {
@@ -74,6 +98,23 @@ pub fn filter(file: &ParsedFile, diagnostics: &mut Vec<Diagnostic>) {
             break;
         }
     }
+    let traits = if phpstan_ignores.is_empty() {
+        Vec::new()
+    } else {
+        trait_lines(file)
+    };
+    let unmatched: Vec<_> = phpstan_ignores
+        .into_iter()
+        .filter(|(line, identifier)| {
+            !traits.iter().any(|range| range.contains(line))
+                && !(identifier.is_none_or(|id| id.ends_with(".internalClass"))
+                    && unverified_internal.contains(line))
+                && !diagnostics.iter().any(|diagnostic| {
+                    diagnostic.line == *line
+                        && identifier.is_none_or(|id| id == diagnostic.identifier)
+                })
+        })
+        .collect();
     diagnostics.retain(|diagnostic| {
         !lines.get(&diagnostic.line).is_some_and(|directives| {
             directives.iter().any(|directive| match directive {
@@ -86,6 +127,51 @@ pub fn filter(file: &ParsedFile, diagnostics: &mut Vec<Diagnostic>) {
             range.contains(&diagnostic.line) && psalm_matches(identifier, &diagnostic.identifier)
         })
     });
+    diagnostics.extend(unmatched.into_iter().map(|(line, identifier)| {
+        let (identifier, message) = if let Some(id) = identifier {
+            (
+                "ignore.unmatchedIdentifier",
+                format!("No error with identifier {id} is reported on line {line}."),
+            )
+        } else {
+            (
+                "ignore.unmatchedLine",
+                format!("No error is reported on line {line}."),
+            )
+        };
+        Diagnostic {
+            file: file.path.clone(),
+            line,
+            identifier: identifier.into(),
+            message,
+            severity: Default::default(),
+            source_range: None,
+        }
+    }));
+}
+
+fn trait_lines(file: &ParsedFile) -> Vec<std::ops::RangeInclusive<usize>> {
+    use phera_ast::{ClassKind, StatementKind};
+
+    let mut ranges = Vec::new();
+    let mut pending = vec![file.program.statements.as_slice()];
+    while let Some(statements) = pending.pop() {
+        for statement in statements {
+            if matches!(&statement.kind, StatementKind::Class(class) if class.kind == ClassKind::Trait)
+            {
+                ranges.push(
+                    file.lines.line(statement.span.start)..=file.lines.line(statement.span.end),
+                );
+            } else {
+                match &statement.kind {
+                    StatementKind::Namespace { statements, .. } => pending.push(statements),
+                    StatementKind::Function(function) => pending.push(&function.body),
+                    _ => pending.extend(crate::collect::child_blocks(statement)),
+                }
+            }
+        }
+    }
+    ranges
 }
 
 fn has_identifier(text: &str, identifier: &str) -> bool {

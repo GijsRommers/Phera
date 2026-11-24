@@ -2952,6 +2952,7 @@ dependencies = [
 name = "phera-analyzer"
 version = "0.1.0"
 dependencies = [
+ "pcre2",
  "phera-ast",
  "phera-bytecode",
  "phera-lexer",
@@ -3506,6 +3507,7 @@ dependencies = [
 name = "phera-ext-standard"
 version = "0.1.0"
 dependencies = [
+ "foldhash",
  "hickory-resolver",
  "indexmap",
  "memchr",

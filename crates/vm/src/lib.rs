@@ -236,7 +236,7 @@ pub struct Vm {
     pending_dimension: Option<dimensions::DimensionPath>,
     returned_hook: Option<property_hook_continuation::ReturnedHook>,
     native_view_depth: Option<usize>,
-    prelinked_classes: foldhash::HashSet<(usize, usize)>,
+    prelinked_classes: Rc<foldhash::HashSet<(usize, usize)>>,
     function_table: function_table::FunctionTable,
     /// Every loaded file and function of the request, by number.
     code: code_table::CodeTable,
@@ -277,7 +277,7 @@ pub struct Vm {
     missed_native: Option<Vec<Value>>,
     /// What extensions remember during this request (response headers, ...).
     state: RequestState,
-    reflection_cache: Option<Box<reflection::ReflectionCache>>,
+    reflection_cache: Option<Rc<reflection::ReflectionCache>>,
     property_references: std::rc::Rc<std::cell::RefCell<reference_holders::ReferenceHolders>>,
     autoload: autoload::Autoloaders,
     request_end: request_end::RequestEnd,
@@ -292,6 +292,22 @@ pub struct Vm {
     websocket_sink: Option<Arc<dyn phera_extension_api::websocket::WebSocketSink>>,
     websocket_resolver: Option<Value>,
     websocket_is_event: bool,
+    /// When this VM was forked from a snapshot, allows clean teardown to
+    /// return its unmodified `CodeTable` and `ClassTable::local` back to the
+    /// snapshot's recycle pool.
+    code_recycle: Option<snapshot::CodeRecycle>,
+}
+
+impl Vm {
+    /// Returns unmodified snapshot-shared tables (`CodeTable`,
+    /// `ClassTable::local`) back to the originating snapshot's recycle pool
+    /// before this VM is dropped. Safe to call on any VM (no-op for classic
+    /// runs or forks that loaded/declared new symbols).
+    pub fn recycle(&mut self) {
+        if let Some(recycle) = self.code_recycle.take() {
+            recycle.try_return(&mut self.code, &mut self.classes, &self.function_table);
+        }
+    }
 }
 
 impl Vm {
@@ -325,6 +341,7 @@ impl Vm {
             websocket_sink: None,
             websocket_resolver: None,
             websocket_is_event: false,
+            code_recycle: None,
             native_callback_sites: Vec::new(),
             debug_objects: Vec::new(),
             property_guards: Vec::new(),

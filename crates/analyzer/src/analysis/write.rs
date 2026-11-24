@@ -79,33 +79,13 @@ impl Analyzer<'_> {
                     }
                 }
                 ExpressionKind::Index { .. } => {
-                    if self.write_index(target, scope) == Evaluation::Never {
+                    if self.write_index(target, &ty, scope) == Evaluation::Never {
                         return Evaluation::Never;
                     }
                 }
                 _ => {
-                    let given_property = matches!(
-                        target.kind,
-                        ExpressionKind::Property { .. } | ExpressionKind::StaticProperty { .. }
-                    );
-                    let expected = if self.level >= 3 && given_property {
-                        self.member_expressions(target, scope, false)
-                    } else {
-                        self.expression(target, scope, false)
-                    };
-                    if expected == ValueType::Never {
+                    if self.write_member(target, &ty, scope) == ValueType::Never {
                         return Evaluation::Never;
-                    }
-                    if given_property {
-                        self.check_property_assignment(target, &expected, &ty);
-                    }
-                    if self.level >= 2 {
-                        scope.forget_member_write(target);
-                        if matches!(target.kind, ExpressionKind::Property { .. })
-                            && let Some(place) = crate::scope::Place::of(target)
-                        {
-                            scope.facts.record(place, ty, None);
-                        }
                     }
                 }
             }
@@ -113,15 +93,69 @@ impl Analyzer<'_> {
         Evaluation::Completes
     }
 
-    fn write_index(&mut self, target: &Expression, scope: &mut Scope) -> Evaluation {
+    fn write_member(
+        &mut self,
+        target: &Expression,
+        ty: &ValueType,
+        scope: &mut Scope,
+    ) -> ValueType {
+        let property = matches!(
+            target.kind,
+            ExpressionKind::Property { .. } | ExpressionKind::StaticProperty { .. }
+        );
+        let expected = if self.level >= 3 && property {
+            self.member_expressions(target, scope, false)
+        } else {
+            self.expression(target, scope, false)
+        };
+        if expected == ValueType::Never {
+            return expected;
+        }
+        let place = if self.level >= 2 && property {
+            crate::scope::Place::of(target)
+        } else {
+            None
+        };
+        if property {
+            self.check_property_assignment(target, place.as_ref(), &expected, ty, scope);
+        }
+        if self.level >= 2 {
+            let stored = place
+                .as_ref()
+                .and_then(|place| self.stored_property_value(place, ty, scope));
+            scope.forget_member_write(target);
+            if (matches!(target.kind, ExpressionKind::Property { .. })
+                || self.level >= 7 && matches!(target.kind, ExpressionKind::StaticProperty { .. }))
+                && let Some(place) = place
+            {
+                scope
+                    .facts
+                    .record(place, stored.unwrap_or_else(|| ty.clone()), None);
+            }
+        }
+        expected
+    }
+
+    fn write_index(
+        &mut self,
+        target: &Expression,
+        value: &ValueType,
+        scope: &mut Scope,
+    ) -> Evaluation {
         let mut base = target;
         let mut keys = Vec::new();
         while let ExpressionKind::Index { target, index } = &base.kind {
-            if let Some(index) = index {
-                keys.push(index.as_ref());
-            }
+            keys.push((
+                base.span,
+                index.as_deref(),
+                self.level >= 9 && scope.facts.has_expression(base),
+            ));
             base = target;
         }
+        if let [(_, None, _)] = keys.as_slice() {
+            self.check_template_key_append(base, value, scope);
+        }
+        let mut receiver = ValueType::Mixed;
         let variable = if let ExpressionKind::Variable(Variable::Named(name)) = &base.kind {
             let old = scope.get(name);
             if old.definition == Definition::Absent {
@@ -133,16 +167,38 @@ impl Analyzer<'_> {
                     },
                 );
             }
+            if self.level >= 3 {
+                receiver = old.ty.clone();
+            }
             Some((name, old))
         } else {
-            if self.write(base, ValueType::Mixed, scope) == Evaluation::Never {
+            if self.level >= 9
+                && matches!(
+                    base.kind,
+                    ExpressionKind::Property { .. } | ExpressionKind::StaticProperty { .. }
+                )
+            {
+                receiver = self.write_member(base, &ValueType::Mixed, scope);
+                if receiver == ValueType::Never {
+                    return Evaluation::Never;
+                }
+            } else if self.write(base, ValueType::Mixed, scope) == Evaluation::Never {
                 return Evaluation::Never;
             }
             None
         };
-        for key in keys.into_iter().rev() {
-            if self.expression(key, scope, false) == ValueType::Never {
+        for (depth, (span, key, specified)) in keys.into_iter().rev().enumerate() {
+            let key = key.map(|key| self.expression(key, scope, false));
+            if key == Some(ValueType::Never) {
                 return Evaluation::Never;
+            }
+            if !specified {
+                self.mixed_offset(&receiver, key.as_ref(), span);
+            }
+            if depth == 0
+                && let Some(key) = &key
+            {
+                self.invalid_array_offset(&receiver, key, span);
             }
         }
         if let Some((name, old)) = variable {
@@ -165,6 +221,11 @@ impl Analyzer<'_> {
             && let Some(name) = crate::global_effects::variable_name(target)
         {
             scope.define(name, ValueType::Mixed);
+        }
+        if self.strict_mixed(&receiver)
+            && let Some(place) = crate::scope::Place::of(target)
+        {
+            scope.facts.record(place, value.clone(), None);
         }
         Evaluation::Completes
     }

@@ -31,9 +31,9 @@ mod objects;
 
 use std::any::{Any, TypeId};
 use std::cell::RefCell;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
-use foldhash::HashMap;
+use foldhash::{HashMap, HashSet};
 
 use crate::object::{Object, ObjectIds, Resource};
 use crate::value::Value;
@@ -94,6 +94,9 @@ pub struct Fork<'n> {
     /// Copies whose originals carry `WeakMap` values; filled once every
     /// map has its copy.
     pub(crate) unfilled_attachments: Vec<(Rc<Object>, Rc<Object>)>,
+    /// Optional snapshot-wide set of `Rc<PhpArray>` addresses already proven
+    /// transitively free of objects, references, and resources.
+    pub(crate) pure_arrays: Option<&'n HashSet<usize>>,
     refusal: Option<Refusal>,
 }
 
@@ -101,7 +104,7 @@ impl<'n> Fork<'n> {
     /// A copy into a new id pool that starts where `ids` is: the same ids
     /// are taken, and the same ones are free for reuse.
     pub fn new(ids: &ObjectIds, natives: &'n dyn NativeFork) -> Self {
-        Self::with_object_hint(ids, natives, 0)
+        Self::with_snapshot_hints(ids, natives, 0, None)
     }
 
     /// Like [`Fork::new`], pre-sizing the temporary copier tables from the
@@ -110,6 +113,18 @@ impl<'n> Fork<'n> {
         ids: &ObjectIds,
         natives: &'n dyn NativeFork,
         object_hint: usize,
+    ) -> Self {
+        Self::with_snapshot_hints(ids, natives, object_hint, None)
+    }
+
+    /// Like [`Fork::with_object_hint`], also accepting a snapshot-wide set of
+    /// transitively pure `PhpArray` addresses that can be shared in O(1)
+    /// without re-scanning their entries on every fork.
+    pub fn with_snapshot_hints(
+        ids: &ObjectIds,
+        natives: &'n dyn NativeFork,
+        object_hint: usize,
+        pure_arrays: Option<&'n HashSet<usize>>,
     ) -> Self {
         fn map_with_cap<V>(cap: usize) -> HashMap<usize, V> {
             if cap == 0 {
@@ -125,13 +140,49 @@ impl<'n> Fork<'n> {
             identities: HashMap::default(),
             references: map_with_cap(object_hint / 4),
             resources: HashMap::default(),
-            arrays: map_with_cap(object_hint / 2),
+            arrays: if pure_arrays.is_some() {
+                map_with_cap(object_hint / 4)
+            } else {
+                map_with_cap(object_hint / 2)
+            },
             native_copies: None,
             unfilled_objects: Vec::with_capacity(object_hint),
             unfilled_references: Vec::new(),
             unfilled_attachments: Vec::new(),
+            pure_arrays,
             refusal: None,
         }
+    }
+
+    /// Whether `value` is guaranteed to share its storage unchanged in this
+    /// fork (scalars, strings, or an array already proven transitively pure).
+    #[inline]
+    pub fn is_trivially_shared(&self, value: &Value) -> bool {
+        match value {
+            Value::Object(_) | Value::Reference(_) | Value::Resource(_) => false,
+            Value::Array(array) => {
+                let addr = Rc::as_ptr(array) as usize;
+                self.pure_arrays.is_some_and(|pure| pure.contains(&addr))
+                    || self
+                        .arrays
+                        .get(&addr)
+                        .is_some_and(|copy| Rc::ptr_eq(copy, array))
+            }
+            _ => true,
+        }
+    }
+
+    /// Every `Rc<PhpArray>` address encountered during this fork whose result
+    /// shared the original allocation unchanged (transitively free of objects,
+    /// references, and resources).
+    pub fn pure_arrays_seen(&self) -> HashSet<usize> {
+        let mut pure = HashSet::default();
+        for (&address, copy) in &self.arrays {
+            if Rc::as_ptr(copy) as usize == address {
+                pure.insert(address);
+            }
+        }
+        pure
     }
 
     /// What this copy allocated, by structure, in bytes (by capacity), for
@@ -293,6 +344,17 @@ impl<'n> Fork<'n> {
             return Err(refusal);
         }
         Ok(self.into_copies())
+    }
+
+    /// Like [`Fork::finish`], returning weak handles directly in one pass so
+    /// the caller avoids allocating intermediate `Vec<Rc<Object>>` buffers.
+    pub fn finish_weak(mut self) -> Result<Vec<Weak<Object>>, Refusal> {
+        self.drain();
+        if let Some(refusal) = self.refusal.take() {
+            self.discard();
+            return Err(refusal);
+        }
+        Ok(self.into_weak_copies())
     }
 
     /// Fills every copy made so far, and every copy that filling makes, so

@@ -16,15 +16,17 @@ use crate::unit_caches::CachedSite;
 
 impl Machine<'_> {
     /// `GuardBuiltin`, when the site found the global built-in.
+    #[inline(always)]
     pub(super) fn builtin_guard(&self, position: Position) -> Step {
         let function = position.frame.function;
         // The VM keys the site by the position after the instruction,
         // which is where the loop stands now.
         let builtin = self
             .code
-            .site(function, position.ip)
-            .and_then(|site| site.try_borrow().ok())
-            .is_some_and(|site| matches!(*site, CachedSite::BuiltinGuard(Resolution::Builtin)));
+            .read_site(function, position.ip, |site| {
+                matches!(*site, CachedSite::BuiltinGuard(Resolution::Builtin))
+            })
+            .unwrap_or(false);
         if builtin {
             Step::Done(position.ip)
         } else {

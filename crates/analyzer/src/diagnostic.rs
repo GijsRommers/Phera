@@ -8,6 +8,8 @@ pub struct Diagnostic {
     pub identifier: String,
     pub message: String,
     pub severity: Severity,
+    /// Distinguishes separate expressions when they produce the same finding on one line.
+    pub(crate) source_range: Option<(usize, usize)>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]

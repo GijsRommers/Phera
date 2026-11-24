@@ -8,20 +8,13 @@
 //! For example, LoadInt(r2, 1); Binary(Add, r1, r0, r2) can become
 //! Nop; BinaryInt(Add, r1, r0, 1) when r2 is dead after the operation.
 
-use std::collections::HashSet;
-
 use phera_bytecode::{Function, Instruction};
 
-use crate::passes::optimize::target;
+use crate::passes::optimize::block_boundaries;
 
 /// Replace literal loads used only by the next binary instruction.
 pub(crate) fn fuse_integer_operands(function: &mut Function) {
-    let boundaries: HashSet<_> = function
-        .instructions
-        .iter()
-        .filter_map(target)
-        .map(|target| target.index())
-        .collect();
+    let boundaries = block_boundaries(function);
     for index in 1..function.instructions.len() {
         if boundaries.contains(&index) {
             continue;
@@ -106,6 +99,21 @@ fn dead_after_from(
             }
             if visited.len() > DEAD_AFTER_SCAN {
                 return false;
+            }
+            if !function.handlers.is_empty() {
+                for handler in &function.handlers {
+                    if handler.start.index() <= cursor
+                        && cursor < handler.end.index()
+                        && !handler.cleanup.contains(&register)
+                    {
+                        if let Some(catch) = handler.catch {
+                            pending.push(catch.index());
+                        }
+                        if let Some(finally) = handler.finally {
+                            pending.push(finally.index());
+                        }
+                    }
+                }
             }
             cursor += 1;
             match *instruction {
@@ -286,12 +294,7 @@ fn dead_after_from(
 
 /// Consume a comparison result immediately instead of storing a temporary bool.
 pub(crate) fn fuse_integer_branches(function: &mut Function) {
-    let boundaries: HashSet<_> = function
-        .instructions
-        .iter()
-        .filter_map(target)
-        .map(|target| target.index())
-        .collect();
+    let boundaries = block_boundaries(function);
     for index in 1..function.instructions.len() {
         if boundaries.contains(&index) {
             continue;

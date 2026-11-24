@@ -1,6 +1,6 @@
 //! `ReflectionClass::getProperties()` keeps declaration order and omits inherited private members.
 
-use std::collections::HashSet;
+use foldhash::{HashSet, HashSetExt};
 
 use phera_bytecode::reflection::DeclarationMetadata;
 use phera_bytecode::{ClassDeclaration, CompiledUnit, TraitAdaptation, Visibility};

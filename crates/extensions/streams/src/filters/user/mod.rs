@@ -5,7 +5,7 @@ mod chain;
 mod stage;
 
 pub(super) use chain::{Placement, attach, attach_native, remove};
-pub(crate) use chain::{close, close_released, lookup};
+pub(crate) use chain::{close, close_last_native_owner, close_released, lookup};
 
 use phera_extension_api::{
     ClassEntry, ConstantValue, Context, FunctionEntry, MethodEntry, NativeError, NativeResult,
