@@ -29,9 +29,9 @@ pub(crate) struct UnsetProperties {
 }
 
 pub(crate) struct PropertyGuard {
-    object: Weak<Object>,
-    name: ArrayKey,
-    hook: PropertyHook,
+    pub(crate) object: Weak<Object>,
+    pub(crate) name: ArrayKey,
+    pub(crate) hook: PropertyHook,
 }
 
 impl PropertyGuard {

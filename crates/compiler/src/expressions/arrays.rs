@@ -15,7 +15,13 @@ impl Compiler<'_> {
         line: usize,
     ) -> Result<Reg, CompileError> {
         let dst = self.allocate_register()?;
-        self.emit(Instruction::Array(dst), line);
+        let list_capacity =
+            if !items.is_empty() && items.iter().all(|item| item.key.is_none() && !item.spread) {
+                items.len().min(u16::MAX as usize) as u16
+            } else {
+                0
+            };
+        self.emit(Instruction::Array(dst, list_capacity), line);
         for item in items {
             let mark = self.mark_temporaries();
             let local_key = item

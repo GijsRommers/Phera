@@ -276,7 +276,7 @@ pub struct Vm {
     missed_native: Option<Vec<Value>>,
     /// What extensions remember during this request (response headers, ...).
     state: RequestState,
-    reflection_cache: Option<Box<reflection::ReflectionCache>>,
+    reflection_cache: Option<Rc<reflection::ReflectionCache>>,
     property_references: std::rc::Rc<std::cell::RefCell<reference_holders::ReferenceHolders>>,
     autoload: autoload::Autoloaders,
     request_end: request_end::RequestEnd,

@@ -18,11 +18,10 @@ use phera_bytecode::{ClassKind, Instruction, Reg, SymbolId, Visibility};
 use phera_value::Value;
 
 use crate::calls::execution_loop::{Machine, Position, Step};
-use crate::calls::php_windows::{push_closure_call, push_constructed, push_php_call};
+use crate::calls::php_windows::{push_constructed, push_lexical_closure_call, push_php_call};
 use crate::calls::prepared_call::CallKind;
 use crate::classes::MethodBody;
 use crate::classes::class::ClassOrigin;
-use crate::closures::{ClosureOrigin, ClosureState};
 
 impl Machine<'_> {
     /// `New` of a class this file has linked, with literal defaults and no
@@ -100,14 +99,8 @@ impl Machine<'_> {
             [Some(Value::Object(object))] => object.clone(),
             _ => return Step::Slow,
         };
-        let lexical = object
-            .native
-            .borrow()
-            .as_ref()
-            .and_then(|state| state.downcast_ref::<ClosureState>())
-            .is_some_and(|state| state.origin == ClosureOrigin::Lexical);
         let parts = (&mut *self.stack, &mut *self.registers);
-        if !lexical || !push_closure_call(self.code, parts, &object) {
+        if !push_lexical_closure_call(self.code, parts, &object) {
             return Step::Slow;
         }
         Step::Done(position.ip)

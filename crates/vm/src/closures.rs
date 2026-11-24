@@ -91,12 +91,14 @@ impl Vm {
             .len()
             .checked_sub(capture_count)
             .ok_or_else(|| internal_error!("capture count"))?;
-        let captures = self
-            .closure_captures
-            .split_off(first_capture)
-            .into_iter()
-            .map(|capture| capture.value)
-            .collect();
+        let captures = if capture_count == 0 {
+            Vec::new()
+        } else {
+            self.closure_captures
+                .drain(first_capture..)
+                .map(|capture| capture.value)
+                .collect()
+        };
         let state = ClosureState {
             origin: ClosureOrigin::Lexical,
             callee,

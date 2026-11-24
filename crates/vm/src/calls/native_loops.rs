@@ -609,6 +609,137 @@ impl Vm {
     }
 }
 
+/// Continues an active `array_map`/`array_filter`/`array_reduce` loop directly
+/// inside `Machine::run` when there is a next element whose callback enters via
+/// the direct PHP/closure fast path. Returns `None` with nothing mutated on the
+/// final element, on `Sort`, on a NaN filter verdict, or when the next element
+/// needs general coercion/binding.
+pub(crate) fn try_continue_in_machine(
+    code: &crate::code_table::CodeTable,
+    classes: &crate::classes::ClassTable,
+    stack: &mut crate::calls::call_stack::CallStack,
+    registers: &mut crate::calls::registers::Registers,
+    frame_limit: usize,
+    value: &mut Value,
+) -> Option<crate::calls::frame::Frame> {
+    let depth = stack.depth();
+    if depth >= frame_limit {
+        return None;
+    }
+    let nan = matches!(value, Value::Float(float) if float.is_nan());
+    let (kind, next_pos, next_second_pos, next_key, mut next_args, arg_count, target) = {
+        let state = stack.native_loops.last()?;
+        if state.depth != depth + 1 || state.kind == Kind::Sort {
+            return None;
+        }
+        if nan && matches!(state.kind, Kind::Filter(_)) {
+            return None;
+        }
+        let next_pos = state
+            .position
+            .and_then(|pos| state.input.next_position(pos));
+        let next_second_pos = if state.kind == Kind::Map2 {
+            state
+                .second
+                .as_ref()
+                .and_then(|(array, pos)| pos.and_then(|p| array.next_position(p)))
+        } else {
+            None
+        };
+        let has_next = match state.kind {
+            Kind::Map2 => next_pos.is_some() || next_second_pos.is_some(),
+            _ => next_pos.is_some(),
+        };
+        if !has_next {
+            return None;
+        }
+        let (next_key, args, count) = match state.kind {
+            Kind::Map2 => {
+                let first = next_pos
+                    .and_then(|pos| state.input.entry_at(pos))
+                    .map(|(_, v)| v.deref().clone())
+                    .unwrap_or_default();
+                let second = next_second_pos
+                    .and_then(|pos| state.second.as_ref()?.0.entry_at(pos))
+                    .map(|(_, v)| v.deref().clone())
+                    .unwrap_or_default();
+                (ArrayKey::Int(0), [first, second], 2)
+            }
+            Kind::Map | Kind::Filter(FilterArguments::Value) => {
+                let (key, elem) = state.input.entry_at(next_pos?)?;
+                (key, [elem.deref().clone(), Value::Null], 1)
+            }
+            Kind::Filter(FilterArguments::Key) => {
+                let (key, _) = state.input.entry_at(next_pos?)?;
+                let key_val = Value::from(key.clone());
+                (key, [key_val, Value::Null], 1)
+            }
+            Kind::Filter(FilterArguments::Both) => {
+                let (key, elem) = state.input.entry_at(next_pos?)?;
+                let key_val = Value::from(key.clone());
+                (key, [elem.deref().clone(), key_val], 2)
+            }
+            Kind::Reduce => {
+                let (key, elem) = state.input.entry_at(next_pos?)?;
+                (key, [value.deref().clone(), elem.deref().clone()], 2)
+            }
+            Kind::Sort => return None,
+        };
+        (
+            state.kind,
+            next_pos,
+            next_second_pos,
+            next_key,
+            args,
+            count,
+            state.callee.target.clone(),
+        )
+    };
+    let mut env = crate::calls::native_loop_callbacks::DirectLoopEnv {
+        code,
+        classes,
+        stack,
+        registers,
+        frame_limit,
+    };
+    let next_frame = crate::calls::native_loop_callbacks::try_enter_direct_target(
+        &mut env,
+        &target,
+        &mut next_args[..arg_count],
+    )?;
+    // Direct entry succeeded; now commit the completed iteration and advance.
+    let state = stack.native_loops.last_mut()?;
+    match kind {
+        Kind::Map => {
+            state
+                .result
+                .insert(state.key.clone(), std::mem::take(value));
+        }
+        Kind::Map2 => {
+            let _ = state.result.push(std::mem::take(value));
+            if let Some((_, pos)) = &mut state.second {
+                *pos = next_second_pos;
+            }
+        }
+        Kind::Filter(_) => {
+            if phera_value::to_bool(value)
+                && let Some(pos) = state.position
+                && let Some((key, element)) = state.input.entry_at(pos)
+            {
+                state.result.insert(key, element.clone());
+            }
+            *value = Value::Null;
+        }
+        Kind::Reduce => {
+            *value = Value::Null;
+        }
+        Kind::Sort => {}
+    }
+    state.position = next_pos;
+    state.key = next_key;
+    Some(next_frame)
+}
+
 /// Synchronous built-ins that never emit warnings or invoke user callbacks for
 /// already-type-checked non-object scalar/array arguments, so they may run in
 /// one tight loop even while a PHP error handler is installed.

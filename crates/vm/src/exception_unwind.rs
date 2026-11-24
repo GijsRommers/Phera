@@ -179,6 +179,17 @@ impl Vm {
     fn discard_exception_frame(&mut self) -> Result<(), NativeError> {
         self.finish_include_scope()?;
         self.abandon_native_view();
+        if self
+            .call_stack
+            .current()
+            .is_some_and(|frame| frame.has_extras())
+        {
+            let extras = self.call_stack.current_extras_mut();
+            if extras.magic_guard {
+                extras.magic_guard = false;
+                self.property_guards.pop();
+            }
+        }
         if let Some(frame) = self.call_stack.pop() {
             if frame.returns_to_native_loop() {
                 self.abandon_native_loop();

@@ -96,6 +96,9 @@ pub(crate) enum SiteOutcome {
     /// A method written in PHP the site's scope may call: entered from the
     /// site.
     Enter(crate::code_table::FunctionIndex),
+    /// A public PHP `__call(string $name, array $arguments)` handler invoked
+    /// directly from the site when the class does not declare the method.
+    MagicCall(crate::code_table::FunctionIndex),
     /// A public native getter with no parameters and a direct handler
     /// (`$method->getName()`): the site runs it and stores its value.
     Getter(Getter),
