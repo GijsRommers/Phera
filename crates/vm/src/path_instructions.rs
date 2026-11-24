@@ -153,7 +153,7 @@ impl Vm {
             self.set(destination, value);
             return Ok(None);
         }
-        if (self.classes.has_dimensions && self.prepare_dimension(&place)?)
+        if (self.classes.has_dimensions && self.prepare_any_dimension(&place)?)
             || place.has_properties()?
         {
             return Ok(Some(BatchExit::Instruction(Instruction::IncDecPath {

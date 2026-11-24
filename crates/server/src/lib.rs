@@ -1,4 +1,4 @@
-//! The Phera HTTP server: HTTP/1.1 on Tokio, thread per core.
+//! The Phera HTTP server: HTTP/1.1 and HTTP/2 on Tokio, thread per core.
 //!
 //! One worker thread per core. Each worker runs its own current-thread
 //! Tokio runtime with a `LocalSet`. With a single worker, it accepts directly

@@ -1,14 +1,19 @@
 //! Request class lookup, leased object ids, and weak cycle-cleanup records.
 
-use std::rc::{Rc, Weak};
+use std::{
+    cell::Cell,
+    num::NonZeroU32,
+    rc::{Rc, Weak},
+};
 
 use foldhash::HashMap;
 
 use phera_value::{Object, ObjectIds};
 
-use super::Class;
 use super::method_table::MethodTable;
 use super::operations::ClassOperations;
+use super::{Class, class::ClassOrigin};
+use crate::native_tables::NativeClasses;
 
 /// A class's position in the request's class table: a method frame's class
 /// scope and called class are kept as these numbers.
@@ -79,7 +84,7 @@ impl ClassDefinitions {
             .hooks
             .as_ref()
             .is_some_and(|hooks| hooks.properties.is_some());
-        if class.origin == super::class::ClassOrigin::Closure {
+        if class.origin == ClassOrigin::Closure {
             self.closure = Some(class.index);
         }
         self.numbered.push(class.clone());
@@ -106,7 +111,7 @@ enum Declared {
 /// are entries of the worker's table of linked classes (see
 /// `super::worker_classes`), and the request holds which it has declared.
 pub(crate) struct ClassTable {
-    native: Rc<ClassDefinitions>,
+    native: Rc<NativeClasses>,
     worker: Rc<super::worker_classes::WorkerClasses>,
     /// The entries this request has declared, by worker position: `None`
     /// where it has not. Whether a class exists in this request is this
@@ -133,7 +138,7 @@ pub(crate) struct ClassTable {
     pub(crate) has_dimensions: bool,
     pub(crate) has_property_views: bool,
     pub(crate) has_lazy_objects: bool,
-    native_count: u32,
+    native_count: Cell<Option<NonZeroU32>>,
     pub(crate) objects: Vec<Weak<Object>>,
     ids: Rc<ObjectIds>,
     /// Allocations left before the cycle collector should run (see
@@ -143,14 +148,17 @@ pub(crate) struct ClassTable {
 }
 
 impl ClassTable {
-    pub(crate) fn native_definitions(&self) -> Rc<ClassDefinitions> {
+    pub(crate) fn native_definitions(&self) -> Rc<NativeClasses> {
         self.native.clone()
     }
 
     pub(crate) fn new(
-        native: Rc<ClassDefinitions>,
+        native: Rc<NativeClasses>,
         worker: Rc<super::worker_classes::WorkerClasses>,
     ) -> Self {
+        let native_count = native
+            .initialized()
+            .and_then(|classes| NonZeroU32::new(classes.next_index().0));
         Self {
             leases: vec![super::worker_classes::PositionLeases::new(&worker)],
             worker,
@@ -160,9 +168,9 @@ impl ClassTable {
             linking: None,
             recording: Default::default(),
             has_dimensions: false,
-            has_property_views: native.has_property_views,
+            has_property_views: false,
             has_lazy_objects: false,
-            native_count: native.numbered.len() as u32,
+            native_count: Cell::new(native_count),
             native,
             local: Vec::new(),
             objects: Vec::new(),
@@ -174,7 +182,25 @@ impl ClassTable {
 
     /// The number of the class being linked (see [`ClassTable::begin_link`]).
     pub(crate) fn next_index(&self) -> ClassIndex {
-        ClassIndex(self.native_count + self.linking.unwrap_or(u32::MAX - self.native_count))
+        let native_count = self.native_count();
+        ClassIndex(native_count + self.linking.unwrap_or(u32::MAX - native_count))
+    }
+
+    fn native_count(&self) -> u32 {
+        if let Some(count) = self.native_count.get() {
+            return count.get();
+        }
+        let count = self.native.definitions().numbered.len() as u32;
+        self.native_count.set(NonZeroU32::new(count));
+        count
+    }
+
+    pub(crate) fn has_property_views(&self) -> bool {
+        self.has_property_views
+            || self
+                .native
+                .initialized()
+                .is_some_and(|classes| classes.has_property_views)
     }
 
     /// The worker's table of linked classes.
@@ -230,7 +256,7 @@ impl ClassTable {
         if let Some(found) = self.declared_by_key(key) {
             return Some(found);
         }
-        if let Some(found) = self.native.by_key(key) {
+        if let Some(found) = self.native.definitions().by_key(key) {
             return Some(found);
         }
         let (_, _, number) = self.aliases.iter().find(|(_, alias, _)| *alias == key)?;
@@ -261,7 +287,7 @@ impl ClassTable {
         {
             return Some(found);
         }
-        if let Some(found) = self.native.entries.get(lowercase) {
+        if let Some(found) = self.native.definitions().entries.get(lowercase) {
             return Some(found);
         }
         let (_, _, number) = self
@@ -278,7 +304,7 @@ impl ClassTable {
 
     /// Declares a class another request of the worker linked.
     pub(crate) fn declare_entry(&mut self, class: Rc<Class>) {
-        let position = class.index.0 - self.native_count;
+        let position = class.index.0 - self.native_count();
         self.register(position, class);
     }
 
@@ -328,13 +354,13 @@ impl ClassTable {
 
     /// Declares the class this request just linked, at its reserved position.
     pub(crate) fn insert(&mut self, class: Rc<Class>) {
-        let position = class.index.0 - self.native_count;
+        let position = class.index.0 - self.native_count();
         self.register(position, class);
     }
 
     /// A declaration completed across an autoload is request-local.
     pub(crate) fn publish_delayed(&mut self, class: Rc<Class>) {
-        let position = class.index.0 - self.native_count;
+        let position = class.index.0 - self.native_count();
         self.own_name(&class.name.to_ascii_lowercase(), position);
         self.insert(class);
     }
@@ -359,6 +385,7 @@ impl ClassTable {
 
     pub(crate) fn names(&self) -> impl Iterator<Item = &str> {
         self.native
+            .definitions()
             .order
             .iter()
             .map(String::as_str)
@@ -380,9 +407,9 @@ impl ClassTable {
     #[inline]
     pub(crate) fn class(&self, index: ClassIndex) -> &Rc<Class> {
         let index = index.0 as usize;
-        let base = self.native_count as usize;
+        let base = self.native_count() as usize;
         if index < base {
-            &self.native.numbered[index]
+            &self.native.definitions().numbered[index]
         } else {
             self.local[index - base]
                 .as_ref()
@@ -392,9 +419,9 @@ impl ClassTable {
 
     pub(crate) fn numbered(&self, index: u32) -> Option<Rc<Class>> {
         let index = index as usize;
-        let base = self.native_count as usize;
+        let base = self.native_count() as usize;
         if index < base {
-            self.native.numbered.get(index).cloned()
+            self.native.definitions().numbered.get(index).cloned()
         } else {
             self.local.get(index - base)?.clone()
         }
@@ -402,17 +429,18 @@ impl ClassTable {
 
     pub(crate) fn by_number(&self, number: u32) -> Option<&Rc<Class>> {
         let number = number as usize;
-        let base = self.native_count as usize;
+        let base = self.native_count() as usize;
         match number.checked_sub(base) {
             Some(position) => self.local.get(position)?.as_ref(),
-            None => self.native.numbered.get(number),
+            None => self.native.definitions().numbered.get(number),
         }
     }
 
     /// The built-in Closure class is fixed for a request.
     pub(crate) fn closure_class(&self) -> Option<Rc<Class>> {
-        let index = self.native.closure?;
-        self.native.numbered.get(index.0 as usize).cloned()
+        let native = self.native.definitions();
+        let index = native.closure?;
+        native.numbered.get(index.0 as usize).cloned()
     }
 
     pub(crate) fn get_lowercase(&self, name: &str) -> Option<&Rc<Class>> {
@@ -606,7 +634,7 @@ impl ClassTable {
             has_dimensions: self.has_dimensions,
             has_property_views: self.has_property_views,
             has_lazy_objects: self.has_lazy_objects,
-            native_count: self.native_count,
+            native_count: self.native_count.clone(),
             objects,
             ids,
             allocations_before_collection: self.allocations_before_collection.clone(),
@@ -634,7 +662,7 @@ mod tests {
     use phera_extension_api::Registry;
     use phera_value::{ArrayKey, Value};
 
-    use super::{ClassDefinitions, ClassTable};
+    use super::{ClassTable, NativeClasses};
 
     #[tokio::test]
     async fn static_singletons_and_cached_enum_cases_release_their_classes() {
@@ -657,7 +685,7 @@ mod tests {
     #[test]
     fn freed_object_ids_reuse_the_most_recently_freed_slot() {
         let mut table = ClassTable::new(
-            Rc::new(ClassDefinitions::native(&Registry::new())),
+            Rc::new(NativeClasses::new(Arc::new(Registry::new()))),
             Rc::default(),
         );
         let class = table.get("stdClass").unwrap();
@@ -682,7 +710,7 @@ mod tests {
     #[test]
     fn a_million_linked_objects_drop_without_rust_recursion() {
         let table = ClassTable::new(
-            Rc::new(ClassDefinitions::native(&Registry::new())),
+            Rc::new(NativeClasses::new(Arc::new(Registry::new()))),
             Rc::default(),
         );
         let class = table.get("stdClass").unwrap();

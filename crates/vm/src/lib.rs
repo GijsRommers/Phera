@@ -226,7 +226,6 @@ pub struct Vm {
     debug_objects: Vec<u32>,
     property_guards: Vec<magic_properties::PropertyGuard>,
     unset_typed_properties: foldhash::HashMap<u32, magic_properties::UnsetProperties>,
-    clone_scopes: classes::cloning::CloneScopes,
     closure_captures: Vec<closures::PendingCapture>,
     /// Pure defaults retain lexical class scope while running outside a method frame.
     initializer_scope: Option<String>,
@@ -321,7 +320,7 @@ impl Vm {
         fibers::register(registry);
     }
 
-    /// Start a fresh request with the worker's already linked built-ins.
+    /// Start a fresh request sharing the worker's built-in definitions.
     pub fn with_native_tables(native: &NativeTables) -> Self {
         let classes = classes::ClassTable::new(native.classes.clone(), native.linked.clone());
         let object_ids = classes.ids_handle();
@@ -346,7 +345,6 @@ impl Vm {
             debug_objects: Vec::new(),
             property_guards: Vec::new(),
             unset_typed_properties: Default::default(),
-            clone_scopes: classes::cloning::CloneScopes::default(),
             property_references: Default::default(),
             closure_captures: Vec::new(),
             initializer_scope: None,

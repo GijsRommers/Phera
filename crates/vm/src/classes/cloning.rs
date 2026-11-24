@@ -17,6 +17,20 @@ use crate::property_hook_continuation::HookContinuation;
 #[derive(Default)]
 pub(crate) struct CloneScopes(Rc<RefCell<HashMap<u32, Vec<ArrayKey>>>>);
 
+impl CloneScopes {
+    /// Whether `object` is a clone whose `clone with` updates are running,
+    /// in which each readonly property may change once (see
+    /// [`Vm::clone_can_update`]). Out of line: only a readonly property's
+    /// initialization asks, and the property writes around it keep their
+    /// code.
+    #[inline(never)]
+    pub(crate) fn covers(&self, object: &Object) -> bool {
+        self.0
+            .try_borrow()
+            .map_or(true, |scopes| scopes.contains_key(&object.id))
+    }
+}
+
 pub(crate) struct CloneScope {
     object: u32,
     registry: Rc<RefCell<HashMap<u32, Vec<ArrayKey>>>>,
@@ -235,18 +249,20 @@ impl Vm {
     }
 
     fn begin_clone_updates(&self, object: &Object) -> CloneScope {
-        self.clone_scopes
+        self.class_states
+            .clone_scopes
             .0
             .borrow_mut()
             .insert(object.id, Vec::new());
         CloneScope {
             object: object.id,
-            registry: self.clone_scopes.0.clone(),
+            registry: self.class_states.clone_scopes.0.clone(),
         }
     }
 
     pub(crate) fn clone_can_update(&self, object: &Object, key: &ArrayKey) -> bool {
-        self.clone_scopes
+        self.class_states
+            .clone_scopes
             .0
             .borrow()
             .get(&object.id)
@@ -254,7 +270,13 @@ impl Vm {
     }
 
     pub(crate) fn clone_updated(&mut self, object: &Object, key: &ArrayKey) {
-        if let Some(changed) = self.clone_scopes.0.borrow_mut().get_mut(&object.id) {
+        if let Some(changed) = self
+            .class_states
+            .clone_scopes
+            .0
+            .borrow_mut()
+            .get_mut(&object.id)
+        {
             changed.push(key.clone());
         }
     }

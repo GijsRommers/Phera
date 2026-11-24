@@ -198,10 +198,12 @@ when it finishes.
 
 ### Serving a site
 
-Run `phera serve public` to serve a document root. PHP diagnostics, including
-fatal backtraces, go to the server log by default. Use `phera serve --dev public`
-to display diagnostics in responses and check PHP files on each request during
-local development.
+Run `phera serve public` to serve a document root over HTTP/1.1 and cleartext
+HTTP/2 (`h2c` with prior knowledge) on one listener. PHP sees
+`$_SERVER['SERVER_PROTOCOL']` as `HTTP/2.0` on HTTP/2 requests. PHP diagnostics,
+including fatal backtraces, go to the server log by default. Use `phera serve
+--dev public` to display diagnostics in responses and check PHP files on each
+request during local development.
 
 The web SAPI queues stderr diagnostics and `error_log()` messages. When the
 queue fills or a record exceeds 64 KiB, it drops the record so the request can
@@ -281,6 +283,9 @@ connection reuse, and the easy and multi interfaces), date, dom (`DOMDocument`,
 PDO (SQLite, MySQL, PostgreSQL, with TLS), random, redis, reflection, serialize,
 session, sodium, SPL, sqlite3, streams, tokenizer, zlib, bcmath, gmp, Unix process
 functions, and POSIX queries.
+
+Phera registers native metadata on first lookup and shares it across workers.
+Each worker prepares native class definitions and constant values on first use.
 
 Register an application stream wrapper with
 `stream_wrapper_register('virtual', VirtualFile::class)`. The registration

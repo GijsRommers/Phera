@@ -201,8 +201,8 @@ tokio-util = { version = "0.7", features = ["io"] }
 tower-service = "0.3"
 memchr = "2"
 http-body-util = "0.1"
-hyper = { version = "1", default-features = false, features = ["http1", "server"] }
-hyper-util = { version = "0.1", default-features = false, features = ["tokio", "http1", "server-graceful"] }
+hyper = { version = "1", default-features = false, features = ["http1", "http2", "server"] }
+hyper-util = { version = "0.1", default-features = false, features = ["tokio", "http1", "http2", "server-auto", "server-graceful"] }
 socket2 = { version = "0.6", features = ["all"] }
 hickory-resolver = "0.26.3"
 tokio = { version = "1", features = [

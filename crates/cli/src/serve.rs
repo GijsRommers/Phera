@@ -446,6 +446,7 @@ fn to_runtime(mut request: Request, trusted_proxies: &TrustedProxies) -> HttpReq
         protocol: match request.version {
             HttpVersion::Http10 => "HTTP/1.0",
             HttpVersion::Http11 => "HTTP/1.1",
+            HttpVersion::Http2 => "HTTP/2.0",
         }
         .to_string(),
         headers: request.headers,

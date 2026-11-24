@@ -46,8 +46,31 @@ impl Vm {
         self.prepare_dimension(&path)
     }
 
+    /// Finds an object with `ArrayAccess` where a key of `place` meets it,
+    /// so that the instruction runs as a dimension of that object.
+    ///
+    /// Only a path of arrays and keys needs this: the general tier reads and
+    /// writes it without calling PHP code. A path with a property step goes
+    /// to the asynchronous tier whatever it holds (`dispatch`), whose walk
+    /// checks each object it meets at a key itself (`magic_places`,
+    /// `magic_mutations`, `magic_references`), so it is not walked here.
     #[cold]
     pub(crate) fn prepare_dimension(&mut self, place: &AccessPath) -> Result<bool, NativeError> {
+        if !self.classes.has_dimensions || place.has_properties()? {
+            return Ok(false);
+        }
+        self.prepare_any_dimension(place)
+    }
+
+    /// [`Vm::prepare_dimension`] for a path with property steps too. An
+    /// increment needs it: the asynchronous tier would write the element
+    /// back with `offsetSet`, where PHP gives the indirect modification
+    /// notice the dimension path gives.
+    #[cold]
+    pub(crate) fn prepare_any_dimension(
+        &mut self,
+        place: &AccessPath,
+    ) -> Result<bool, NativeError> {
         if !self.classes.has_dimensions {
             return Ok(false);
         }

@@ -643,6 +643,7 @@ impl Machine<'_> {
         }
         let ok = if packed.is_readonly() {
             table.fills_missing_directly()
+                && !self.class_states.clone_scopes.covers(object)
                 && write_readonly_init_direct(object, packed.slot(), value)
         } else {
             write_slot_direct(object, packed.slot(), value, table.fills_missing_directly())
