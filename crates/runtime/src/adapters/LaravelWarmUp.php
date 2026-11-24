@@ -394,5 +394,11 @@ final class WarmUp
         (function () use ($callbacks) {
             $this->terminatingCallbacks = $callbacks;
         })->call($app);
+
+        // WebSocket event forks resolve handlers from the container that was
+        // already booted and warmed before Phera\snapshot().
+        if (\function_exists('Phera\\WebSocket\\resolveUsing')) {
+            \Phera\WebSocket\resolveUsing(static fn (string $class): object => $app->make($class));
+        }
     }
 }

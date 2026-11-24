@@ -16,13 +16,20 @@ mod static_file;
 
 use std::future::Future;
 use std::net::SocketAddr;
+use std::path::Path;
 use std::pin::Pin;
 use std::process::ExitCode;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use phera_runtime::{HttpRequest, HttpResponse, Runtime, WebWorker};
-use phera_server::{Handler, HandlerFactory, HttpVersion, Request, Response, Server, ServerConfig};
+use phera_runtime::{
+    HttpRequest, HttpResponse, Runtime, WebSocketEvent as RuntimeWebSocketEvent, WebSocketSink,
+    WebWorker,
+};
+use phera_server::{
+    Handler, HandlerFactory, HttpVersion, Request, Response, Server, ServerConfig, WebSocketEvent,
+    WebSocketEventKind, WebSocketHub, WebSocketOutcome, WebSocketUpgrade,
+};
 
 use crate::arguments::ServeOptions;
 use forwarded::TrustedProxies;
@@ -104,13 +111,19 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
     if let Some(request_read_timeout) = options.request_read_timeout {
         config.request_read_timeout = request_read_timeout;
     }
+    apply_websocket_config(&mut config, &settings.websocket, &options);
     let workers = config.workers;
+    let ws_hub = Arc::new(WebSocketHub::new(
+        config.websocket.send_queue_len,
+        config.websocket.send_queue_bytes,
+    ));
 
     let mut runtime = Runtime::with_environment(loaded.environment)
         .with_startup_ini(options.ini)
         .with_web_development(options.dev)
         .without_web_processes(options.no_process)
-        .without_class_warmup(!options.class_warmup);
+        .without_class_warmup(!options.class_warmup)
+        .with_websocket_sink(Arc::new(HubSink(ws_hub.clone())));
     if let (Adapter::Laravel, Some(front_controller)) = (adapter, site.front_controller()) {
         runtime = runtime.with_entry_script(
             front_controller.to_path_buf(),
@@ -143,7 +156,7 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
         trusted_proxies: Arc::new(trusted_proxies),
         health_path: options.health_path.map(Arc::from),
     };
-    let server = match Server::bind(config, factory) {
+    let server = match Server::bind_with_hub(config, factory, ws_hub) {
         Ok(server) => server,
         Err(error) => {
             eprintln!("Cannot listen on {listen}: {error}");
@@ -266,6 +279,59 @@ impl Handler for SiteHandler {
     fn start(&self) -> Pin<Box<dyn Future<Output = ()> + '_>> {
         Box::pin(self.boot())
     }
+
+    fn handle_websocket(
+        &self,
+        event: WebSocketEvent,
+    ) -> Pin<Box<dyn Future<Output = WebSocketOutcome> + '_>> {
+        Box::pin(async move {
+            let kind = match event.kind {
+                WebSocketEventKind::Open => RuntimeWebSocketEvent::Open,
+                WebSocketEventKind::Message { data, binary } => {
+                    RuntimeWebSocketEvent::Message { data, binary }
+                }
+                WebSocketEventKind::Close { code, reason } => {
+                    RuntimeWebSocketEvent::Close { code, reason }
+                }
+            };
+            let outcome = self
+                .runtime
+                .handle_websocket_event(
+                    Path::new(&event.entry),
+                    self.site.document_root(),
+                    &event.connection_id,
+                    &event.handler_class,
+                    kind,
+                )
+                .await;
+            WebSocketOutcome {
+                close_1011: outcome.close_1011,
+            }
+        })
+    }
+
+    fn websocket_origin_allowed(
+        &self,
+        request: &Request,
+        allowed_origins: Option<&[String]>,
+    ) -> bool {
+        let original = self
+            .trusted_proxies
+            .original_request(request.remote_addr.ip(), &request.headers)
+            .unwrap_or_default();
+        let effective_https = original.https.unwrap_or(false);
+        let effective_host = original
+            .host
+            .as_deref()
+            .map(str::as_bytes)
+            .or_else(|| request.header("host"));
+        phera_server::websocket::handshake::validate_origin(
+            request.header("origin"),
+            effective_https,
+            effective_host,
+            allowed_origins,
+        )
+    }
 }
 
 impl SiteHandler {
@@ -333,8 +399,8 @@ impl SiteHandler {
                         to_runtime(request, &self.trusted_proxies),
                     )
                     .await;
-                let response = from_runtime(response);
-                if self.compress {
+                let response = from_runtime(response, &script);
+                if self.compress && response.upgrade.is_none() {
                     compress::php_response(response, accept_encoding.as_deref()).await
                 } else {
                     response
@@ -390,10 +456,102 @@ fn to_runtime(mut request: Request, trusted_proxies: &TrustedProxies) -> HttpReq
     }
 }
 
-fn from_runtime(response: HttpResponse) -> Response {
+fn from_runtime(response: HttpResponse, script: &Path) -> Response {
     let mut converted = Response::new(response.status).with_body(response.body);
     for (name, value) in response.headers {
         converted = converted.with_header(name, value);
     }
+    if let Some(ws) = response.websocket {
+        converted = converted.with_websocket_upgrade(WebSocketUpgrade {
+            entry: script.to_string_lossy().into_owned(),
+            handler_class: ws.handler,
+            subprotocol: ws.subprotocol,
+            context: ws.context,
+            rooms: ws.rooms,
+        });
+    }
     converted
+}
+
+fn apply_websocket_config(
+    config: &mut ServerConfig,
+    file: &config::WebSocketSettings,
+    options: &ServeOptions,
+) {
+    let ws = &mut config.websocket;
+    if let Some(n) = options.ws_max_connections.or(file.max_connections) {
+        ws.max_connections_per_worker = n;
+    }
+    if let Some(bytes) = options.ws_max_message_size.or(file.max_message_size) {
+        ws.max_message_bytes = bytes;
+    }
+    if let Some(timeout) = options.ws_idle_timeout.or(file.idle_timeout) {
+        ws.idle_timeout = timeout;
+    }
+    if let Some(interval) = options.ws_ping_interval.or(file.ping_interval) {
+        ws.ping_interval = interval;
+    }
+    if let Some(queue) = options.ws_send_queue.or(file.send_queue) {
+        ws.send_queue_len = queue;
+    }
+    if let Some(bytes) = file.send_queue_bytes {
+        ws.send_queue_bytes = bytes;
+    }
+    if let Some(origins) = options
+        .ws_allowed_origins
+        .as_ref()
+        .or(file.allowed_origins.as_ref())
+    {
+        ws.allowed_origins = Some(origins.clone());
+    }
+}
+
+struct HubSink(Arc<WebSocketHub>);
+
+impl WebSocketSink for HubSink {
+    fn send(&self, connection_id: &str, data: &[u8], binary: bool) -> bool {
+        self.0.send(connection_id, data, binary)
+    }
+
+    fn broadcast(
+        &self,
+        room: &str,
+        data: &[u8],
+        binary: bool,
+        exclude_connection_id: Option<&str>,
+    ) -> usize {
+        self.0.broadcast(room, data, binary, exclude_connection_id)
+    }
+
+    fn join(&self, connection_id: &str, room: &str) -> bool {
+        self.0.join(connection_id, room)
+    }
+
+    fn leave(&self, connection_id: &str, room: &str) -> bool {
+        self.0.leave(connection_id, room)
+    }
+
+    fn rooms(&self, connection_id: &str) -> Vec<String> {
+        self.0.rooms(connection_id)
+    }
+
+    fn room_count(&self, room: &str) -> usize {
+        self.0.room_count(room)
+    }
+
+    fn connections(&self, room: &str) -> Vec<String> {
+        self.0.connections(room)
+    }
+
+    fn close(&self, connection_id: &str, code: u16, reason: &str) -> bool {
+        self.0.close(connection_id, code, reason)
+    }
+
+    fn context(&self, connection_id: &str) -> Option<Vec<u8>> {
+        self.0.context(connection_id)
+    }
+
+    fn set_context(&self, connection_id: &str, context: Vec<u8>) -> bool {
+        self.0.set_context(connection_id, context)
+    }
 }

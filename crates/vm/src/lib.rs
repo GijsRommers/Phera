@@ -192,6 +192,7 @@ mod types;
 mod unit_caches;
 mod unpacking;
 mod unsupported_items;
+mod websocket;
 mod worker_code;
 
 pub use include_lookup::{
@@ -288,6 +289,9 @@ pub struct Vm {
     suspended_fibers: fibers::SuspendedFibers,
     /// What `Phera\snapshot()` does here, and the state it kept.
     snapshot: snapshot::SnapshotState,
+    websocket_sink: Option<Arc<dyn phera_extension_api::websocket::WebSocketSink>>,
+    websocket_resolver: Option<Value>,
+    websocket_is_event: bool,
 }
 
 impl Vm {
@@ -318,6 +322,9 @@ impl Vm {
             fiber_bailout: false,
             suspended_fibers: Default::default(),
             snapshot: Default::default(),
+            websocket_sink: None,
+            websocket_resolver: None,
+            websocket_is_event: false,
             native_callback_sites: Vec::new(),
             debug_objects: Vec::new(),
             property_guards: Vec::new(),
@@ -428,8 +435,11 @@ impl Vm {
             .await
     }
 
-    async fn run_request(&mut self, unit: Arc<CompiledUnit>) -> i32 {
-        let main = self.code.load(&unit);
+    pub(crate) fn load_entry_unit(
+        &mut self,
+        unit: &Arc<CompiledUnit>,
+    ) -> Result<(), phera_extension_api::NativeError> {
+        let main = self.code.load(unit);
         for id in &unit.hoisted {
             if let Some(function) = unit.functions.get(id.index()) {
                 let index = self.code.declared(main, id.index());
@@ -447,8 +457,12 @@ impl Vm {
                 self.registers.window_mut(index, 1)[0] = self.globals.take(name);
             }
         }
-        self.publish_declaration_warnings(&unit);
-        if let Err(error) = self.hoist_classes(&unit, main) {
+        self.publish_declaration_warnings(unit);
+        self.hoist_classes(unit, main)
+    }
+
+    async fn run_request(&mut self, unit: Arc<CompiledUnit>) -> i32 {
+        if let Err(error) = self.load_entry_unit(&unit) {
             self.unwind(error);
             return self.end_script(request_end::ScriptEnd::Fatal).await;
         }

@@ -1025,6 +1025,27 @@ impl Context for Vm {
             self.invoke_resolved_callable(callee, arguments).await
         })
     }
+
+    fn websocket_sink(
+        &self,
+    ) -> Option<&std::sync::Arc<dyn phera_extension_api::websocket::WebSocketSink>> {
+        self.websocket_sink_ref()
+    }
+
+    fn is_websocket_event(&self) -> bool {
+        self.is_websocket_event_flag()
+    }
+
+    fn set_websocket_resolver(&mut self, resolver: Value) -> Result<(), NativeError> {
+        self.store_websocket_resolver(resolver)
+    }
+
+    fn verify_websocket_handler<'a>(
+        &'a mut self,
+        handler: &'a str,
+    ) -> LocalFuture<'a, Result<String, NativeError>> {
+        Box::pin(self.verify_websocket_handler_class(handler))
+    }
 }
 
 impl Vm {

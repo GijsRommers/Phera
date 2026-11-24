@@ -26,6 +26,7 @@ mod preload;
 #[cfg(test)]
 mod process_oracle_tests;
 mod snapshots;
+mod websocket;
 mod worker_code_cache;
 
 use std::path::Path;
@@ -47,6 +48,7 @@ pub use boot::BootReport;
 pub use error::RuntimeError;
 pub use http::{HttpRequest, HttpResponse};
 pub use phera_extension_api::web_log::flush as flush_web_log;
+pub use phera_extension_api::websocket::{WebSocketEvent, WebSocketEventOutcome, WebSocketSink};
 pub use phera_vm::OutputSink;
 pub use preload::PreloadSummary;
 pub use snapshots::{remembered as snapshot_remembered, requests_from_the_top};
@@ -70,6 +72,8 @@ pub struct Runtime {
     /// Scripts that run PHP source Phera ships in place of the file (an
     /// adapter's entry script), by the script's path.
     entry_scripts: Arc<std::collections::HashMap<std::path::PathBuf, &'static str>>,
+    /// WebSocket hub exposed to `Phera\WebSocket\*` when running under `phera serve`.
+    websocket_sink: Option<Arc<dyn phera_extension_api::websocket::WebSocketSink>>,
 }
 
 /// A web worker links the process's native definitions once on its own
@@ -122,6 +126,27 @@ impl WebWorker {
     ) -> HttpResponse {
         self.runtime
             .handle_web_request(self, script, document_root, request)
+            .await
+    }
+
+    /// Runs one WebSocket lifecycle event (`onOpen`, `onMessage`, or `onClose`).
+    pub async fn handle_websocket_event(
+        &self,
+        script: &Path,
+        document_root: &Path,
+        connection_id: &str,
+        handler_class: &str,
+        event: phera_extension_api::websocket::WebSocketEvent,
+    ) -> phera_extension_api::websocket::WebSocketEventOutcome {
+        self.runtime
+            .handle_websocket_event(
+                self,
+                script,
+                document_root,
+                connection_id,
+                handler_class,
+                event,
+            )
             .await
     }
 
@@ -225,6 +250,7 @@ impl Runtime {
         registry.load(&phera_ext_simplexml::SimpleXml);
         registry.load(&phera_ext_session::Session);
         adapters::register(&mut registry);
+        websocket::register(&mut registry);
         let mut web_registry = registry.clone();
         phera_ext_http::register_web(&mut web_registry);
         web_registry.sapi_ini("phera_server");
@@ -244,7 +270,17 @@ impl Runtime {
             class_warmup: true,
             include_policy: phera_vm::IncludeCachePolicy::default(),
             entry_scripts: Arc::default(),
+            websocket_sink: None,
         }
+    }
+
+    /// Attaches the WebSocket hub used by `Phera\WebSocket\*`.
+    pub fn with_websocket_sink(
+        mut self,
+        sink: Arc<dyn phera_extension_api::websocket::WebSocketSink>,
+    ) -> Self {
+        self.websocket_sink = Some(sink);
+        self
     }
 
     /// Runs `source` whenever a request goes to `script`, compiled under
@@ -392,6 +428,132 @@ impl Runtime {
             .await
     }
 
+    fn prepare_worker_vm(
+        &self,
+        worker: &WebWorker,
+        script: &Path,
+        document_root: &Path,
+        unit_ready: bool,
+    ) -> (Vm, Option<boot_changes::Carried>, Option<usize>) {
+        let (plan, reboot) =
+            worker
+                .snapshots
+                .plan(script, self.include_policy, self.stale_snapshots());
+        if reboot {
+            worker.boot_in_background(script, document_root);
+        }
+        let mut carried = None;
+        let mut warmup_before = None;
+        let vm = match plan {
+            snapshots::Plan::Fork(snapshot, changes) if unit_ready => match snapshot.fork() {
+                Ok(mut vm) => {
+                    carried = Some(changes.carry(&vm));
+                    if self.class_warmup {
+                        let sink = worker.snapshots.warmup_sink(script);
+                        warmup_before = Some(sink.borrow().len());
+                        vm.set_warmup_sink(sink);
+                    }
+                    vm
+                }
+                Err(error) => {
+                    eprintln!(
+                        "phera: worker {}: DEFECT: this request to {} runs from the top: {error}",
+                        worker.index,
+                        script.display()
+                    );
+                    snapshots::count_from_the_top();
+                    self.new_classic_vm(worker)
+                }
+            },
+            _ => self.new_classic_vm(worker),
+        };
+        (vm, carried, warmup_before)
+    }
+
+    fn record_warmup_growth(
+        &self,
+        worker: &WebWorker,
+        script: &Path,
+        document_root: &Path,
+        warmup_before: Option<usize>,
+    ) {
+        if let Some(before) = warmup_before {
+            let grew = worker.snapshots.warmup_sink(script).borrow().len() > before;
+            if worker.snapshots.note_forked_request(script, grew) {
+                worker.boot_in_background(script, document_root);
+            }
+        }
+    }
+
+    async fn handle_websocket_event(
+        &self,
+        worker: &WebWorker,
+        script: &Path,
+        document_root: &Path,
+        connection_id: &str,
+        handler_class: &str,
+        event: phera_extension_api::websocket::WebSocketEvent,
+    ) -> phera_extension_api::websocket::WebSocketEventOutcome {
+        let code = Rc::new(RequestCodeCache::new(worker.code.clone()));
+        let unit = match self.entry_unit(&code, script).await {
+            Ok(unit) => unit,
+            Err(RuntimeError::Compile(error)) => {
+                let mut vm = self.new_classic_vm(worker);
+                vm.configure_web_diagnostics(self.web_development, |_| None);
+                vm.report_entry_compile_failure(error);
+                return phera_extension_api::websocket::WebSocketEventOutcome { close_1011: true };
+            }
+            Err(error) => {
+                phera_extension_api::web_log::write(
+                    format!(
+                        "phera-server: WebSocket event failed to load {}: {error}\n",
+                        script.display()
+                    )
+                    .into_bytes(),
+                );
+                return phera_extension_api::websocket::WebSocketEventOutcome { close_1011: true };
+            }
+        };
+
+        let (mut vm, carried, warmup_before) =
+            self.prepare_worker_vm(worker, script, document_root, true);
+        let forked = vm.is_fork();
+        vm.set_local_loader(code);
+        if !forked {
+            http::define_boot_superglobals(
+                &mut vm,
+                script,
+                document_root,
+                worker.environment.as_ref().clone(),
+            );
+        }
+        if let Some(carried) = carried {
+            carried.apply(&mut vm);
+        }
+        vm.configure_web_diagnostics(self.web_development, |_| None);
+        phera_ext_streams::set_request(
+            vm.state_mut(),
+            script.parent().map(Path::to_path_buf),
+            Vec::new().into(),
+        );
+
+        let outcome = vm
+            .run_websocket_event(
+                (!forked).then_some(unit),
+                connection_id,
+                handler_class,
+                event,
+            )
+            .await;
+
+        if !forked && vm.snapshot_called() && !worker.snapshots.knows(script) {
+            snapshots::remember(script);
+            worker.boot_in_background(script, document_root);
+        }
+        self.record_warmup_growth(worker, script, document_root, warmup_before);
+        outcome
+    }
+
     async fn handle_web_request(
         &self,
         worker: &WebWorker,
@@ -421,38 +583,8 @@ impl Runtime {
             http::Boundary::OtherMediaType => (None, None),
         };
 
-        let (plan, reboot) =
-            worker
-                .snapshots
-                .plan(script, self.include_policy, self.stale_snapshots());
-        if reboot {
-            worker.boot_in_background(script, document_root);
-        }
-        let mut carried = None;
-        let mut warmup_before = None;
-        let mut vm = match (plan, &compiled) {
-            (snapshots::Plan::Fork(snapshot, changes), Ok(_)) => match snapshot.fork() {
-                Ok(mut vm) => {
-                    carried = Some(changes.carry(&vm));
-                    if self.class_warmup {
-                        let sink = worker.snapshots.warmup_sink(script);
-                        warmup_before = Some(sink.borrow().len());
-                        vm.set_warmup_sink(sink);
-                    }
-                    vm
-                }
-                Err(error) => {
-                    eprintln!(
-                        "phera: worker {}: DEFECT: this request to {} runs from the top: {error}",
-                        worker.index,
-                        script.display()
-                    );
-                    snapshots::count_from_the_top();
-                    self.new_classic_vm(worker)
-                }
-            },
-            _ => self.new_classic_vm(worker),
-        };
+        let (mut vm, carried, warmup_before) =
+            self.prepare_worker_vm(worker, script, document_root, compiled.is_ok());
         let forked = vm.is_fork();
         vm.set_local_loader(code);
         let uploads = http::define_superglobals(
@@ -512,17 +644,17 @@ impl Runtime {
         // A forked request that autoloaded new classes grows the warm-up
         // list; once the list settles, the worker boots again in the
         // background and the new snapshot declares the classes.
-        if let Some(before) = warmup_before {
-            let grew = worker.snapshots.warmup_sink(script).borrow().len() > before;
-            if worker.snapshots.note_forked_request(script, grew) {
-                worker.boot_in_background(script, document_root);
-            }
-        }
+        self.record_warmup_growth(worker, script, document_root, warmup_before);
         let head = vm.state_mut().take::<ResponseHead>().unwrap_or_default();
+        let websocket = vm
+            .state_mut()
+            .take::<websocket::PendingWebSocketAccept>()
+            .and_then(|pending| pending.0);
         HttpResponse {
             status: head.status,
             headers: head.headers,
             body: std::mem::take(&mut vm.output),
+            websocket,
         }
     }
 
@@ -575,6 +707,7 @@ impl Runtime {
 
     fn new_vm(&self, native: &NativeTables, sapi: Sapi, environment: Rc<PhpArray>) -> Vm {
         let mut vm = Vm::with_native_tables(native);
+        vm.set_websocket_sink(self.websocket_sink.clone());
         *vm.state_mut().get_or_default::<Sapi>() = sapi;
         if matches!(sapi, Sapi::Web) {
             vm.use_web_execution_time();

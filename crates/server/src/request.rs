@@ -30,6 +30,8 @@ pub struct Request {
     pub body: Vec<u8>,
     pub remote_addr: SocketAddr,
     pub local_addr: SocketAddr,
+    /// True when the request asks for a WebSocket upgrade (`Upgrade: websocket`).
+    pub is_websocket_upgrade: bool,
 }
 
 impl Request {
