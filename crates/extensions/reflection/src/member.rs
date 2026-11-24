@@ -9,7 +9,7 @@ use phera_extension_api::{
 };
 
 use crate::class::{NAME_PROPERTY, load_target_class, loaded_target_class, reflect_class};
-use crate::{UNCLONEABLE, bind, engine, exception, load, receiver};
+use crate::{UNCLONEABLE, bind, engine, exception, inspect, load, receiver};
 
 pub(crate) const CLASS_PROPERTY: PropertyEntry =
     PropertyEntry::typed("class", PropertyType::String, Visibility::Public);
@@ -158,7 +158,7 @@ pub(crate) fn data(
     this: Option<&Rc<Object>>,
     result: impl FnOnce(&MemberInfo) -> Value,
 ) -> NativeResult {
-    Ok(result(&*reflected(this)?))
+    inspect(this, |member: &Rc<MemberInfo>| result(member))
 }
 
 pub(crate) fn has_modifier(this: Option<&Rc<Object>>, mask: i64) -> NativeResult {
