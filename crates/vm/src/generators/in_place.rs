@@ -108,16 +108,16 @@ impl Vm {
         let instructions = self.code.instructions(frame.frame.function);
         let mut ip = frame.frame.ip();
         let registers = frame.local_registers()?;
-        *registers.get_mut(received.index())? = Some(sent.clone());
+        *registers.get_mut(received.index())? = Some(crate::fast::duplicate(sent));
 
         let mut work = 0;
         let mut executed = 0;
         let yielded = loop {
-            let Some(&instruction) = instructions.get(ip) else {
+            let Some(instruction) = instructions.get(ip) else {
                 break None;
             };
             let mut next = ip + 1;
-            if scalar_step::<false, _>(&instruction, registers, &mut next) == ScalarStep::Complete {
+            if scalar_step::<false, _>(instruction, registers, &mut next) == ScalarStep::Complete {
                 executed += 1;
                 if next <= ip {
                     work += 1;
@@ -128,7 +128,7 @@ impl Vm {
                 }
                 break None;
             }
-            let Instruction::Yield { dst, key, value } = instruction else {
+            let &Instruction::Yield { dst, key, value } = instruction else {
                 break None;
             };
             let Some(key) = read_operand(key, registers) else {
@@ -163,9 +163,13 @@ impl Vm {
 /// Absent operands are distinct from operands referring to an undefined local.
 fn read_operand(operand: Option<Reg>, registers: &[Option<Value>]) -> Option<Option<Value>> {
     match operand {
-        Some(register) => Some(Some(
-            registers.get(register.index())?.as_ref()?.deref().clone(),
-        )),
+        Some(register) => {
+            let value = registers.get(register.index())?.as_ref()?;
+            Some(Some(match value {
+                Value::Reference(_) => value.deref().clone(),
+                other => crate::fast::duplicate(other),
+            }))
+        }
         None => Some(None),
     }
 }

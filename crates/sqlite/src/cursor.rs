@@ -3,6 +3,7 @@
 
 use crate::{Cell, Description, Error, Execution};
 use rusqlite::{Connection, Rows};
+use std::cell::Cell as StdCell;
 use std::rc::Rc;
 use std::sync::{
     Arc,
@@ -83,14 +84,19 @@ pub(crate) async fn serve(
     lifetime: Arc<crate::lifetime::CursorTask>,
     sql: String,
     ready: Reply<Statement>,
+    dirty: Rc<StdCell<bool>>,
 ) {
     let mut statement = match connection.prepare(&sql) {
         Ok(statement) => statement,
         Err(error) => {
+            dirty.set(true);
             let _ = ready.send(Err(error.into()));
             return;
         }
     };
+    if !statement.readonly() || is_session_statement(&sql) {
+        dirty.set(true);
+    }
     let (sender, mut receiver) = mpsc::unbounded_channel();
     let busy = Arc::new(AtomicBool::new(false));
     let handle = Statement {
@@ -208,4 +214,55 @@ fn read_all(rows: &mut Rows<'_>) -> Result<Vec<Vec<Cell>>, Error> {
         batch.push(row);
     }
     Ok(batch)
+}
+
+/// Returns true if `sql` starts with a session-altering or transaction SQL
+/// keyword (even when SQLite marks the statement read-only, such as `PRAGMA`
+/// or `ATTACH`).
+fn is_session_statement(sql: &str) -> bool {
+    let mut rest = sql.as_bytes();
+    loop {
+        while let Some(&b) = rest.first() {
+            if b.is_ascii_whitespace() {
+                rest = &rest[1..];
+            } else {
+                break;
+            }
+        }
+        if rest.starts_with(b"--") {
+            match rest.iter().position(|&b| b == b'\n') {
+                Some(nl) => rest = &rest[nl + 1..],
+                None => return false,
+            }
+            continue;
+        }
+        if rest.starts_with(b"/*") {
+            let Some(end) = rest[2..].windows(2).position(|w| w == b"*/") else {
+                return true;
+            };
+            rest = &rest[2 + end + 2..];
+            continue;
+        }
+        break;
+    }
+    let word_len = rest
+        .iter()
+        .take_while(|b| b.is_ascii_alphanumeric() || **b == b'_')
+        .count();
+    let keyword = &rest[..word_len];
+    matches!(
+        keyword.to_ascii_uppercase().as_slice(),
+        b"PRAGMA"
+            | b"ATTACH"
+            | b"DETACH"
+            | b"VACUUM"
+            | b"BEGIN"
+            | b"COMMIT"
+            | b"END"
+            | b"ROLLBACK"
+            | b"SAVEPOINT"
+            | b"RELEASE"
+            | b"ANALYZE"
+            | b"REINDEX"
+    )
 }

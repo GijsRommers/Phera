@@ -509,6 +509,19 @@ impl Machine<'_> {
         path: PathId,
         (source, result): (Reg, Option<Reg>),
     ) -> Step {
+        let body = self.code.function(position.frame.function);
+        let Some(path_body) = body.paths.get(path.index()) else {
+            return Step::Slow;
+        };
+        let Some((last_step, prefix)) = path_body.steps.split_last() else {
+            return Step::Slow;
+        };
+        if !matches!(
+            *last_step,
+            PathStep::Property(_) | PathStep::DynamicProperty(_)
+        ) {
+            return Step::Slow;
+        }
         let base = position.frame.base();
         // Once the property is written, the value must be stored.
         if result.is_some_and(|result| self.registers.window(base + result.index(), 1).is_empty()) {
@@ -520,13 +533,6 @@ impl Machine<'_> {
             _ => return Step::Slow,
         };
         let result_value = result.map(|_| crate::fast::duplicate(value.as_ref().unwrap()));
-        let body = self.code.function(position.frame.function);
-        let Some(path_body) = body.paths.get(path.index()) else {
-            return Step::Slow;
-        };
-        let Some((last_step, prefix)) = path_body.steps.split_last() else {
-            return Step::Slow;
-        };
         let scope = self.caller_scope_index(position);
         let written = match *last_step {
             PathStep::Property(last_name) => {

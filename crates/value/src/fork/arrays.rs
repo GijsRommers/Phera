@@ -30,11 +30,22 @@ struct Visit {
 }
 
 impl Visit {
-    fn new(array: Rc<PhpArray>) -> Self {
+    fn new(
+        array: Rc<PhpArray>,
+        pure: Option<&foldhash::HashSet<usize>>,
+        done: &foldhash::HashMap<usize, Rc<PhpArray>>,
+    ) -> Self {
         let children = array
             .values()
             .filter_map(|value| match value {
-                Value::Array(child) => Some(child.clone()),
+                Value::Array(child) => {
+                    let addr = address(child);
+                    if pure.is_some_and(|set| set.contains(&addr)) || done.contains_key(&addr) {
+                        None
+                    } else {
+                        Some(child.clone())
+                    }
+                }
                 _ => None,
             })
             .collect();
@@ -47,10 +58,8 @@ impl Fork<'_> {
     /// needs copying, otherwise a rebuilt clone.
     pub fn array(&mut self, root: &Rc<PhpArray>) -> Rc<PhpArray> {
         let root_addr = address(root);
-        if self
-            .pure_arrays
-            .is_some_and(|pure| pure.contains(&root_addr))
-        {
+        let pure = self.pure_arrays;
+        if pure.is_some_and(|set| set.contains(&root_addr)) {
             return root.clone();
         }
         if let Some(done) = self.arrays.get(&root_addr) {
@@ -60,7 +69,17 @@ impl Fork<'_> {
         let mut has_identity = false;
         for value in root.values() {
             match value {
-                Value::Array(_) => {
+                Value::Array(child) => {
+                    let child_addr = address(child);
+                    if pure.is_some_and(|set| set.contains(&child_addr)) {
+                        continue;
+                    }
+                    if let Some(done) = self.arrays.get(&child_addr) {
+                        if !Rc::ptr_eq(done, child) {
+                            has_identity = true;
+                        }
+                        continue;
+                    }
                     has_nested_array = true;
                     break;
                 }
@@ -74,19 +93,26 @@ impl Fork<'_> {
             let copy = if !has_identity {
                 root.clone()
             } else {
-                let mut copy = PhpArray::clone(root);
-                self.array_contents(&mut copy);
-                Rc::new(copy)
+                Rc::new(root.clone_mapped(|value| {
+                    if needs_copy(value) {
+                        self.value(value)
+                    } else {
+                        value.clone()
+                    }
+                }))
             };
             self.arrays.insert(root_addr, copy.clone());
             return copy;
         }
-        let mut stack = vec![Visit::new(root.clone())];
+        let mut stack = vec![Visit::new(root.clone(), pure, &self.arrays)];
         let mut last_copy = None;
         while let Some(visit) = stack.last_mut() {
             if let Some(child) = visit.children.pop() {
-                if !self.arrays.contains_key(&address(&child)) {
-                    stack.push(Visit::new(child));
+                let child_addr = address(&child);
+                if !pure.is_some_and(|set| set.contains(&child_addr))
+                    && !self.arrays.contains_key(&child_addr)
+                {
+                    stack.push(Visit::new(child, pure, &self.arrays));
                 }
                 continue;
             }
@@ -98,24 +124,6 @@ impl Fork<'_> {
             }
         }
         last_copy.unwrap_or_else(|| root.clone())
-    }
-
-    /// Replaces every value of `array` that has identity by its copy, in
-    /// place: for an object's property table, which is not behind an `Rc`.
-    pub(crate) fn array_contents(&mut self, array: &mut PhpArray) {
-        let mut position = array.first_position();
-        while let Some(at) = position {
-            let original = array.entry_at(at).map(|(_, value)| value.clone());
-            if let Some(original) = original
-                && needs_copy(&original)
-            {
-                let copy = self.value(&original);
-                if let Some((_, slot)) = array.entry_at_mut(at) {
-                    *slot = copy;
-                }
-            }
-            position = array.next_position(at);
-        }
     }
 
     /// One array whose nested arrays have all been handled.
@@ -131,9 +139,13 @@ impl Fork<'_> {
         if !changes {
             return array.clone();
         }
-        let mut copy = PhpArray::clone(array);
-        self.array_contents(&mut copy);
-        Rc::new(copy)
+        Rc::new(array.clone_mapped(|value| {
+            if needs_copy(value) {
+                self.value(value)
+            } else {
+                value.clone()
+            }
+        }))
     }
 }
 

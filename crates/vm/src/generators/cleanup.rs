@@ -8,7 +8,7 @@
 //! ```
 
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     rc::{Rc, Weak},
 };
 
@@ -23,7 +23,28 @@ use crate::{
 use super::{Generator, Item, State, activation::Activation};
 
 #[derive(Default)]
-pub(crate) struct Releases(RefCell<Vec<Released>>);
+pub(crate) struct Releases {
+    pending: Cell<bool>,
+    queue: RefCell<Vec<Released>>,
+}
+
+impl Releases {
+    #[inline]
+    fn push(&self, item: Released) {
+        self.queue.borrow_mut().push(item);
+        self.pending.set(true);
+    }
+
+    #[inline]
+    fn pop(&self) -> Option<Released> {
+        let mut queue = self.queue.borrow_mut();
+        let item = queue.pop();
+        if queue.is_empty() {
+            self.pending.set(false);
+        }
+        item
+    }
+}
 
 pub(crate) type ReleaseQueue = Weak<Releases>;
 
@@ -46,7 +67,7 @@ pub(crate) fn close_complete() -> NativeError {
 impl Drop for Generator {
     fn drop(&mut self) {
         if let Some(queue) = self.releases.upgrade() {
-            queue.0.borrow_mut().push(Released::Owners {
+            queue.push(Released::Owners {
                 state: std::mem::replace(&mut self.state, State::Failed),
                 item: self.item.take(),
                 closure: self.closure.take(),
@@ -63,11 +84,13 @@ impl Vm {
         Rc::downgrade(self.generator_releases.get_or_insert_with(Rc::default))
     }
 
-    #[inline]
+    #[inline(always)]
     pub(crate) fn generator_releases_pending(&self) -> bool {
-        self.generator_releases
-            .as_ref()
-            .is_some_and(|queue| !self.draining_generators && !queue.0.borrow().is_empty())
+        !self.draining_generators
+            && self
+                .generator_releases
+                .as_ref()
+                .is_some_and(|queue| queue.pending.get())
     }
 
     /// A generator still alive in the last destructor phase of the request:
@@ -98,7 +121,7 @@ impl Vm {
         let Some(queue) = self.generator_releases.clone() else {
             return Ok(());
         };
-        queue.0.borrow_mut().push(released);
+        queue.push(released);
         self.drain_generator_releases().await
     }
 
@@ -173,7 +196,7 @@ impl Vm {
         caller: Option<&SourceLocation>,
     ) -> Result<(), NativeError> {
         loop {
-            let released = queue.0.borrow_mut().pop();
+            let released = queue.pop();
             match released {
                 Some(Released::Owners {
                     state,
@@ -182,10 +205,10 @@ impl Vm {
                 }) => {
                     match state {
                         State::Yielded(activation, _) | State::Ready(activation) => {
-                            queue.0.borrow_mut().push(Released::Close(activation));
+                            queue.push(Released::Close(activation));
                         }
                         State::Delegating(activation, _, delegate) => {
-                            queue.0.borrow_mut().push(Released::Close(activation));
+                            queue.push(Released::Close(activation));
                             drop(delegate);
                         }
                         _ => drop(state),

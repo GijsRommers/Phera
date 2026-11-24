@@ -32,7 +32,7 @@ use crate::calls::window_context::WindowContext;
 use crate::classes::method_table::{MethodExtra, MethodKind, PackedMethod};
 use crate::classes::{Class, ClassIndex, ClassTable, MethodBody};
 use crate::code_table::{FunctionIndex, FunctionShape, NameKey};
-use crate::unit_caches::{SiteOutcome, SiteRecord};
+use crate::unit_caches::{CachedSite, SiteOutcome, SiteRecord, StaticCallCache, StaticCallMode};
 
 impl Machine<'_> {
     /// `InitMethodCall` of a public instance method written in PHP: reserve
@@ -778,6 +778,47 @@ impl Machine<'_> {
         symbols: (SymbolId, SymbolId),
         binding: ClassBinding,
     ) -> Step {
+        if position.frame.kind() != CallKind::Closure
+            && let Some(Some(cached)) =
+                self.code
+                    .read_site(position.frame.function, position.ip, |site| match site {
+                        CachedSite::StaticCall(cached) => Some(*cached),
+                        _ => None,
+                    })
+        {
+            return match cached.mode {
+                StaticCallMode::Static => {
+                    self.prepare_php_method(position, cached.function, None, Some(cached.called))
+                }
+                StaticCallMode::Forward => {
+                    let called = match self.current_context() {
+                        Some(context) => context
+                            .called_index()
+                            .or_else(|| context.called().map(|called| called.index)),
+                        None => Some(cached.called),
+                    };
+                    self.prepare_php_method(position, cached.function, None, called)
+                }
+                StaticCallMode::Instance => {
+                    let receiver = match self.registers.window(position.frame.base() - 1, 1) {
+                        [Some(Value::Object(this))] => Some(this.clone()),
+                        _ => return Step::Slow,
+                    };
+                    self.prepare_php_method(position, cached.function, receiver, None)
+                }
+            };
+        }
+        self.resolve_static_call::<GUARDED>(position, symbols, binding)
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn resolve_static_call<const GUARDED: bool>(
+        &mut self,
+        position: Position,
+        symbols: (SymbolId, SymbolId),
+        binding: ClassBinding,
+    ) -> Step {
         use phera_bytecode::name_keys::{key_parent, key_self, key_static};
 
         let (class_symbol, method_symbol) = symbols;
@@ -785,12 +826,13 @@ impl Machine<'_> {
         let class_key = self.code.unit_symbol_key(function, class_symbol);
         let owned_called: Option<Rc<Class>>;
         let scope = self.caller_scope(position);
+        let is_late_static = class_key == key_static();
         let (class_ref, relative): (&Class, bool) = if class_key == key_self() {
             match scope {
                 Some(scope) => (scope.as_ref(), true),
                 None => return Step::Slow,
             }
-        } else if class_key == key_static() {
+        } else if is_late_static {
             let Some(context) = self.current_context() else {
                 return Step::Slow;
             };
@@ -854,6 +896,25 @@ impl Machine<'_> {
         {
             return Step::Slow;
         }
+        let class_index = class_ref.index;
+        if !is_late_static && position.frame.kind() != CallKind::Closure {
+            let mode = if receiver.is_some() {
+                StaticCallMode::Instance
+            } else if binding == ClassBinding::Forward {
+                StaticCallMode::Forward
+            } else {
+                StaticCallMode::Static
+            };
+            self.code.write_site(
+                function,
+                position.ip,
+                CachedSite::StaticCall(StaticCallCache {
+                    function: target_function,
+                    called: class_index,
+                    mode,
+                }),
+            );
+        }
         // A call with `$this` takes its called class from `$this`; only a
         // static call needs it worked out here.
         let called = match (receiver.is_some(), binding) {
@@ -862,9 +923,9 @@ impl Machine<'_> {
                 Some(context) => context
                     .called_index()
                     .or_else(|| context.called().map(|called| called.index)),
-                None => Some(class_ref.index),
+                None => Some(class_index),
             },
-            (false, _) => Some(class_ref.index),
+            (false, _) => Some(class_index),
         };
         self.prepare_php_method(position, target_function, receiver, called)
     }

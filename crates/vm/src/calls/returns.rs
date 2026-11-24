@@ -29,10 +29,9 @@ impl Vm {
         mut value: Value,
         stop: usize,
     ) -> Result<Option<Value>, NativeError> {
-        if self
-            .call_stack
-            .current()
-            .is_some_and(|frame| self.code.facts(frame.function).return_mask.is_some())
+        if let Some(frame) = self.call_stack.current()
+            && let Some(mask) = self.code.facts(frame.function).return_mask
+            && !crate::calls::fast_calls::return_fits(mask, &value)
         {
             value = self.check_return_value(value)?;
         }
@@ -75,47 +74,33 @@ impl Vm {
 
     /// Coercion precedes finally, allowing a surrounding catch to handle an invalid return.
     pub(crate) fn check_return_value(&mut self, value: Value) -> Result<Value, NativeError> {
-        if let Some(declaration) = self.current().and_then(|frame| {
-            frame
-                .function()
-                .return_type
-                .and_then(|ty| frame.unit().types.get(ty.index()))
-        }) && let Some(float) = crate::types::widen_int_to_float(&value, declaration.mask)
+        let Some(frame) = self.current() else {
+            return Ok(value);
+        };
+        let Some(declaration) = frame.function().return_type else {
+            return Ok(value);
+        };
+        if let Some(declared) = frame.unit().types.get(declaration.index()) {
+            if let Some(float) = crate::types::widen_int_to_float(&value, declared.mask) {
+                return Ok(float);
+            }
+            if crate::types::accepts_as_is(&value, declared) {
+                return Ok(value);
+            }
+        }
+        // Direct ancestry check accepts an object without cloning its declaration.
+        // References still need the ordinary cell-write and borrow checks below.
+        if matches!(value, Value::Object(_))
+            && self.matches_declared_class_type(frame.frame.function, declaration, &value)
         {
-            return Ok(float);
+            return Ok(value);
         }
-        match self.unaccepted_return(&value) {
-            Some(site) => self.coerce_return_value(value, site),
-            None => Ok(value),
-        }
-    }
-
-    /// The return type of the running function, unless `value` satisfies it
-    /// as it is: by its built-in type, or by its declared class ancestry.
-    fn unaccepted_return(&self, value: &Value) -> Option<ReturnTypeSite> {
-        self.current().and_then(|frame| {
-            let declaration = frame.function().return_type?;
-            if frame
-                .unit()
-                .types
-                .get(declaration.index())
-                .is_some_and(|declared| crate::types::accepts_as_is(value, declared))
-            {
-                return None;
-            }
-            // Direct ancestry check accepts an object without cloning its declaration.
-            // References still need the ordinary cell-write and borrow checks below.
-            if matches!(value, Value::Object(_))
-                && self.matches_declared_class_type(frame.frame.function, declaration, value)
-            {
-                return None;
-            }
-            Some(ReturnTypeSite {
-                unit: frame.unit().clone(),
-                function: frame.frame.function,
-                declaration,
-            })
-        })
+        let site = ReturnTypeSite {
+            unit: frame.unit().clone(),
+            function: frame.frame.function,
+            declaration,
+        };
+        self.coerce_return_value(value, site)
     }
 
     /// Slow coercion may warn, throw or update a returned PHP reference cell.

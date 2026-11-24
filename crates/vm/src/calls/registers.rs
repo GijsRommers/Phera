@@ -174,7 +174,11 @@ impl Registers {
                 None
             }
         });
-        self.truncate(start);
+        let clear_from = if base <= start + 2 { base } else { start };
+        self.truncate(clear_from);
+        if start < self.top {
+            self.top = start;
+        }
         drop(prefix);
     }
 
