@@ -112,7 +112,7 @@ icu_segmenter = { version = "=2.4.0", default-features = false, features = ["com
 phera-ext-intl = { path = "crates/extensions/intl" }
 phera-ext-http = { path = "crates/extensions/http" }
 phera-ext-mbstring = { path = "crates/extensions/mbstring" }
-iconv-native = "0.1"
+iconv-native = "0.2"
 encoding_rs = "0.8.35"
 base16ct = { version = "1", features = ["alloc"] }
 cssparser = "0.38"
