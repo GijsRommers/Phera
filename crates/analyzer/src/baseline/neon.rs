@@ -6,7 +6,7 @@ use crate::diagnostic::Diagnostic;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-mod scalars;
+pub(crate) mod scalars;
 
 #[derive(Default)]
 struct Entry {

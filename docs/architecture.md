@@ -695,6 +695,36 @@ Phera gives each web child its own process group and terminates abandoned
 children at request cleanup while their leader is still tracked. Programs
 that explicitly detach can keep running. [Process decisions](decisions/README.md)
 
+### 5.6 WebSockets in `phera serve`
+
+HTTP requests handle WebSocket upgrade authorization normally and opt into
+upgrading by calling `Phera\WebSocket\accept(MyHandler::class, ...)`.
+Once the `101 Switching Protocols` response is flushed, `phera-server`
+moves the socket into an async `tokio-tungstenite` task (`read_buffer_size = 8 KiB`,
+zero idle write buffer) and registers its bounded outbound sender, rooms, and
+context bytes in the shared 64-sharded `WebSocketHub`.
+
+Each WebSocket event (`onOpen`, `onMessage`, `onClose`) runs in its own isolated
+PHP run (`Vm::run_websocket_event`) on the worker's `LocalSet`:
+
+- *Ordering.* Messages for a single connection queue through a bounded per-socket
+  channel so `onOpen`, each `onMessage`, and `onClose` execute strictly
+  one after another in arrival order while other connections proceed in parallel.
+- *Handler resolution.* Event forks skip bytecode past `Phera\snapshot()`, calling
+  the resolver registered with `Phera\WebSocket\resolveUsing(...)` (wired
+  automatically by the Laravel and Symfony adapters to their container before
+  the snapshot) or falling back to `new $handlerClass()`.
+- *HTTP-to-WebSocket push.* Any HTTP request can call `Phera\WebSocket\broadcast()`,
+  `Phera\WebSocket\send()`, `Phera\WebSocket\roomCount()`, and
+  `Phera\WebSocket\connections()` through the same `WebSocketHub` without locking
+  PHP workers.
+- *Errors and origin policy.* Uncaught `Throwable` exceptions in `onOpen` or
+  `onMessage` log once, invoke `$handler->onError($conn, $e)`, and close with
+  `1011`; constructor/resolver errors and throws inside `onError` log once
+  without recursion and close with `1011`. Origin checks resolve `X-Forwarded-Proto`
+  and `X-Forwarded-Host` via `--trusted-proxies` unless overridden with
+  `--ws-allowed-origins`.
+
 ## 6. Scope
 
 In: the PHP that Symfony and Laravel and their dependencies run in production.

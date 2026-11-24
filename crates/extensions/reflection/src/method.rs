@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use phera_extension_api::reflection::FunctionTarget;
+use phera_extension_api::reflection::{FunctionInfo, FunctionTarget, MemberInfo};
 use phera_extension_api::{
     ClassEntry, ConstantValue, Context, LocalFuture, MethodEntry, NativeResult, Object, Param,
     ParamType, PhpString, Registry, Value, args,
@@ -10,10 +10,11 @@ use phera_extension_api::{
 
 use crate::class::{load_target_class, loaded_target_class, reflect_class};
 use crate::function::{
-    ARGS, ARRAY, argument_array, data, forwarded_arguments, make, method, reflected, set_class,
+    ARGS, ARRAY, argument_array, data, direct, forwarded_arguments, make, method, reflected,
+    set_class,
 };
 use crate::member::{ACCESS, CLASS_PROPERTY, accessible};
-use crate::{bind, engine, exception, receiver};
+use crate::{bind, engine, exception, inspect, receiver};
 
 const INSTANCE: Param = Param::new("object", ParamType::Object).nullable();
 
@@ -58,13 +59,23 @@ pub(crate) fn register(registry: &mut Registry) {
                 )
                 .static_()
                 .returning("static"),
-                MethodEntry::public("isPublic", &[], |_, o, _| flags(o, 1)),
-                MethodEntry::public("isProtected", &[], |_, o, _| flags(o, 2)),
-                MethodEntry::public("isPrivate", &[], |_, o, _| flags(o, 4)),
-                MethodEntry::public("isFinal", &[], |_, o, _| flags(o, 32)),
-                MethodEntry::public("isAbstract", &[], |_, o, _| flags(o, 64)),
+                MethodEntry::public("isPublic", &[], |_, o, _| flags(o, 1))
+                    .with_direct(|o, a| direct_flags(o, a, 1)),
+                MethodEntry::public("isProtected", &[], |_, o, _| flags(o, 2))
+                    .with_direct(|o, a| direct_flags(o, a, 2)),
+                MethodEntry::public("isPrivate", &[], |_, o, _| flags(o, 4))
+                    .with_direct(|o, a| direct_flags(o, a, 4)),
+                MethodEntry::public("isFinal", &[], |_, o, _| flags(o, 32))
+                    .with_direct(|o, a| direct_flags(o, a, 32)),
+                MethodEntry::public("isAbstract", &[], |_, o, _| flags(o, 64))
+                    .with_direct(|o, a| direct_flags(o, a, 64)),
                 MethodEntry::public("isConstructor", &[], |_, o, _| {
                     data(o, |f| {
+                        Value::Bool(f.name.eq_ignore_ascii_case("__construct"))
+                    })
+                })
+                .with_direct(|o, a| {
+                    direct(o, a, |f| {
                         Value::Bool(f.name.eq_ignore_ascii_case("__construct"))
                     })
                 }),
@@ -72,10 +83,18 @@ pub(crate) fn register(registry: &mut Registry) {
                     data(o, |f| {
                         Value::Bool(f.name.eq_ignore_ascii_case("__destruct"))
                     })
+                })
+                .with_direct(|o, a| {
+                    direct(o, a, |f| {
+                        Value::Bool(f.name.eq_ignore_ascii_case("__destruct"))
+                    })
                 }),
                 MethodEntry::public("getModifiers", &[], |_, o, _| {
-                    Ok(Value::Int(method(&*reflected(o)?)?.modifiers))
-                }),
+                    inspect(o, |function: &Rc<FunctionInfo>| {
+                        Ok(Value::Int(method(function)?.modifiers))
+                    })?
+                })
+                .with_direct(|o, a| direct_member(o, a, |m| Value::Int(m.modifiers))),
                 MethodEntry::public_async("getDeclaringClass", &[], declaring),
                 MethodEntry::public("hasPrototype", &[], |c, o, _| {
                     Ok(Value::Bool(prototype_target(c, &*reflected(o)?)?.is_some()))
@@ -251,9 +270,28 @@ pub(crate) fn split_method(
 }
 
 fn flags(this: Option<&Rc<Object>>, flag: i64) -> NativeResult {
-    Ok(Value::Bool(
-        method(&*reflected(this)?)?.modifiers & flag != 0,
-    ))
+    inspect(this, |function: &Rc<FunctionInfo>| {
+        Ok(Value::Bool(method(function)?.modifiers & flag != 0))
+    })?
+}
+
+fn direct_member(
+    object: &Object,
+    arguments: &[Option<Value>],
+    read: impl FnOnce(&MemberInfo) -> Value,
+) -> Option<Value> {
+    if !arguments.is_empty() {
+        return None;
+    }
+    let native = object.native.try_borrow().ok()?;
+    let function = native.as_ref()?.downcast_ref::<Rc<FunctionInfo>>()?;
+    Some(read(function.member.as_ref()?))
+}
+
+fn direct_flags(object: &Object, arguments: &[Option<Value>], flag: i64) -> Option<Value> {
+    direct_member(object, arguments, |member| {
+        Value::Bool(member.modifiers & flag != 0)
+    })
 }
 
 fn declaring(

@@ -138,6 +138,55 @@ rises by 0.5%. The cause is the fork, not the warm-up: a fork that copies
 only what a request writes removes this cost, and that is the next piece
 of work.
 
+### Measured again on main `f9cf1e1f` (2026-11-23)
+
+The table above was measured against main `0c63b85f`. Main has moved since
+(ninety commits, mostly the speed pull requests), so every row was
+measured again with a release build of `f9cf1e1f` plus this change (no
+source change): one binary, warm-up on against `PHERA_SERVICE_WARMUP=0`
+(`bin/gate.sh` and the Symfony yardstick take binaries, not options, so the
+"off" binary is a two-line wrapper that sets the variable and `exec`s the
+same file). One worker, instructions per settled request, everything through
+`bin/quiet.sh`, the response bytes the same on and off.
+
+| Route | Off | On | Change |
+|---|---:|---:|---:|
+| Laravel `/api/posts?page=2` (`bin/gate.sh`, four pairs, mean) | 103.35M | 50.65M | −51.0% |
+| Laravel `/api/hello` (`bin/gate.sh`, four pairs, mean) | 21.65M | 20.80M | −3.9% |
+| Symfony `/api/ping` (two pairs, lowest) | 10.81M | 10.01M | −7.4% |
+| Symfony `/api/db-yardstick` (yardstick, four pairs, mean) | 266.54M | 265.42M | −0.4% |
+
+Four pairs of `bin/gate.sh` agreed within 0.2%. The two pairs of the Symfony
+yardstick disagreed by 0.5% on the first run (base 264.83M and 266.22M, new
+263.95M and 266.16M, mean −0.18%), so it was run again with four pairs: the
+off binary then read 265.21M to 267.10M and the on binary 265.12M to
+265.76M. Read both runs as "no difference worth claiming": between −0.2% and
+−0.4%, inside the spread between pairs. `/api/ping` is not a route of the
+yardstick (its route is fixed), so it was measured with the same counters
+(`warm/measure.py --symfony`, 300 settled requests, 200 measured, two pairs)
+on a scratch copy of the yardstick application.
+
+The cost, on the same binary and the same day:
+
+| | Off | On |
+|---|---:|---:|
+| Laravel: a request that ends right after `Phera\snapshot()` (the fork; a maintenance file ends it) | 3.32M | 5.49M |
+| Symfony: the same (a `Kernel::handle()` that answers `/fork` at once; includes reading the request and sending the answer) | 2.36M | 2.57M |
+| Laravel, process start until one worker has booted | 2,437M instructions | 2,979M instructions |
+| Symfony, the same | 660M instructions | 633M instructions (no difference: the scatter of this number is ±30M) |
+| Laravel, memory of the process (physical footprint, one worker), after boot | 58.1 MiB | 72.9 MiB |
+| ... after 200 requests of `/api/hello` | 70.3 MiB | 81.6 MiB |
+| ... and then 200 of `/api/posts?page=2` | 79.8 MiB | 87.5 MiB |
+| Symfony, memory, after boot | 24.6 MiB | 24.7 MiB |
+| ... after 200 requests of `/api/ping` | 28.9 MiB | 29.4 MiB |
+
+Compared with the first table: the saving on the Eloquent route is the same
+(−51.0% against −49.5%), the fork costs about the same extra
+(+2.17M against +2.07M), and a worker that has served requests holds 8 to
+11 MiB more with the warm-up, where it held 16 MiB more on `0c63b85f`. The Symfony rows are
+smaller in absolute terms than before because main got faster; the
+difference between on and off keeps its size and sign.
+
 ## Turned down
 
 - **`Model::query()` for the query.** It applies the model's global scopes,

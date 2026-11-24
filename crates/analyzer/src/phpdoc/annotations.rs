@@ -1,6 +1,7 @@
 //! Attach `@param User $user` to its parameter and keep the tag's diagnostic span.
 //! PHPStan-prefixed tags take precedence over Psalm-prefixed or unprefixed tags.
 
+use super::assertions::AssertionBranch;
 use super::type_parser::{Templates, parse};
 use crate::{names::Names, types::ValueType};
 use phera_source::Span;
@@ -16,10 +17,13 @@ pub struct Annotation {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Documentation {
     pub params: BTreeMap<String, Annotation>,
+    pub assertions: Vec<super::assertions::Assertion>,
     pub returns: Option<Annotation>,
     pub variables: BTreeMap<Option<String>, Annotation>,
     pub templates: Templates,
     pub template_names: Vec<String>,
+    pub(crate) template_variances: BTreeMap<String, super::Variance>,
+    pub(crate) type_imports: Vec<super::type_aliases::TypeImport>,
     pub bases: Vec<Annotation>,
     pub properties: BTreeMap<String, Annotation>,
     pub methods: BTreeMap<String, Annotation>,
@@ -62,10 +66,29 @@ pub fn read(
     let mut templates = inherited.clone();
     for tag in &tags {
         let (_, name) = tag_name(tag.name);
-        if (template_tag(name) || matches!(name, "type" | "import-type"))
-            && let Some(name) = tag.body.split_whitespace().next()
-        {
-            templates.insert(name.into(), ValueType::Mixed);
+        if let Some(identifier) = tag.body.split_whitespace().next() {
+            if template_tag(name) {
+                templates.aliases.remove(identifier);
+                templates.imported_aliases.remove(identifier);
+                templates
+                    .parameters
+                    .insert(identifier.into(), ValueType::Mixed);
+            } else if name == "type" {
+                templates.imported_aliases.remove(identifier);
+                templates.aliases.insert(
+                    identifier.into(),
+                    super::type_aliases::placeholder(identifier),
+                );
+            } else if name == "import-type"
+                && let Some(import) = super::type_aliases::TypeImport::parse(&tag.body, names)
+            {
+                templates.imported_aliases.insert(import.local.clone());
+                templates.aliases.insert(
+                    import.local.clone(),
+                    super::type_aliases::placeholder(&import.local),
+                );
+                documentation.type_imports.push(import);
+            }
         }
     }
     for tag in &tags {
@@ -89,7 +112,18 @@ pub fn read(
             if !documentation.template_names.iter().any(|old| old == name) {
                 documentation.template_names.push(name.into());
             }
-            templates.insert(name.into(), bound.limit_complexity());
+            let (_, tag) = tag_name(tag.name);
+            let variance = match tag {
+                "template-covariant" => super::Variance::Covariant,
+                "template-contravariant" => super::Variance::Contravariant,
+                _ => super::Variance::Invariant,
+            };
+            documentation
+                .template_variances
+                .insert(name.into(), variance);
+            templates
+                .parameters
+                .insert(name.into(), bound.limit_complexity());
         }
     }
     for tag in &tags {
@@ -99,17 +133,9 @@ pub fn read(
         {
             let body = body.trim_start().trim_start_matches('=').trim_start();
             if let Ok(parsed) = parse(body, names, &templates) {
-                templates.insert(alias.into(), parsed.ty.limit_complexity());
-            }
-        }
-        if name == "import-type" {
-            let mut words = tag.body.split_whitespace();
-            if let Some(local) = words.next() {
-                let local = words
-                    .skip_while(|word| *word != "as")
-                    .nth(1)
-                    .unwrap_or(local);
-                templates.insert(local.into(), ValueType::Mixed);
+                templates
+                    .aliases
+                    .insert(alias.into(), parsed.ty.limit_complexity());
             }
         }
     }
@@ -117,6 +143,25 @@ pub fn read(
     for tag in &tags {
         let (priority, name) = tag_name(tag.name);
         let span = Span::new(tag.offset, tag.offset);
+        let assertion_branch = match name {
+            "assert" => Some(AssertionBranch::Always),
+            "assert-if-true" => Some(AssertionBranch::OnResult(true)),
+            "assert-if-false" => Some(AssertionBranch::OnResult(false)),
+            _ => None,
+        };
+        if priority != Priority::Standard
+            && let Some(branch) = assertion_branch
+        {
+            if let Some(assertion) = super::assertions::parse_assertion(
+                &tag.body,
+                names,
+                &documentation.templates,
+                branch,
+            ) {
+                documentation.assertions.push(assertion);
+            }
+            continue;
+        }
         if name == "method" {
             match method(&tag.body, names, &documentation.templates) {
                 Some((name, ty)) => insert(
@@ -286,13 +331,20 @@ fn template_tag(tag: &str) -> bool {
 }
 
 fn tag_name(tag: &str) -> (Priority, &str) {
-    if let Some(name) = tag.strip_prefix("@phpstan-") {
+    let (priority, name) = if let Some(name) = tag.strip_prefix("@phpstan-") {
         (Priority::PhpStan, name)
     } else if let Some(name) = tag.strip_prefix("@psalm-") {
         (Priority::Psalm, name)
     } else {
         (Priority::Standard, tag.trim_start_matches('@'))
-    }
+    };
+    let name = match name {
+        "template-extends" => "extends",
+        "template-implements" => "implements",
+        "template-use" => "use",
+        name => name,
+    };
+    (priority, name)
 }
 
 fn detailed_tags(text: &str, start: usize) -> Vec<Tag<'_>> {

@@ -75,7 +75,21 @@ enum PropertySlots {
         len: u8,
         values: [Option<Value>; INLINE_SLOTS],
     },
-    Heap(Box<[Option<Value>]>),
+    /// Declared slots beyond `INLINE_SLOTS`, shared copy-on-write across
+    /// clones and leaf snapshot forks. `leaf` is true only when every slot is
+    /// known to hold no objects, references, resources, or non-leaf arrays.
+    Heap {
+        slots: Rc<[Option<Value>]>,
+        leaf: bool,
+    },
+}
+
+const _: () = assert!(std::mem::size_of::<PropertySlots>() <= 72);
+
+#[cold]
+#[inline(never)]
+fn detach_heap_slots(slots: &mut Rc<[Option<Value>]>) {
+    *slots = Rc::from(slots.to_vec());
 }
 
 impl PropertySlots {
@@ -89,7 +103,10 @@ impl PropertySlots {
                 values: [const { None }; INLINE_SLOTS],
             }
         } else {
-            Self::Heap(vec![None; len].into_boxed_slice())
+            Self::Heap {
+                slots: Rc::from(vec![None; len]),
+                leaf: false,
+            }
         }
     }
 
@@ -104,7 +121,10 @@ impl PropertySlots {
             }
             Self::Inline { len, values }
         } else {
-            Self::Heap(slots)
+            Self::Heap {
+                slots: Rc::from(slots),
+                leaf: false,
+            }
         }
     }
 
@@ -113,7 +133,7 @@ impl PropertySlots {
         match self {
             Self::Empty => &[],
             Self::Inline { len, values } => &values[..usize::from(*len)],
-            Self::Heap(slots) => slots,
+            Self::Heap { slots, .. } => slots,
         }
     }
 
@@ -122,7 +142,13 @@ impl PropertySlots {
         match self {
             Self::Empty => &mut [],
             Self::Inline { len, values } => &mut values[..usize::from(*len)],
-            Self::Heap(slots) => slots,
+            Self::Heap { slots, leaf } => {
+                *leaf = false;
+                if Rc::strong_count(slots) != 1 || Rc::weak_count(slots) != 0 {
+                    detach_heap_slots(slots);
+                }
+                Rc::get_mut(slots).unwrap_or(&mut [])
+            }
         }
     }
 
@@ -130,7 +156,10 @@ impl PropertySlots {
     fn heap_bytes(&self) -> usize {
         match self {
             Self::Empty | Self::Inline { .. } => 0,
-            Self::Heap(slots) => slots.len() * std::mem::size_of::<Option<Value>>(),
+            Self::Heap { slots, .. } if Rc::strong_count(slots) == 1 => {
+                slots.len() * std::mem::size_of::<Option<Value>>()
+            }
+            Self::Heap { .. } => 0,
         }
     }
 }
@@ -142,9 +171,9 @@ pub struct Properties {
     layout: Option<Rc<PropertyLayout>>,
     /// One per key of the layout (inline for up to four declared properties).
     slots: PropertySlots,
-    /// Properties the class does not declare, in insertion order; made on
-    /// the first one, since most objects have none.
-    others: Option<Box<PhpArray>>,
+    /// Properties the class does not declare, in insertion order; shared
+    /// copy-on-write across clones and leaf snapshot forks.
+    others: Option<Rc<PhpArray>>,
 }
 
 impl Properties {
@@ -180,7 +209,7 @@ impl Properties {
         Self {
             layout: None,
             slots: PropertySlots::Empty,
-            others: Some(Box::new(others)),
+            others: Some(Rc::new(others)),
         }
     }
 
@@ -194,7 +223,7 @@ impl Properties {
     }
 
     fn others_or_new(&mut self) -> &mut PhpArray {
-        self.others.get_or_insert_with(Box::default)
+        Rc::make_mut(self.others.get_or_insert_with(Rc::default))
     }
 
     // ----- By slot number -------------------------------------------------
@@ -229,11 +258,6 @@ impl Properties {
         self.slots.as_slice()
     }
 
-    /// The slots, writable, in layout order.
-    pub(crate) fn slots_mut(&mut self) -> &mut [Option<Value>] {
-        self.slots.as_mut_slice()
-    }
-
     /// The slot of `key`, using `hint` (a slot a site or a
     /// `ReflectionProperty` remembered) when the layout has `key` there.
     #[inline]
@@ -259,7 +283,7 @@ impl Properties {
     pub fn get_mut_at(&mut self, key: &ArrayKey, hint: Option<usize>) -> Option<&mut Value> {
         match self.slot_for(key, hint) {
             Some(slot) => self.slot_mut(slot),
-            None => self.others.as_deref_mut()?.get_mut(key),
+            None => self.others_mut()?.get_mut(key),
         }
     }
 
@@ -296,7 +320,7 @@ impl Properties {
     pub fn remove(&mut self, key: &ArrayKey) -> Option<Value> {
         match self.slot_of(key) {
             Some(slot) => self.clear_slot(slot),
-            None => self.others.as_deref_mut()?.remove(key),
+            None => self.others_mut()?.remove(key),
         }
     }
 
@@ -332,8 +356,12 @@ impl Properties {
     /// The memory the properties hold beyond the object itself.
     pub fn heap_bytes(&self) -> usize {
         self.slots.heap_bytes()
-            + self.others.as_deref().map_or(0, |others| {
-                std::mem::size_of::<PhpArray>() + others.heap_bytes()
+            + self.others.as_ref().map_or(0, |others| {
+                if Rc::strong_count(others) == 1 {
+                    std::mem::size_of::<PhpArray>() + others.heap_bytes()
+                } else {
+                    0
+                }
             })
     }
 
@@ -350,7 +378,7 @@ impl Properties {
                 }
             }
         }
-        if let Some(others) = self.others.as_deref_mut() {
+        if let Some(others) = self.others_mut() {
             for (key, value) in others.iter_mut() {
                 visit(&key, value);
             }
@@ -442,7 +470,67 @@ impl Properties {
 
     /// The same, writable.
     pub fn others_mut(&mut self) -> Option<&mut PhpArray> {
-        self.others.as_deref_mut()
+        self.others.as_mut().map(Rc::make_mut)
+    }
+
+    /// One-pass fork copy of an object's properties: shares leaf `Heap`
+    /// slabs and leaf dynamic `others` arrays in O(1) via `Rc::clone`, and
+    /// maps non-leaf slots directly without cloning-then-overwriting.
+    pub(crate) fn fork_with(&self, fork: &mut crate::Fork<'_>) -> Self {
+        let slots = match &self.slots {
+            PropertySlots::Empty => PropertySlots::Empty,
+            PropertySlots::Inline { len, values } => {
+                let count = usize::from(*len);
+                let mut out = [const { None }; INLINE_SLOTS];
+                for (dst, src) in out[..count].iter_mut().zip(&values[..count]) {
+                    if let Some(value) = src {
+                        *dst = Some(fork.value(value));
+                    }
+                }
+                PropertySlots::Inline {
+                    len: *len,
+                    values: out,
+                }
+            }
+            PropertySlots::Heap { slots, leaf: true } => PropertySlots::Heap {
+                slots: slots.clone(),
+                leaf: true,
+            },
+            PropertySlots::Heap { slots, leaf: false } => {
+                let mut is_leaf = true;
+                let mut out = Vec::with_capacity(slots.len());
+                for slot in slots.iter() {
+                    let mapped = match slot {
+                        None => None,
+                        Some(Value::Array(array)) => {
+                            let copied = fork.array(array);
+                            if !Rc::ptr_eq(&copied, array) {
+                                is_leaf = false;
+                            }
+                            Some(Value::Array(copied))
+                        }
+                        Some(
+                            value @ (Value::Object(_) | Value::Reference(_) | Value::Resource(_)),
+                        ) => {
+                            is_leaf = false;
+                            Some(fork.value(value))
+                        }
+                        Some(scalar_or_str) => Some(scalar_or_str.clone()),
+                    };
+                    out.push(mapped);
+                }
+                PropertySlots::Heap {
+                    slots: Rc::from(out),
+                    leaf: is_leaf,
+                }
+            }
+        };
+        let others = self.others.as_ref().map(|others| fork.array(others));
+        Self {
+            layout: self.layout.clone(),
+            slots,
+            others,
+        }
     }
 
     /// Replaces every property with those of `array`, by key: declared
@@ -455,13 +543,13 @@ impl Properties {
     /// take the general path for this object.
     pub fn replace_all(&mut self, array: PhpArray) {
         let Some(layout) = self.layout.clone() else {
-            self.others = (!array.is_empty()).then(|| Box::new(array));
+            self.others = (!array.is_empty()).then(|| Rc::new(array));
             return;
         };
         if !in_layout_order(&layout, &array) {
             self.layout = None;
             self.slots = PropertySlots::Empty;
-            self.others = (!array.is_empty()).then(|| Box::new(array));
+            self.others = (!array.is_empty()).then(|| Rc::new(array));
             return;
         }
         self.slots
@@ -486,7 +574,9 @@ impl Properties {
     /// in last first, so that `pop` frees them in PHP's order: the
     /// declared properties first to last, then the others.
     pub(crate) fn take_values(mut self, work: &mut Vec<Value>) {
-        if let Some(mut others) = self.others.take() {
+        if let Some(others) = self.others.take()
+            && let Ok(mut others) = Rc::try_unwrap(others)
+        {
             others.take_values(work);
         }
         match std::mem::take(&mut self.slots) {
@@ -494,8 +584,10 @@ impl Properties {
             PropertySlots::Inline { len, values } => {
                 work.extend(values.into_iter().take(usize::from(len)).rev().flatten());
             }
-            PropertySlots::Heap(slots) => {
-                work.extend(slots.into_vec().into_iter().rev().flatten());
+            PropertySlots::Heap { mut slots, .. } => {
+                if let Some(slice) = Rc::get_mut(&mut slots) {
+                    work.extend(slice.iter_mut().rev().filter_map(Option::take));
+                }
             }
         }
     }
@@ -551,9 +643,11 @@ impl Drop for Properties {
                     PhpArray::release_entries(values.into_iter().take(len).flatten());
                 }
             }
-            PropertySlots::Heap(slots) => {
-                if slots.iter().any(may_recurse_on_drop) {
-                    PhpArray::release_entries(slots.into_vec().into_iter().flatten());
+            PropertySlots::Heap { mut slots, .. } => {
+                if let Some(slice) = Rc::get_mut(&mut slots)
+                    && slice.iter().any(may_recurse_on_drop)
+                {
+                    PhpArray::release_entries(slice.iter_mut().filter_map(Option::take));
                 }
             }
         }
@@ -618,5 +712,79 @@ mod tests {
             array.get(&ArrayKey::str("shown")),
             Some(Value::Int(2))
         ));
+    }
+
+    #[test]
+    fn leaf_heap_properties_share_storage_across_forks_and_detach_on_write() {
+        let layout = Rc::new(PropertyLayout::new([
+            ArrayKey::str("a"),
+            ArrayKey::str("b"),
+            ArrayKey::str("c"),
+            ArrayKey::str("d"),
+            ArrayKey::str("e"),
+        ]));
+        let mut original = Properties::with_layout(
+            layout,
+            vec![
+                Some(Value::Int(1)),
+                Some(Value::Int(2)),
+                Some(Value::Int(3)),
+                Some(Value::Int(4)),
+                Some(Value::Int(5)),
+            ]
+            .into_boxed_slice(),
+        );
+        original.insert(ArrayKey::str("dyn"), Value::Int(9));
+
+        struct EmptyNatives;
+        impl crate::NativeFork for EmptyNatives {
+            fn fork_native(
+                &self,
+                _object: &crate::Object,
+                _state: &dyn std::any::Any,
+                _fork: &mut crate::Fork<'_>,
+            ) -> Result<Box<dyn std::any::Any>, String> {
+                Err("unexpected".into())
+            }
+            fn fork_resource(
+                &self,
+                _resource: &crate::Resource,
+                _fork: &mut crate::Fork<'_>,
+            ) -> Result<crate::Resource, String> {
+                Err("unexpected".into())
+            }
+        }
+
+        let ids = Rc::new(crate::ObjectIds::default());
+        let mut snap_fork = crate::Fork::new(&ids, &EmptyNatives);
+        let snapshot = original.fork_with(&mut snap_fork);
+
+        // Request forks share the snapshot's leaf heap slot slice and leaf others map in O(1).
+        let mut req1_fork = crate::Fork::new(&ids, &EmptyNatives);
+        let mut req1 = snapshot.fork_with(&mut req1_fork);
+        let mut req2_fork = crate::Fork::new(&ids, &EmptyNatives);
+        let req2 = snapshot.fork_with(&mut req2_fork);
+
+        assert!(std::ptr::eq(
+            snapshot.slots().as_ptr(),
+            req1.slots().as_ptr()
+        ));
+        assert!(std::ptr::eq(
+            snapshot.slots().as_ptr(),
+            req2.slots().as_ptr()
+        ));
+        assert!(std::ptr::eq(
+            snapshot.others().unwrap(),
+            req1.others().unwrap()
+        ));
+
+        // Mutating req1 detaches COW without affecting snapshot or req2.
+        req1.set_slot(4, Value::Int(99));
+        req1.insert(ArrayKey::str("dyn"), Value::Int(77));
+        assert_eq!(req1.slot(4), Some(&Value::Int(99)));
+        assert_eq!(snapshot.slot(4), Some(&Value::Int(5)));
+        assert_eq!(req2.slot(4), Some(&Value::Int(5)));
+        assert_eq!(req1.get(&ArrayKey::str("dyn")), Some(&Value::Int(77)));
+        assert_eq!(req2.get(&ArrayKey::str("dyn")), Some(&Value::Int(9)));
     }
 }

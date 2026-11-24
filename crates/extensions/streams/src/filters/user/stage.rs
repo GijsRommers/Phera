@@ -1,6 +1,9 @@
 //! A native codec and a PHP `php_user_filter` can occupy the same pipeline.
 
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::RefCell,
+    rc::{Rc, Weak},
+};
 
 use phera_extension_api::{
     ArrayKey, Context, NativeError, Object, Value,
@@ -20,7 +23,10 @@ pub(super) struct Stage {
 
 #[derive(Clone)]
 enum Kind {
-    Php(Rc<Object>),
+    Php {
+        object: Rc<Object>,
+        attachment: Weak<Resource>,
+    },
     Native(Rc<RefCell<Filter>>),
 }
 
@@ -31,10 +37,10 @@ pub(super) enum StageOutput {
 }
 
 impl Stage {
-    pub fn php(id: i64, filter: Rc<Object>) -> Self {
+    pub fn php(id: i64, object: Rc<Object>, attachment: Weak<Resource>) -> Self {
         Self {
             id,
-            filter: Kind::Php(filter),
+            filter: Kind::Php { object, attachment },
         }
     }
 
@@ -47,9 +53,13 @@ impl Stage {
 
     pub fn name(&self) -> &str {
         match &self.filter {
-            Kind::Php(object) => object.class.name(),
+            Kind::Php { object, .. } => object.class.name(),
             Kind::Native(_) => "stream filter",
         }
+    }
+
+    pub fn is_php(&self) -> bool {
+        matches!(&self.filter, Kind::Php { .. })
     }
 
     pub async fn apply(
@@ -62,10 +72,10 @@ impl Stage {
         initial: bool,
     ) -> Result<StageOutput, NativeError> {
         match &self.filter {
-            Kind::Php(filter) => {
+            Kind::Php { object, .. } => {
                 run(
                     context,
-                    filter,
+                    object,
                     stream,
                     function,
                     data,
@@ -111,8 +121,12 @@ impl Stage {
     }
 
     pub async fn close(&self, context: &mut dyn Context) -> Result<(), NativeError> {
-        if let Kind::Php(filter) = &self.filter {
-            invoke(context, filter, "onclose", Vec::new()).await?;
+        if let Kind::Php { object, attachment } = &self.filter {
+            let result = invoke(context, object, "onclose", Vec::new()).await;
+            if let Some(attachment) = attachment.upgrade() {
+                attachment.data.borrow_mut().take();
+            }
+            result?;
         }
         Ok(())
     }

@@ -132,6 +132,44 @@ impl Directory {
     }
 }
 
+/// A clone of a wrapper directory opens its own handle and advances it to the cursor.
+pub(super) fn clone_state<'a>(
+    context: &'a mut dyn Context,
+    source: &'a Rc<Object>,
+    destination: &'a Rc<Object>,
+) -> LocalFuture<'a, Result<(), NativeError>> {
+    Box::pin(async move {
+        let mut state = read(source, Clone::clone)?;
+        if let Data::Directory(directory) = &mut state.data
+            && matches!(directory.entries, Entries::Wrapped { .. })
+        {
+            let method = "DirectoryIterator::__clone";
+            let handle =
+                native::DirectoryStream::open_wrapper(context, directory.path.as_bytes(), method)
+                    .await?
+                    .ok_or_else(|| {
+                        NativeError::throw(
+                            "UnexpectedValueException",
+                            format!(
+                                "Failed to open directory \"{}\"",
+                                String::from_utf8_lossy(directory.path.as_bytes())
+                            ),
+                        )
+                    })?;
+            let mut entry = None;
+            for _ in 0..=directory.position {
+                entry =
+                    cursor::read_wrapper_entry(context, &handle, directory.flags, method).await?;
+                if entry.is_none() {
+                    break;
+                }
+            }
+            directory.entries = Entries::Wrapped { handle, entry };
+        }
+        crate::store(destination, state)
+    })
+}
+
 fn dot(name: &[u8]) -> bool {
     matches!(name, b"." | b"..")
 }

@@ -30,11 +30,13 @@ pub(crate) fn register(registry: &mut Registry) {
                 MethodEntry::public("allowsNull", &[], |_, o, _| {
                     inspect(o, |ty: &ReflectedType| Value::Bool(allows_null(&ty.text)))
                 })
-                .tentative_return("bool"),
+                .tentative_return("bool")
+                .with_direct(|o, a| direct(o, a, |ty| Value::Bool(allows_null(&ty.text)))),
                 MethodEntry::public("__toString", &[], |_, o, _| {
                     inspect(o, |ty: &ReflectedType| Value::from(ty.text.as_str()))
                 })
-                .returning("string"),
+                .returning("string")
+                .with_direct(|o, a| direct(o, a, |ty| Value::from(ty.text.as_str()))),
             ]
         },
         hooks: Some(&UNCLONEABLE),
@@ -49,13 +51,21 @@ pub(crate) fn register(registry: &mut Registry) {
                         Value::from(ty.text.trim_start_matches('?'))
                     })
                 })
-                .tentative_return("string"),
+                .tentative_return("string")
+                .with_direct(|o, a| {
+                    direct(o, a, |ty| Value::from(ty.text.trim_start_matches('?')))
+                }),
                 MethodEntry::public("isBuiltin", &[], |_, o, _| {
                     inspect(o, |ty: &ReflectedType| {
                         Value::Bool(is_builtin(ty.text.trim_start_matches('?')))
                     })
                 })
-                .tentative_return("bool"),
+                .tentative_return("bool")
+                .with_direct(|o, a| {
+                    direct(o, a, |ty| {
+                        Value::Bool(is_builtin(ty.text.trim_start_matches('?')))
+                    })
+                }),
             ]
         },
         ..ClassEntry::class("ReflectionNamedType")
@@ -145,4 +155,17 @@ pub(crate) fn allows_null(text: &str) -> bool {
 pub(crate) fn is_builtin(name: &str) -> bool {
     matches!(name, "mixed" | "void" | "never" | "iterable")
         || name != "static" && BUILTIN_ORDER.contains(&name)
+}
+
+fn direct(
+    object: &Object,
+    arguments: &[Option<Value>],
+    read: impl FnOnce(&ReflectedType) -> Value,
+) -> Option<Value> {
+    if !arguments.is_empty() {
+        return None;
+    }
+    let native = object.native.try_borrow().ok()?;
+    let ty = native.as_ref()?.downcast_ref::<ReflectedType>()?;
+    Some(read(ty))
 }

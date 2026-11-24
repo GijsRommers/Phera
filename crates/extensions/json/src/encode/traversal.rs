@@ -50,7 +50,7 @@ impl Container {
         self.owner.identity()
     }
 
-    pub(super) fn next_entry(&mut self) -> Option<(ArrayKey, Value)> {
+    pub(super) fn next_entry(&mut self) -> Option<(bool, ArrayKey, &Value)> {
         let entries = self.owner.entries();
         while let Some(position) = self.next {
             self.next = entries.next_position(position);
@@ -61,7 +61,9 @@ impl Container {
             {
                 continue;
             }
-            return Some((key, value.clone()));
+            let comma = self.wrote_entry;
+            self.wrote_entry = true;
+            return Some((comma, key, value));
         }
         None
     }

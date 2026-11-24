@@ -41,13 +41,14 @@ impl Display for ValueType {
                 Part::Type(ty) => ty,
             };
             let name = match ty {
-                Self::Mixed => "mixed",
+                Self::Mixed | Self::ExplicitMixed | Self::ImplicitMixed => "mixed",
                 Self::Null => "null",
                 Self::Bool => "bool",
                 Self::BoolLiteral(true) => "true",
                 Self::BoolLiteral(false) => "false",
                 Self::Int => "int",
                 Self::Float => "float",
+                Self::OverflowingInt => "float|int",
                 Self::String => "string",
                 Self::Array => "array",
                 Self::Iterable => "iterable",
@@ -104,8 +105,8 @@ impl Display for ValueType {
                     sequence(&mut parts, &generic.arguments, ", ", false);
                     continue;
                 }
-                Self::Union(types) | Self::Intersection(types) => {
-                    let union = matches!(ty, Self::Union(_));
+                Self::Union(types) | Self::BenevolentUnion(types) | Self::Intersection(types) => {
+                    let union = !matches!(ty, Self::Intersection(_));
                     if union
                         && let Some(names) =
                             types.iter().map(native_member).collect::<Option<Vec<_>>>()

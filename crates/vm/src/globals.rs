@@ -2,18 +2,19 @@
 
 use std::{cell::RefCell, rc::Rc};
 
+use foldhash::fast::RandomState;
 use indexmap::IndexMap;
 use phera_value::Value;
 
 /// A vacant entry reserves the symbol's place while its value is in a frame.
 pub(crate) struct Globals {
-    values: IndexMap<String, Option<Value>>,
+    values: IndexMap<String, Option<Value>, RandomState>,
 }
 
 impl Globals {
     pub(crate) fn new() -> Self {
         Self {
-            values: IndexMap::new(),
+            values: IndexMap::with_hasher(RandomState::default()),
         }
     }
 

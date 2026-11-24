@@ -39,6 +39,10 @@ pub(crate) enum PureNative {
     Ord,
     Chr,
     Abs,
+    ArrayKeys,
+    ArrayValues,
+    ArrayMerge,
+    Strtoupper,
 }
 
 impl PureNative {
@@ -61,6 +65,10 @@ impl PureNative {
             "ord" => Self::Ord,
             "chr" => Self::Chr,
             "abs" => Self::Abs,
+            "array_keys" => Self::ArrayKeys,
+            "array_values" => Self::ArrayValues,
+            "array_merge" => Self::ArrayMerge,
+            "strtoupper" => Self::Strtoupper,
             _ => return None,
         })
     }
@@ -92,9 +100,13 @@ impl NativeLink {
             NativeFn::Async(_) => Handler::Select(registry.sync_selector(entry.name)?),
         };
         let mut masks = [TypeMask::default(); 4];
-        // A selector can validate a positional window containing variadic
-        // arguments. The signature still rejects references and coercions.
-        let variadic = matches!(handler, Handler::Select(_))
+        // A sync handler or selector can validate a positional window containing
+        // variadic arguments when none of the parameters are by-reference. The
+        // signature still rejects references and coercions.
+        let variadic = entry
+            .params
+            .iter()
+            .all(|parameter| !parameter.by_ref)
             .then(|| entry.params.last().filter(|parameter| parameter.variadic))
             .flatten();
         for (index, mask) in masks.iter_mut().enumerate() {

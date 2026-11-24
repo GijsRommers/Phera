@@ -37,9 +37,12 @@ impl Vm {
         steps: impl Iterator<Item = Step>,
     ) -> Result<Option<DimensionPath>, NativeError> {
         let mut value = root;
-        let mut steps = steps;
+        let mut steps = steps.peekable();
         while let Some(step) = steps.next() {
-            let current = value.deref().clone();
+            let current = match value {
+                Value::Reference(cell) => cell.borrow().clone(),
+                other => other,
+            };
             value = match (current, step) {
                 (Value::Object(object), Step::Index(_) | Step::Append)
                     if has_dimension(&object) =>
@@ -55,6 +58,11 @@ impl Vm {
                     }));
                 }
                 (Value::Array(array), Step::Index(register)) => {
+                    // If this is the final step on a plain array, it can never reach
+                    // an overloaded `ArrayAccess` object — skip key hashing and clone.
+                    if steps.peek().is_none() {
+                        return Ok(None);
+                    }
                     let Ok(key) = ArrayKey::from_value(&self.operand(register)) else {
                         return Ok(None);
                     };

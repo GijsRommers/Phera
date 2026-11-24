@@ -159,7 +159,7 @@ impl Vm {
         };
         let named = view.details.and_then(|details| details.named.as_ref());
         let extra = match named {
-            Some(name) => self.check_named_send(&view, slot, name)?,
+            Some(name) => self.check_named_send(&view, index, slot, name)?,
             None => false,
         };
         let mut deferred = None;
@@ -200,15 +200,19 @@ impl Vm {
     }
 
     /// Named sends may overwrite a parameter or a previous variadic key.
+    /// `index` was already resolved by `CallView::argument_index`, so an extra
+    /// variadic argument is simply past the declared non-variadic parameters.
     #[cold]
     #[inline(never)]
     fn check_named_send(
         &self,
         view: &CallView<'_>,
+        index: usize,
         slot: usize,
         name: &PhpString,
     ) -> Result<bool, NativeError> {
-        let extra = view.parameters().position_of(name.as_bytes()).is_none();
+        let parameters = view.parameters();
+        let extra = index >= parameters.len() || parameters.is_variadic(index);
         let duplicate = match extra {
             true => view
                 .details
