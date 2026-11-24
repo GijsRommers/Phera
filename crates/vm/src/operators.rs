@@ -276,45 +276,19 @@ impl Vm {
     }
 }
 
-/// The common scalar cases do not need PHP's general coercion machinery.
-#[inline(always)]
-pub(crate) fn fast_binary(operator: BinaryOp, left: &Value, right: &Value) -> Option<Value> {
+/// Out-of-line numeric fast path for floats, mixed int/float, and division so
+/// `scalar_step` stays lean for integer-only hot loops.
+#[inline(never)]
+pub(crate) fn fast_binary_non_int(
+    operator: BinaryOp,
+    left: &Value,
+    right: &Value,
+) -> Option<Value> {
     use BinaryOp::{
         Add, Divide, Equal, Greater, GreaterEqual, Identical, Less, LessEqual, Modulo, Multiply,
         NotEqual, NotIdentical, Subtract,
     };
     match (left, right) {
-        (Value::Int(left), Value::Int(right)) => Some(match operator {
-            Add => left
-                .checked_add(*right)
-                .map(Value::Int)
-                .unwrap_or_else(|| overflow_value(OverflowOperation::Add, *left, *right)),
-            Subtract => left
-                .checked_sub(*right)
-                .map(Value::Int)
-                .unwrap_or_else(|| overflow_value(OverflowOperation::Subtract, *left, *right)),
-            Multiply => left
-                .checked_mul(*right)
-                .map(Value::Int)
-                .unwrap_or_else(|| overflow_value(OverflowOperation::Multiply, *left, *right)),
-            Divide if *right != 0 => {
-                if *left == i64::MIN && *right == -1 {
-                    Value::Float(-(*left as f64))
-                } else if *left % *right == 0 {
-                    Value::Int(*left / *right)
-                } else {
-                    Value::Float(*left as f64 / *right as f64)
-                }
-            }
-            Modulo if *right != 0 => Value::Int(if *right == -1 { 0 } else { left % right }),
-            Less => Value::Bool(left < right),
-            LessEqual => Value::Bool(left <= right),
-            Greater => Value::Bool(left > right),
-            GreaterEqual => Value::Bool(left >= right),
-            Equal | Identical => Value::Bool(left == right),
-            NotEqual | NotIdentical => Value::Bool(left != right),
-            _ => return None,
-        }),
         (Value::Float(left), Value::Float(right)) => Some(match operator {
             Add => Value::Float(left + right),
             Subtract => Value::Float(left - right),
@@ -364,7 +338,72 @@ pub(crate) fn fast_binary(operator: BinaryOp, left: &Value, right: &Value) -> Op
                 _ => return None,
             })
         }
+        (Value::Int(left), Value::Int(right)) => Some(match operator {
+            Add => left
+                .checked_add(*right)
+                .map(Value::Int)
+                .unwrap_or_else(|| overflow_value(OverflowOperation::Add, *left, *right)),
+            Subtract => left
+                .checked_sub(*right)
+                .map(Value::Int)
+                .unwrap_or_else(|| overflow_value(OverflowOperation::Subtract, *left, *right)),
+            Multiply => left
+                .checked_mul(*right)
+                .map(Value::Int)
+                .unwrap_or_else(|| overflow_value(OverflowOperation::Multiply, *left, *right)),
+            Divide if *right != 0 => {
+                if *left == i64::MIN && *right == -1 {
+                    Value::Float(-(*left as f64))
+                } else if *left % *right == 0 {
+                    Value::Int(*left / *right)
+                } else {
+                    Value::Float(*left as f64 / *right as f64)
+                }
+            }
+            Modulo if *right != 0 => Value::Int(if *right == -1 { 0 } else { left % right }),
+            Less => Value::Bool(left < right),
+            LessEqual => Value::Bool(left <= right),
+            Greater => Value::Bool(left > right),
+            GreaterEqual => Value::Bool(left >= right),
+            Equal | Identical => Value::Bool(left == right),
+            NotEqual | NotIdentical => Value::Bool(left != right),
+            _ => return None,
+        }),
         _ => None,
+    }
+}
+
+/// The common scalar cases do not need PHP's general coercion machinery.
+#[inline(always)]
+pub(crate) fn fast_binary(operator: BinaryOp, left: &Value, right: &Value) -> Option<Value> {
+    use BinaryOp::{
+        Add, Equal, Greater, GreaterEqual, Identical, Less, LessEqual, Modulo, Multiply, NotEqual,
+        NotIdentical, Subtract,
+    };
+    match (left, right) {
+        (Value::Int(l), Value::Int(r)) => Some(match operator {
+            Add => l
+                .checked_add(*r)
+                .map(Value::Int)
+                .unwrap_or_else(|| overflow_value(OverflowOperation::Add, *l, *r)),
+            Subtract => l
+                .checked_sub(*r)
+                .map(Value::Int)
+                .unwrap_or_else(|| overflow_value(OverflowOperation::Subtract, *l, *r)),
+            Multiply => l
+                .checked_mul(*r)
+                .map(Value::Int)
+                .unwrap_or_else(|| overflow_value(OverflowOperation::Multiply, *l, *r)),
+            Modulo if *r != 0 => Value::Int(if *r == -1 { 0 } else { l % r }),
+            Less => Value::Bool(l < r),
+            LessEqual => Value::Bool(l <= r),
+            Greater => Value::Bool(l > r),
+            GreaterEqual => Value::Bool(l >= r),
+            Equal | Identical => Value::Bool(l == r),
+            NotEqual | NotIdentical => Value::Bool(l != r),
+            _ => return fast_binary_non_int(operator, left, right),
+        }),
+        _ => fast_binary_non_int(operator, left, right),
     }
 }
 

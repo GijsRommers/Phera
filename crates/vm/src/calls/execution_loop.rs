@@ -26,7 +26,7 @@ use crate::calls::frame::Frame;
 use crate::calls::registers::{Registers, WINDOW};
 use crate::classes::ClassTable;
 use crate::code_table::CodeTable;
-use crate::fast::{ScalarStep, array_index_step, assign_literal, load_const_step, scalar_step};
+use crate::fast::{ScalarStep, array_index_step, assign_literal, scalar_step};
 
 /// How many loop rounds or calls a script may run before it lets other tasks
 /// on the same thread have a turn.
@@ -322,21 +322,16 @@ impl Machine<'_> {
             ip: frame.ip(),
         };
         let mut instructions = self.code.instructions(frame.function);
-        let mut constants: &[Value] = &self.code.cache(frame.function).constants;
         // Whether the frame's registers fit a window (see
         // `registers::WINDOW`): decided when the frame is entered, not per
         // instruction.
         let mut windowed = self.windowed(frame);
         loop {
-            let instruction = match self.run_simple::<GUARDED>(
-                instructions,
-                constants,
-                &mut position,
-                windowed,
-            ) {
-                Ok(instruction) => instruction,
-                Err(exit) => return exit,
-            };
+            let instruction =
+                match self.run_simple::<GUARDED>(instructions, &mut position, windowed) {
+                    Ok(instruction) => instruction,
+                    Err(exit) => return exit,
+                };
             match self.step::<GUARDED>(instruction, position) {
                 Step::Done(ip) => {
                     // In the guarded loop a step may have let go of the
@@ -357,7 +352,6 @@ impl Machine<'_> {
                     }
                     position = next;
                     instructions = self.code.instructions(next.frame.function);
-                    constants = &self.code.cache(next.frame.function).constants;
                     windowed = self.windowed(next.frame);
                 }
                 Step::Slow => {
@@ -377,7 +371,6 @@ impl Machine<'_> {
     fn run_simple<'code, const GUARDED: bool>(
         &mut self,
         instructions: &'code [Instruction],
-        constants: &[Value],
         position: &mut Position,
         windowed: bool,
     ) -> Result<&'code Instruction, LoopExit> {
@@ -412,9 +405,6 @@ impl Machine<'_> {
                     Instruction::FetchIndex {
                         dst, base, index, ..
                     } => array_index_step::<GUARDED, _>(dst, base, index, slots),
-                    Instruction::LoadConst { dst, constant } => {
-                        load_const_step::<GUARDED, _>(dst, constant, constants, slots)
-                    }
                     _ => ScalarStep::Fallback,
                 },
                 complete => complete,
@@ -648,7 +638,10 @@ impl Machine<'_> {
             }
             | Instruction::Unary { .. }
             | Instruction::Cast {
-                to: phera_bytecode::CastKind::String,
+                to:
+                    phera_bytecode::CastKind::String
+                    | phera_bytecode::CastKind::Int
+                    | phera_bytecode::CastKind::Float,
                 ..
             }
             | Instruction::JumpIfNull { .. }

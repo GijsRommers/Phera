@@ -69,7 +69,12 @@ pub(crate) fn value_step<const GUARDED: bool>(
             else {
                 return ScalarStep::Fallback;
             };
-            let result = quiet_binary(op, &left.deref(), &right.deref());
+            let left = left.deref();
+            let right = right.deref();
+            let result = crate::operators::fast_binary_non_int(op, &left, &right)
+                .or_else(|| quiet_binary(op, &left, &right));
+            drop(left);
+            drop(right);
             match result {
                 Some(value) => store::<GUARDED, _>(slots, dst, value),
                 None => ScalarStep::Fallback,
@@ -79,7 +84,11 @@ pub(crate) fn value_step<const GUARDED: bool>(
             let Some(Some(left)) = slots.get(lhs.index()) else {
                 return ScalarStep::Fallback;
             };
-            let result = quiet_binary(op, &left.deref(), &Value::Int(i64::from(rhs)));
+            let left = left.deref();
+            let right = Value::Int(i64::from(rhs));
+            let result = crate::operators::fast_binary_non_int(op, &left, &right)
+                .or_else(|| quiet_binary(op, &left, &right));
+            drop(left);
             match result {
                 Some(value) => store::<GUARDED, _>(slots, dst, value),
                 None => ScalarStep::Fallback,
@@ -155,6 +164,32 @@ pub(crate) fn value_step<const GUARDED: bool>(
         } => match cast_to_string(slots.get(src.index())) {
             Some(text) => store::<GUARDED, _>(slots, dst, text),
             None => ScalarStep::Fallback,
+        },
+        Instruction::Cast {
+            to: CastKind::Int,
+            dst,
+            src,
+        } => match slots.get(src.index()) {
+            Some(Some(Value::Float(value)))
+                if value.is_finite()
+                    && *value >= -9223372036854775808.0
+                    && *value < 9223372036854775808.0 =>
+            {
+                let value = *value as i64;
+                store::<GUARDED, _>(slots, dst, Value::Int(value))
+            }
+            _ => ScalarStep::Fallback,
+        },
+        Instruction::Cast {
+            to: CastKind::Float,
+            dst,
+            src,
+        } => match slots.get(src.index()) {
+            Some(Some(Value::Int(value))) => {
+                let value = *value as f64;
+                store::<GUARDED, _>(slots, dst, Value::Float(value))
+            }
+            _ => ScalarStep::Fallback,
         },
         Instruction::JumpIfNull { value, target } => jump_on_null(slots, value, target, true, ip),
         Instruction::JumpIfNotNull { value, target } => {
@@ -492,7 +527,9 @@ fn branch_on_binary<const WHEN: bool>(
     target: Target,
     ip: &mut usize,
 ) -> ScalarStep {
-    match quiet_binary(op, left, right) {
+    match crate::operators::fast_binary_non_int(op, left, right)
+        .or_else(|| quiet_binary(op, left, right))
+    {
         Some(value) => {
             if to_bool(&value) == WHEN {
                 *ip = target.index();

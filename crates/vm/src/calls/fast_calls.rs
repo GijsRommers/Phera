@@ -54,35 +54,24 @@ impl Machine<'_> {
         }
         let arguments = self.registers.window(from, count);
         let mut typed = facts.typed_parameters();
-        if typed == 0 {
-            for argument in arguments {
-                match argument {
-                    Some(value) if !value.is_reference() => {}
-                    _ => return Step::Slow,
-                }
-            }
-        } else {
-            for (index, (argument, mask)) in arguments
-                .iter()
-                .zip(facts.parameter_masks.iter())
-                .enumerate()
+        for (index, (argument, mask)) in arguments
+            .iter()
+            .zip(facts.parameter_masks.iter())
+            .enumerate()
+        {
+            let Some(value) = argument else {
+                return Step::Slow;
+            };
+            if value.is_reference()
+                || (typed & 1 != 0
+                    && !mask.intersects(crate::types::own_type(value))
+                    && !self.code.function(function).parameters[index]
+                        .ty
+                        .is_some_and(|declared| self.class_type_matches(function, declared, value)))
             {
-                let Some(value) = argument else {
-                    return Step::Slow;
-                };
-                if value.is_reference()
-                    || (typed & 1 != 0
-                        && !mask.intersects(crate::types::own_type(value))
-                        && !self.code.function(function).parameters[index]
-                            .ty
-                            .is_some_and(|declared| {
-                                self.class_type_matches(function, declared, value)
-                            }))
-                {
-                    return Step::Slow;
-                }
-                typed >>= 1;
+                return Step::Slow;
             }
+            typed >>= 1;
         }
         self.registers.grow_to(base + size);
         for index in 0..count {

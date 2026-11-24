@@ -60,7 +60,10 @@ impl Machine<'_> {
             }
             | Instruction::Unary { .. }
             | Instruction::Cast {
-                to: phera_bytecode::CastKind::String,
+                to:
+                    phera_bytecode::CastKind::String
+                    | phera_bytecode::CastKind::Int
+                    | phera_bytecode::CastKind::Float,
                 ..
             }
             | Instruction::JumpIfNull { .. }
