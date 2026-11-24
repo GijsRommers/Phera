@@ -289,6 +289,27 @@ impl OrderedMap {
         value
     }
 
+    /// Unsets the live entry with integer key `key`.
+    #[inline]
+    pub fn remove_int(&mut self, key: i64) -> Option<Value> {
+        let position = self.find_int(key)?;
+        self.remove_at(position).1
+    }
+
+    /// Unsets the live entry with non-numeric interned string key `key`.
+    #[inline]
+    pub fn remove_interned(&mut self, key: &'static InternedStr) -> Option<Value> {
+        let position = self.find_interned(key)?;
+        self.remove_at(position).1
+    }
+
+    /// Unsets the live entry with non-numeric string key bytes `bytes`.
+    #[inline]
+    pub fn remove_str_bytes(&mut self, bytes: &[u8]) -> Option<Value> {
+        let position = self.find_str_bytes(bytes)?;
+        self.remove_at(position).1
+    }
+
     /// Unsets the entry at a live `position` and returns its key and value.
     pub fn remove_at(&mut self, position: usize) -> (ArrayKey, Option<Value>) {
         if let Some(index) = &mut self.index {

@@ -42,6 +42,7 @@ impl Mysql {
     pub async fn select_db(&mut self, name: &str) -> Result<(), DbError> {
         self.check_pending().await?;
         self.db_changed = true;
+        self.session_dirty = true;
         let name = identifier(name);
         self.connection()?
             .query_drop(format!("USE {name}"))
@@ -51,6 +52,7 @@ impl Mysql {
 
     pub async fn set_charset(&mut self, name: &str) -> Result<(), DbError> {
         self.check_pending().await?;
+        self.session_dirty = true;
         if name.is_empty() || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
             return Err(DbError {
                 state: "HY000".into(),
@@ -74,6 +76,7 @@ impl Mysql {
         // The pool key identifies the original user. COM_CHANGE_USER changes
         // the credentials the client would use even on its next reset.
         self.reusable = false;
+        self.session_dirty = true;
         let options = ChangeUserOpts::new()
             .with_user(Some(user))
             .with_pass(Some(password))
@@ -83,7 +86,16 @@ impl Mysql {
 
     pub async fn prepare_native(&mut self, sql: &[u8]) -> Result<Statement, DbError> {
         self.check_pending().await?;
-        self.connection()?.prep(sql).await.map_err(error)
+        if !self.session_dirty && !super::is_clean_dml_sql(sql) {
+            self.session_dirty = true;
+        }
+        match self.connection()?.prep(sql).await {
+            Ok(stmt) => Ok(stmt),
+            Err(cause) => {
+                self.session_dirty = true;
+                Err(error(cause))
+            }
+        }
     }
 
     pub async fn execute_native(
@@ -92,20 +104,38 @@ impl Mysql {
         params: Params,
     ) -> Result<Outcome, DbError> {
         self.check_pending().await?;
-        let mut result = self
-            .connection()?
-            .exec_iter(statement, params)
-            .await
-            .map_err(error)?;
-        let columns = result.columns_ref().to_vec();
-        let reply = Reply {
-            affected: result.affected_rows(),
-            insert_id: result.last_insert_id().unwrap_or(0),
-            info: result.info().into_owned(),
-            warnings: result.warnings(),
+        let outcome = {
+            let mut result = match self.connection()?.exec_iter(statement, params).await {
+                Ok(result) => result,
+                Err(cause) => {
+                    self.session_dirty = true;
+                    return Err(error(cause));
+                }
+            };
+            let columns = result.columns_ref().to_vec();
+            let reply = Reply {
+                affected: result.affected_rows(),
+                insert_id: result.last_insert_id().unwrap_or(0),
+                info: result.info().into_owned(),
+                warnings: result.warnings(),
+            };
+            let rows: Result<Vec<Row>, _> = result.collect().await;
+            let dropped = result.drop_result().await;
+            match (rows, dropped) {
+                (Ok(rows), Ok(())) => Ok((columns, rows, reply)),
+                (Err(cause), _) | (_, Err(cause)) => Err(error(cause)),
+            }
         };
-        let rows: Vec<Row> = result.collect().await.map_err(error)?;
-        result.drop_result().await.map_err(error)?;
+        let (columns, rows, reply) = match outcome {
+            Ok(done) => done,
+            Err(cause) => {
+                self.session_dirty = true;
+                return Err(cause);
+            }
+        };
+        if reply.insert_id != 0 {
+            self.session_dirty = true;
+        }
         Ok(Outcome {
             rows: RawRows::Mysql {
                 columns,
@@ -123,6 +153,7 @@ impl Mysql {
         owner: &Arc<()>,
     ) -> Result<Outcome, DbError> {
         self.check_pending().await?;
+        self.session_dirty = true;
         if !self.db_changed && super::contains_use_keyword(&sql) {
             self.db_changed = true;
         }
@@ -150,47 +181,72 @@ impl Mysql {
         if !self.db_changed && super::contains_use_keyword(sql) {
             self.db_changed = true;
         }
+        if multiple || (!self.session_dirty && !super::is_clean_dml_sql(sql)) {
+            self.session_dirty = true;
+        }
         if !multiple {
             self.validate_native_text(sql).await?;
         }
-        let mut result = self.connection()?.query_iter(sql).await.map_err(error)?;
-        if multiple {
-            let mut outcomes = Vec::new();
-            loop {
-                // is_empty() does not distinguish a pending OK packet from the end
-                // of the batch and can also hide a queued server error.
-                let set = match result.stream::<Row>().await {
-                    Ok(Some(set)) => set,
-                    Ok(None) => break,
-                    Err(cause) if outcomes.is_empty() => return Err(error(cause)),
-                    Err(cause) => {
-                        outcomes.push(Err(error(cause)));
-                        break;
-                    }
-                };
-                let columns = set.columns_ref().to_vec();
-                let reply = Reply {
-                    affected: set.affected_rows(),
-                    insert_id: set.last_insert_id().unwrap_or(0),
-                    info: set.info().into_owned(),
-                    warnings: set.get_warnings(),
-                };
-                let rows = set.try_collect().await.map_err(error)?;
-                outcomes.push(Ok(buffered_outcome(columns, rows, reply)));
+        let single = {
+            let mut result = match self.connection()?.query_iter(sql).await {
+                Ok(result) => result,
+                Err(cause) => {
+                    self.session_dirty = true;
+                    return Err(error(cause));
+                }
+            };
+            if multiple {
+                let mut outcomes = Vec::new();
+                loop {
+                    // is_empty() does not distinguish a pending OK packet from the end
+                    // of the batch and can also hide a queued server error.
+                    let set = match result.stream::<Row>().await {
+                        Ok(Some(set)) => set,
+                        Ok(None) => break,
+                        Err(cause) if outcomes.is_empty() => return Err(error(cause)),
+                        Err(cause) => {
+                            outcomes.push(Err(error(cause)));
+                            break;
+                        }
+                    };
+                    let columns = set.columns_ref().to_vec();
+                    let reply = Reply {
+                        affected: set.affected_rows(),
+                        insert_id: set.last_insert_id().unwrap_or(0),
+                        info: set.info().into_owned(),
+                        warnings: set.get_warnings(),
+                    };
+                    let rows = set.try_collect().await.map_err(error)?;
+                    outcomes.push(Ok(buffered_outcome(columns, rows, reply)));
+                }
+                return Ok(outcomes);
             }
-            return Ok(outcomes);
-        }
 
-        let columns = result.columns_ref().to_vec();
-        let mut reply = Reply {
-            affected: result.affected_rows(),
-            insert_id: result.last_insert_id().unwrap_or(0),
-            info: result.info().into_owned(),
-            warnings: result.warnings(),
+            let columns = result.columns_ref().to_vec();
+            let mut reply = Reply {
+                affected: result.affected_rows(),
+                insert_id: result.last_insert_id().unwrap_or(0),
+                info: result.info().into_owned(),
+                warnings: result.warnings(),
+            };
+            let rows = result.collect().await;
+            reply.warnings = result.warnings();
+            let dropped = result.drop_result().await;
+            match (rows, dropped) {
+                (Ok(rows), Ok(())) => Ok((columns, rows, reply)),
+                (Err(cause), _) | (_, Err(cause)) => Err(error(cause)),
+            }
         };
-        let rows = result.collect().await.map_err(error)?;
-        reply.warnings = result.warnings();
-        result.drop_result().await.map_err(error)?;
+        let (columns, rows, reply) = match single {
+            Ok(done) => done,
+            Err(cause) => {
+                self.session_dirty = true;
+                return Err(cause);
+            }
+        };
+        if reply.insert_id != 0 {
+            self.session_dirty = true;
+        }
         Ok(vec![Ok(buffered_outcome(columns, rows, reply))])
     }
 

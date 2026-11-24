@@ -69,9 +69,51 @@ pub(crate) fn value_step<const GUARDED: bool>(
             else {
                 return ScalarStep::Fallback;
             };
-            let result = quiet_binary(op, &left.deref(), &right.deref());
+            let left = left.deref();
+            let right = right.deref();
+            let result = crate::operators::fast_numeric_binary(op, &left, &right)
+                .or_else(|| quiet_binary(op, &left, &right));
+            drop(left);
+            drop(right);
             match result {
                 Some(value) => store::<GUARDED, _>(slots, dst, value),
+                None => ScalarStep::Fallback,
+            }
+        }
+        Instruction::BinaryInt { op, dst, lhs, rhs } => {
+            let Some(Some(left)) = slots.get(lhs.index()) else {
+                return ScalarStep::Fallback;
+            };
+            let left = left.deref();
+            let right = Value::Int(i64::from(rhs));
+            let result = crate::operators::fast_numeric_binary(op, &left, &right)
+                .or_else(|| quiet_binary(op, &left, &right));
+            drop(left);
+            match result {
+                Some(value) => store::<GUARDED, _>(slots, dst, value),
+                None => ScalarStep::Fallback,
+            }
+        }
+        Instruction::AssignOp {
+            op: BinaryOp::Concat,
+            local,
+            src,
+        } if local != src => assign_concat_plain(slots, local, src),
+        Instruction::AssignOp { op, local, src } if op != BinaryOp::Concat => {
+            let (Some(Some(left)), Some(Some(right))) =
+                (slots.get(local.index()), slots.get(src.index()))
+            else {
+                return ScalarStep::Fallback;
+            };
+            if left.is_reference() {
+                return ScalarStep::Fallback;
+            }
+            let right = right.deref();
+            let result = crate::operators::fast_numeric_binary(op, left, &right)
+                .or_else(|| quiet_binary(op, left, &right));
+            drop(right);
+            match result {
+                Some(value) => store::<GUARDED, _>(slots, local, value),
                 None => ScalarStep::Fallback,
             }
         }
@@ -141,6 +183,32 @@ pub(crate) fn value_step<const GUARDED: bool>(
             Some(text) => store::<GUARDED, _>(slots, dst, text),
             None => ScalarStep::Fallback,
         },
+        Instruction::Cast {
+            to: CastKind::Int,
+            dst,
+            src,
+        } => match slots.get(src.index()) {
+            Some(Some(Value::Float(value)))
+                if value.is_finite()
+                    && *value >= -9223372036854775808.0
+                    && *value < 9223372036854775808.0 =>
+            {
+                let value = *value as i64;
+                store::<GUARDED, _>(slots, dst, Value::Int(value))
+            }
+            _ => ScalarStep::Fallback,
+        },
+        Instruction::Cast {
+            to: CastKind::Float,
+            dst,
+            src,
+        } => match slots.get(src.index()) {
+            Some(Some(Value::Int(value))) => {
+                let value = *value as f64;
+                store::<GUARDED, _>(slots, dst, Value::Float(value))
+            }
+            _ => ScalarStep::Fallback,
+        },
         Instruction::JumpIfNull { value, target } => jump_on_null(slots, value, target, true, ip),
         Instruction::JumpIfNotNull { value, target } => {
             jump_on_null(slots, value, target, false, ip)
@@ -172,6 +240,56 @@ pub(crate) fn value_step<const GUARDED: bool>(
             }
         }
         _ => ScalarStep::Fallback,
+    }
+}
+
+/// `$local .= $src` in-place for plain non-reference strings without leaving
+/// `Machine::run` or allocating a temporary string copy of `$src`.
+#[inline(always)]
+fn assign_concat_plain(slots: &mut [Option<Value>], local: Reg, src: Reg) -> ScalarStep {
+    let interned: Option<&'static [u8]> = match slots.get(src.index()) {
+        Some(Some(Value::InternedStr(s))) => Some(s.as_bytes()),
+        Some(Some(Value::String(_))) => None,
+        _ => return ScalarStep::Fallback,
+    };
+    if let Some(bytes) = interned {
+        match slots.get_mut(local.index()) {
+            Some(Some(slot @ Value::InternedStr(_))) => {
+                let Value::InternedStr(existing) = *slot else {
+                    unreachable!()
+                };
+                let mut owned = existing.to_php_string();
+                owned.push_bytes(bytes);
+                *slot = Value::String(owned);
+                ScalarStep::Complete
+            }
+            Some(Some(Value::String(existing))) => {
+                existing.push_bytes(bytes);
+                ScalarStep::Complete
+            }
+            _ => ScalarStep::Fallback,
+        }
+    } else {
+        let Some(Some(Value::String(src_str))) = slots.get(src.index()) else {
+            return ScalarStep::Fallback;
+        };
+        let src_cloned = src_str.clone();
+        match slots.get_mut(local.index()) {
+            Some(Some(slot @ Value::InternedStr(_))) => {
+                let Value::InternedStr(existing) = *slot else {
+                    unreachable!()
+                };
+                let mut owned = existing.to_php_string();
+                owned.push_bytes(src_cloned.as_bytes());
+                *slot = Value::String(owned);
+                ScalarStep::Complete
+            }
+            Some(Some(Value::String(existing))) => {
+                existing.push_bytes(src_cloned.as_bytes());
+                ScalarStep::Complete
+            }
+            _ => ScalarStep::Fallback,
+        }
     }
 }
 
@@ -288,17 +406,12 @@ fn array_element(slots: &[Option<Value>], base: Reg, index: Reg, mode: FetchMode
         return None;
     }
     match slots.get(base.index())? {
-        Some(Value::Array(array)) => {
-            let found = match key {
-                Value::Int(integer) => array.get_int(*integer),
-                Value::InternedStr(string) => array.get_interned(string),
-                Value::String(string) => array.get_str(string),
-                _ => unreachable!("checked above"),
-            };
-            match found {
-                Some(value) => Some(value.deref().clone()),
-                None if quiet => Some(Value::Null),
-                None => None,
+        Some(Value::Array(array)) => array_lookup_key(array, key, quiet),
+        Some(Value::Reference(cell)) => {
+            let borrowed = cell.try_borrow().ok()?;
+            match &*borrowed {
+                Value::Array(array) => array_lookup_key(array, key, quiet),
+                _ => None,
             }
         }
         Some(Value::InternedStr(string)) if mode != FetchMode::Destructure => {
@@ -309,6 +422,21 @@ fn array_element(slots: &[Option<Value>], base: Reg, index: Reg, mode: FetchMode
         }
         None | Some(Value::Null) if quiet => Some(Value::Null),
         _ => None,
+    }
+}
+
+#[inline(always)]
+fn array_lookup_key(array: &PhpArray, key: &Value, quiet: bool) -> Option<Value> {
+    let found = match key {
+        Value::Int(integer) => array.get_int(*integer),
+        Value::InternedStr(string) => array.get_interned(string),
+        Value::String(string) => array.get_str(string),
+        _ => unreachable!("checked above"),
+    };
+    match found {
+        Some(value) => Some(crate::fast::duplicate(&value.deref())),
+        None if quiet => Some(Value::Null),
+        None => None,
     }
 }
 
@@ -417,7 +545,9 @@ fn branch_on_binary<const WHEN: bool>(
     target: Target,
     ip: &mut usize,
 ) -> ScalarStep {
-    match quiet_binary(op, left, right) {
+    match crate::operators::fast_numeric_binary(op, left, right)
+        .or_else(|| quiet_binary(op, left, right))
+    {
         Some(value) => {
             if to_bool(&value) == WHEN {
                 *ip = target.index();

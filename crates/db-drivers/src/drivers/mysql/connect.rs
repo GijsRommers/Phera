@@ -17,6 +17,7 @@ impl Mysql {
             let mut options = OptsBuilder::default()
                 .ip_or_hostname(dsn.get("host", "localhost"))
                 .tcp_port(port)
+                .tcp_nodelay(true)
                 .user(Some(user))
                 .pass(Some(password))
                 .db_name(Some(dsn.get("dbname", "")))
@@ -28,6 +29,8 @@ impl Mysql {
             }
             if !settings.multiple {
                 options = options.stmt_cache_size(0);
+            } else {
+                options = options.stmt_cache_size(32);
             }
             if let Some(tls) = &settings.ssl {
                 options = options.ssl_opts(tls::options(tls).await?);
@@ -85,6 +88,7 @@ impl Mysql {
             last_insert_id: 0,
             pending_exec_rows: false,
             db_changed: false,
+            session_dirty: false,
             reset_sql_with_db,
             reset_sql_keep_db,
             charset,

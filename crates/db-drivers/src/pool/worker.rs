@@ -61,7 +61,9 @@ impl Slots {
             .enumerate()
             .filter_map(|(index, slot)| Some((index, slot.as_ref()?)))
             .filter(|(_, idle)| matches(idle))
-            .min_by_key(|(_, idle)| idle.returned)?;
+            // LIFO keeps the hottest prepared-statement caches active and lets
+            // cold connections expire first.
+            .max_by_key(|(_, idle)| idle.returned)?;
         self.free.push(index);
         self.connections[index].take()
     }
@@ -179,7 +181,9 @@ impl Worker {
                     drop(reclaim);
                 } else {
                     self.idle().insert(idle);
-                    self.changed.notify_one();
+                    if self.admission.has_waiters_fast() {
+                        self.changed.notify_one();
+                    }
                 }
             }
         } else {

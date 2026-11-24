@@ -627,15 +627,14 @@ impl Machine<'_> {
             // Listed, so that the instructions further_step never takes do
             // not pay for a call to it on their way to the VM.
             Instruction::Binary { .. }
+            | Instruction::BinaryInt { .. }
             | Instruction::BinaryBranch { .. }
             | Instruction::BinaryBranchIf { .. }
             | Instruction::BinaryIntBranch { .. }
             | Instruction::BinaryIntBranchIf { .. }
+            | Instruction::AssignOp { .. }
             | Instruction::Unary { .. }
-            | Instruction::Cast {
-                to: phera_bytecode::CastKind::String,
-                ..
-            }
+            | Instruction::Cast { .. }
             | Instruction::JumpIfNull { .. }
             | Instruction::JumpIfNotNull { .. }
             | Instruction::NewArray { .. }
@@ -650,6 +649,7 @@ impl Machine<'_> {
             | Instruction::AssignPathFromLocal { .. }
             | Instruction::AssignOpPath { .. }
             | Instruction::IncDecPath { .. }
+            | Instruction::UnsetPath { .. }
             | Instruction::InitCall { .. }
             | Instruction::FetchClassName { .. }
             | Instruction::FetchClassConstant { .. }
