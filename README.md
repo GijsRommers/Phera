@@ -284,6 +284,9 @@ PDO (SQLite, MySQL, PostgreSQL, with TLS), random, redis, reflection, serialize,
 session, sodium, SPL, sqlite3, streams, tokenizer, zlib, bcmath, gmp, Unix process
 functions, and POSIX queries.
 
+Phera registers native metadata on first lookup and shares it across workers.
+Each worker prepares native class definitions and constant values on first use.
+
 Register an application stream wrapper with
 `stream_wrapper_register('virtual', VirtualFile::class)`. The registration
 belongs to the current request. `fopen()`, `file_get_contents()`, and

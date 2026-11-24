@@ -80,7 +80,7 @@ impl Vm {
             }
             Some(value) => Ok(value),
             None if needs_comparison_step(operator, &left, &right) => {
-                if self.classes.has_property_views
+                if self.classes.has_property_views()
                     && matches!(
                         (&*left, &*right),
                         (Value::Array(_), Value::Array(_)) | (Value::Object(_), Value::Object(_))

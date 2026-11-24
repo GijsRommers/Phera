@@ -320,7 +320,7 @@ impl Vm {
         fibers::register(registry);
     }
 
-    /// Start a fresh request with the worker's already linked built-ins.
+    /// Start a fresh request sharing the worker's built-in definitions.
     pub fn with_native_tables(native: &NativeTables) -> Self {
         let classes = classes::ClassTable::new(native.classes.clone(), native.linked.clone());
         let object_ids = classes.ids_handle();

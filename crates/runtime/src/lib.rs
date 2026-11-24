@@ -19,6 +19,7 @@ mod http;
 mod ini_tests;
 #[cfg(test)]
 mod native_parameter_tests;
+mod native_registry;
 #[cfg(test)]
 mod native_trace_tests;
 mod platform;
@@ -212,74 +213,8 @@ impl Runtime {
                 .clone()
                 .install_default();
         });
-        let mut registry = Registry::new();
-        registry.load(&phera_ext_core::Core);
-        registry.class(phera_extension_api::ClassEntry {
-            parent: Some("LogicException"),
-            ..phera_extension_api::ClassEntry::class("Phera\\NotSupportedException")
-        });
-        // Thrown by `Phera\snapshot()` when the state cannot be kept.
-        registry.class(phera_extension_api::ClassEntry {
-            parent: Some("RuntimeException"),
-            ..phera_extension_api::ClassEntry::class("Phera\\SnapshotException")
-        });
-        registry.load(&phera_ext_standard::Standard);
-        registry.load(&phera_ext_tokenizer::Tokenizer);
-        registry.load(&phera_ext_streams::Streams);
-        registry.load(&phera_ext_sockets::Sockets);
-        registry.load(&phera_ext_process::Process);
-        registry.load(&phera_ext_process::Posix);
-        registry.load(&phera_ext_zlib::Zlib);
-        registry.load(&phera_ext_bcmath::BcMath);
-        registry.load(&phera_ext_gmp::Gmp);
-        registry.load(&phera_ext_ctype::Ctype);
-        registry.load(&phera_ext_date::Date);
-        registry.load(&phera_ext_curl::Curl);
-        registry.load(&phera_ext_dom::Libxml);
-        registry.load(&phera_ext_dom::Dom);
-        registry.load(&phera_ext_xml::Xml);
-        registry.load(&phera_ext_xmlreader::XmlReader);
-        registry.load(&phera_ext_xmlwriter::XmlWriter);
-        registry.load(&phera_ext_fileinfo::FileInfo);
-        registry.load(&phera_ext_gd::Gd);
-        registry.load(&phera_ext_gd::ImageMetadata);
-        registry.load(&phera_ext_gd::ExifImageType);
-        registry.load(&phera_ext_filter::Filter);
-        registry.load(&phera_ext_intl::Intl);
-        registry.load(&phera_ext_json::Json);
-        registry.load(&phera_ext_mbstring::Mbstring);
-        registry.php_module("iconv");
-        registry.load(&phera_ext_pcre::Pcre);
-        registry.load(&phera_ext_pdo::Pdo);
-        registry.load(&phera_ext_mysqli::Mysqli);
-        registry.load(&phera_ext_pgsql::Pgsql);
-        registry.php_module("pdo_mysql");
-        registry.php_module("pdo_pgsql");
-        registry.php_module("pdo_sqlite");
-        registry.load(&phera_ext_sqlite3::Sqlite3);
-        registry.load(&phera_ext_redis::Redis);
-        registry.load(&phera_ext_http::Http);
-        http::register_request_parse_body(&mut registry);
-        registry.load(&phera_ext_hash::Hash);
-        registry.load(&phera_ext_openssl::OpenSsl);
-        registry.load(&phera_ext_sodium::Sodium);
-        registry.load(&phera_ext_random::Random);
-        registry.load(&phera_ext_reflection::Reflection);
-        registry.load(&phera_ext_serialize::Serialize);
-        Vm::register_fiber_classes(&mut registry);
-        Vm::register_state_forks(&mut registry);
-        registry.load(&phera_ext_spl::Spl);
-        registry.load(&phera_ext_simplexml::SimpleXml);
-        registry.load(&phera_ext_session::Session);
-        adapters::register(&mut registry);
-        websocket::register(&mut registry);
-        let mut web_registry = registry.clone();
-        phera_ext_http::register_web(&mut web_registry);
-        web_registry.sapi_ini("phera_server");
-        phera_ext_process::register_cli_process_control(&mut registry);
-        registry.constant("PHP_SAPI", Sapi::Cli.name());
-        let registry = Arc::new(registry);
-        let web_registry = Arc::new(web_registry);
+        let registry = native_registry::cli();
+        let web_registry = native_registry::web();
         Runtime {
             web_cache: CodeCache::new(web_registry.clone(), FileMode::Web),
             web_registry,
@@ -390,7 +325,18 @@ impl Runtime {
         arguments: &[String],
         sink: Option<Box<dyn OutputSink>>,
     ) -> Result<RunResult, RuntimeError> {
-        let compiled = self.cache.compile(path.as_ref().to_path_buf()).await;
+        let path = path.as_ref();
+        let compiled = self.cache.compile(path.to_path_buf()).await;
+        self.run_compiled_cli(compiled, path, arguments, sink).await
+    }
+
+    async fn run_compiled_cli(
+        &self,
+        compiled: Result<Arc<CompiledUnit>, RuntimeError>,
+        path: &Path,
+        arguments: &[String],
+        sink: Option<Box<dyn OutputSink>>,
+    ) -> Result<RunResult, RuntimeError> {
         let mut vm = self.new_cli_vm();
         if let Some(sink) = sink {
             vm.set_sink(sink);
@@ -411,7 +357,7 @@ impl Runtime {
         phera_ext_standard::set_cli_arguments(vm.state_mut(), arguments);
         let server = Rc::new(environment::cli_server(
             php_array(self.environment.iter()),
-            path.as_ref(),
+            path,
             arguments,
         ));
         phera_ext_filter::capture_server(vm.state_mut(), &server);
@@ -731,15 +677,19 @@ impl Runtime {
         sink: Option<Box<dyn OutputSink>>,
     ) -> Result<RunResult, RuntimeError> {
         let executor = single_threaded_executor()?;
+        let path = path.as_ref();
+        let compiled = self.cache.compile_cli_entry(path);
         // PHP values are not `Send`, so a script's future can only run on a
         // `LocalSet`, which keeps its tasks on this thread.
-        tokio::task::LocalSet::new().block_on(&executor, self.run_file(path, arguments, sink))
+        tokio::task::LocalSet::new().block_on(
+            &executor,
+            self.run_compiled_cli(compiled, path, arguments, sink),
+        )
     }
 
     /// The bytecode listing of a file, for `phera --dump`.
     pub fn dump_file_blocking(&self, path: impl AsRef<Path>) -> Result<String, RuntimeError> {
-        let unit = single_threaded_executor()?
-            .block_on(self.cache.compile(path.as_ref().to_path_buf()))?;
+        let unit = self.cache.compile_cli_entry(path.as_ref())?;
         Ok(unit.to_string())
     }
 

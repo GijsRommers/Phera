@@ -442,13 +442,16 @@ pub(crate) fn scalar_step<const GUARDED: bool, S: crate::calls::registers::Slots
             target,
         } => binary_branch_step::<GUARDED, true, _>(slots, op, lhs, rhs, target, ip),
         Instruction::AssignOp { op, local, src } => {
-            if let Some(left) = integer_at(slots, local)
-                && let Some(right) = integer_at(slots, src)
+            // Read the right operand before borrowing the local; `$x += $x`
+            // uses the old value on both sides.
+            if let Some(right) = integer_at(slots, src)
+                && let Some(Some(Value::Int(left))) = slots.slot_mut(local)
             {
-                return match integer_arithmetic(op, left, right) {
-                    Some(result) => store_integer::<GUARDED, _>(slots, local, result),
-                    None => ScalarStep::Fallback,
+                let Some(result) = integer_arithmetic(op, *left, right) else {
+                    return ScalarStep::Fallback;
                 };
+                *left = result;
+                return ScalarStep::Complete;
             }
             let (Some(Some(left)), Some(Some(right))) = (slots.slot(local), slots.slot(src)) else {
                 return ScalarStep::Fallback;
@@ -459,9 +462,10 @@ pub(crate) fn scalar_step<const GUARDED: bool, S: crate::calls::registers::Slots
             }
         }
         Instruction::IncDecLocal { mode, dst, local } => {
-            let Some(old) = integer_at(slots, local) else {
+            let Some(Some(Value::Int(local))) = slots.slot_mut(local) else {
                 return ScalarStep::Fallback;
             };
+            let old = *local;
             let step = match mode {
                 IncDec::PreIncrement | IncDec::PostIncrement => 1,
                 IncDec::PreDecrement | IncDec::PostDecrement => -1,
@@ -474,9 +478,7 @@ pub(crate) fn scalar_step<const GUARDED: bool, S: crate::calls::registers::Slots
                 IncDec::PostIncrement | IncDec::PostDecrement => old,
                 IncDec::PreIncrement | IncDec::PreDecrement => new,
             };
-            if store_integer::<GUARDED, _>(slots, local, new) == ScalarStep::Fallback {
-                return ScalarStep::Fallback;
-            }
+            *local = new;
             // The variable has changed, so this store must not fall back.
             // The result goes to a temporary that never holds an object;
             // were it to, its destructor would run at the next check.
