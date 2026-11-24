@@ -221,6 +221,12 @@ impl Sql {
         self.rewrite(|index, _, output| output.push_str(&placeholder(index)))
     }
 
+    /// Rewrites placeholders directly into the destination buffer without
+    /// allocating an intermediate `String` per parameter.
+    pub fn render_into(&self, mut placeholder: impl FnMut(usize, &mut String)) -> String {
+        self.rewrite(|index, _, output| placeholder(index, output))
+    }
+
     pub fn unbound_sql(&self) -> Cow<'_, str> {
         if self.escaped_questions {
             Cow::Owned(self.rewrite(|_, token, output| output.push_str(token)))
