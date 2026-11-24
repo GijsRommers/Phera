@@ -85,8 +85,10 @@ impl Site {
             return Resolved::NotFound;
         };
         let mut candidate = self.document_root.join(relative);
-        if candidate.is_dir() {
-            candidate.push("index.php");
+        match candidate.metadata() {
+            Ok(metadata) if metadata.is_dir() => candidate.push("index.php"),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return fallback(),
+            _ => {}
         }
         // Resolving symbolic links first means a link that points outside
         // the site cannot be used to read files outside it.

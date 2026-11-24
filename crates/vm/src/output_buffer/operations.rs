@@ -18,6 +18,7 @@ pub(crate) enum Operation {
     EndFlush,
     GetClean,
     GetFlush,
+    FinishResponse(&'static str),
     Shutdown,
 }
 
@@ -28,7 +29,7 @@ impl Operation {
             Self::Clean => 2,
             Self::Flush => 4,
             Self::EndClean | Self::GetClean => 8 | 2,
-            Self::EndFlush | Self::GetFlush | Self::Shutdown => 8,
+            Self::EndFlush | Self::GetFlush | Self::FinishResponse(_) | Self::Shutdown => 8,
         }
     }
 
@@ -49,6 +50,7 @@ impl Operation {
             Self::GetClean => OutputFunction::GetClean.name(),
             Self::GetFlush => OutputFunction::GetFlush.name(),
             Self::Chunk(caller) => return caller,
+            Self::FinishResponse(function) => function,
             Self::Shutdown => return None,
         })
     }
@@ -56,7 +58,12 @@ impl Operation {
     fn removes(self) -> bool {
         matches!(
             self,
-            Self::EndClean | Self::EndFlush | Self::GetClean | Self::GetFlush | Self::Shutdown
+            Self::EndClean
+                | Self::EndFlush
+                | Self::GetClean
+                | Self::GetFlush
+                | Self::FinishResponse(_)
+                | Self::Shutdown
         )
     }
 
@@ -179,6 +186,9 @@ impl Vm {
         if self.headers_pending() {
             self.finish_headers().await?;
         }
+        if self.output_writer.response_pending {
+            self.flush_response_body().await?;
+        }
         Ok(())
     }
 
@@ -204,6 +214,32 @@ impl Vm {
             }
         }
         self.output_writer.buffers.finalizing = false;
+    }
+
+    pub(crate) async fn finish_response_buffers(
+        &mut self,
+        function: &'static str,
+    ) -> Result<(), NativeError> {
+        if self.output_writer.buffers.running.is_some() {
+            // Closing the response inside its own output handler ends
+            // the script and discards the active buffers.
+            self.output_writer.buffers.lock_broken = true;
+            return Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
+                crate::request_end::FatalStop,
+            ))));
+        }
+        while let Some(index) = self.output_writer.buffers.len().checked_sub(1) {
+            let result = self
+                .apply_buffer(index, Operation::FinishResponse(function))
+                .await;
+            if let Err(error) = result {
+                self.output_writer.buffers.stack.clear();
+                self.output_writer.buffers.pending = None;
+                return Err(error);
+            }
+            self.drain_output().await?;
+        }
+        Ok(())
     }
 
     async fn apply_buffer(
@@ -297,12 +333,21 @@ impl Vm {
         match replacement {
             Ok(bytes) => {
                 if !operation.discards() {
-                    self.out_below(index, &bytes.unwrap_or(original));
+                    let bytes = bytes.unwrap_or(original);
+                    self.out_below(index, &bytes);
+                    if index == 0
+                        && !bytes.is_empty()
+                        && matches!(operation, Operation::Flush | Operation::EndFlush)
+                    {
+                        self.queue_response_flush();
+                    }
                 }
                 deprecation
             }
             Err(error) => {
-                if !operation.discards() && !matches!(operation, Operation::Shutdown) {
+                if matches!(operation, Operation::FinishResponse(_)) {
+                    self.out_below(0, &original);
+                } else if !operation.discards() && !matches!(operation, Operation::Shutdown) {
                     self.out_below(index, &original);
                 }
                 Err(error)

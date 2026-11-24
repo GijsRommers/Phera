@@ -13,6 +13,7 @@ mod forwarded;
 mod precompressed;
 mod site;
 mod static_file;
+mod web_output;
 
 use std::future::Future;
 use std::net::SocketAddr;
@@ -27,8 +28,8 @@ use phera_runtime::{
     WebWorker,
 };
 use phera_server::{
-    Handler, HandlerFactory, HttpVersion, Request, Response, Server, ServerConfig, WebSocketEvent,
-    WebSocketEventKind, WebSocketHub, WebSocketOutcome, WebSocketUpgrade,
+    Handler, HandlerFactory, HttpVersion, Request, Response, ResponseWriter, Server, ServerConfig,
+    WebSocketEvent, WebSocketEventKind, WebSocketHub, WebSocketOutcome, WebSocketUpgrade,
 };
 
 use crate::arguments::ServeOptions;
@@ -245,11 +246,19 @@ struct SiteHandlerFactory {
 
 impl HandlerFactory for SiteHandlerFactory {
     fn create(&self, worker_index: usize) -> Rc<dyn Handler> {
+        let compress = self.compress;
         Rc::new(SiteHandler {
             runtime: self
                 .runtime
                 .web_worker(worker_index)
-                .with_background_boots(),
+                .with_background_boots()
+                .with_web_output(move |encoding| {
+                    let writer = ResponseWriter::take_current()?;
+                    let encoding = encoding
+                        .filter(|_| compress)
+                        .map(|value| String::from_utf8_lossy(value).into_owned());
+                    Some(web_output::HttpOutput::new(writer, compress, encoding))
+                }),
             adapter: self.adapter,
             site: self.site.clone(),
             compress: self.compress,
@@ -375,30 +384,30 @@ impl SiteHandler {
                 .with_header("Phera-From-The-Top", from_the_top);
         }
         let site = self.site.clone();
-        let path = request.path.clone();
-        let conditions = Conditions::of(&request, self.compress);
-        let accept_encoding = request
-            .header("accept-encoding")
-            .filter(|_| self.compress)
-            .map(|value| String::from_utf8_lossy(value).into_owned());
+        let compress = self.compress;
         // Looking at the file system blocks, so it runs off the worker
         // thread, which must stay free for other requests.
-        let found = tokio::task::spawn_blocking(move || match site.resolve(&path) {
-            Resolved::Script(script) => Found::Script(script),
-            Resolved::File(file) => Found::Answer(static_file::answer(&site, &file, &conditions)),
+        let found = tokio::task::spawn_blocking(move || match site.resolve(&request.path) {
+            Resolved::Script(script) => Found::Script(script, request),
+            Resolved::File(file) => {
+                let conditions = Conditions::of(&request, compress);
+                Found::Answer(static_file::answer(&site, &file, &conditions))
+            }
             Resolved::NotFound => Found::Answer(Response::text(404, "Not Found\n")),
         })
         .await;
         match found {
-            Ok(Found::Script(script)) => {
-                let response = self
-                    .runtime
-                    .handle_request(
-                        &script,
-                        self.site.document_root(),
-                        to_runtime(request, &self.trusted_proxies),
-                    )
-                    .await;
+            Ok(Found::Script(script, request)) => {
+                let accept_encoding = if compress {
+                    request
+                        .header("accept-encoding")
+                        .map(|value| String::from_utf8_lossy(value).into_owned())
+                } else {
+                    None
+                };
+                let request = to_runtime(request, &self.trusted_proxies);
+                let root = self.site.document_root();
+                let response = self.runtime.handle_request(&script, root, request).await;
                 let response = from_runtime(response, &script);
                 if self.compress && response.upgrade.is_none() {
                     compress::php_response(response, accept_encoding.as_deref()).await
@@ -415,7 +424,7 @@ impl SiteHandler {
 /// What looking up a request path on disk led to.
 enum Found {
     /// A PHP file to run.
-    Script(std::path::PathBuf),
+    Script(std::path::PathBuf, Request),
     /// A response that is ready: a static file, or "not found".
     Answer(Response),
 }
