@@ -66,7 +66,7 @@ impl Vm {
                 }
                 // From here the classes are shared by every fork.
                 self.classes.build_method_tables();
-                let mut frozen = self.fork_vm().map_err(|refusal| {
+                let (mut frozen, pure_arrays) = self.fork_vm_for_snapshot().map_err(|refusal| {
                     let error = self.snapshot_exception(&refusal);
                     if let NativeError::Throw { message, .. } = &error {
                         self.snapshot.refused = Some(message.clone());
@@ -74,7 +74,7 @@ impl Vm {
                     error
                 })?;
                 frozen.snapshot.mode = SnapshotMode::Forked;
-                self.snapshot.taken = Some(Box::new(Snapshot { frozen }));
+                self.snapshot.taken = Some(Box::new(Snapshot::new(frozen, pure_arrays)));
                 Err(NativeError::Unwind(Unwind(Box::new(SnapshotStop))))
             }
         }

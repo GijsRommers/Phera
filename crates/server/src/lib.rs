@@ -1,11 +1,14 @@
 //! The Phera HTTP server: HTTP/1.1 on Tokio, thread per core.
 //!
 //! One worker thread per core. Each worker runs its own current-thread
-//! Tokio runtime with a `LocalSet` and its own listening socket bound with
-//! `SO_REUSEADDR` and `SO_REUSEPORT`, so the kernel spreads incoming
-//! connections over the workers. Each accepted connection is handled with
-//! `tokio::task::spawn_local` on the worker that accepted it; tasks never
-//! cross threads, so handlers are free to hold `Rc` and `RefCell` state.
+//! Tokio runtime with a `LocalSet`. With a single worker, it accepts directly
+//! from the listening socket with no extra hop. With multiple workers, a
+//! single listening socket accepts connections and hands each one to the
+//! worker with the fewest active connections (round-robin on ties), so
+//! keep-alive pools spread evenly across workers on every platform. Each
+//! connection is handled with `tokio::task::spawn_local` on its worker's
+//! runtime; tasks never cross threads, so handlers are free to hold `Rc` and
+//! `RefCell` state.
 //!
 //! The PHP runtime plugs in through [`Handler`] and [`HandlerFactory`]:
 //! the factory is `Send + Sync` and is called once per worker thread,

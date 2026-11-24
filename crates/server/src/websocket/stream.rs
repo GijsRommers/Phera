@@ -19,6 +19,7 @@ use tokio_tungstenite::tungstenite::protocol::{
 };
 
 use crate::handler::Handler;
+use crate::worker::ConnectionSlot;
 
 use super::hub::{OutboundCommand, RegisteredConnection, WebSocketHub};
 use super::{WebSocketConfig, WebSocketEvent, WebSocketEventKind, WebSocketUpgrade};
@@ -29,7 +30,7 @@ pub(crate) struct UpgradedContext {
     pub(crate) hub: Arc<WebSocketHub>,
     pub(crate) config: WebSocketConfig,
     pub(crate) shutdown: watch::Receiver<bool>,
-    pub(crate) tcp_slot: OwnedSemaphorePermit,
+    pub(crate) tcp_slot: ConnectionSlot,
     pub(crate) ws_slot: OwnedSemaphorePermit,
 }
 

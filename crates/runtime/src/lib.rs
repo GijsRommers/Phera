@@ -621,8 +621,30 @@ impl Runtime {
             None => None,
         };
 
-        let (mut vm, carried, warmup_before) =
+        struct ManagedVm(Vm);
+
+        impl std::ops::Deref for ManagedVm {
+            type Target = Vm;
+            fn deref(&self) -> &Self::Target {
+                &self.0
+            }
+        }
+
+        impl std::ops::DerefMut for ManagedVm {
+            fn deref_mut(&mut self) -> &mut Self::Target {
+                &mut self.0
+            }
+        }
+
+        impl Drop for ManagedVm {
+            fn drop(&mut self) {
+                self.0.recycle();
+            }
+        }
+
+        let (vm, carried, warmup_before) =
             self.prepare_worker_vm(worker, script, document_root, compiled.is_ok());
+        let mut vm = ManagedVm(vm);
         let forked = vm.is_fork();
         vm.set_local_loader(code);
         let uploads = http::define_superglobals(

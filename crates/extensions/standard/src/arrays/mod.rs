@@ -41,6 +41,7 @@ pub(crate) use phera_extension_api::zend_sort;
 
 pub(crate) fn register(registry: &mut Registry) {
     multisort::register(registry);
+    filter::register_sync_selectors(registry);
     search::register_sync_selectors(registry);
     let modules = [
         build::FUNCTIONS,

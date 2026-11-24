@@ -14,18 +14,109 @@
 //! the end of the script without the call tells the runtime that this
 //! application does not snapshot.
 
+use std::cell::RefCell;
+use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
+use foldhash::HashSet;
 use phera_bytecode::CompiledUnit;
 use phera_value::Value;
 
 use super::SnapshotMode;
 use crate::Vm;
+use crate::classes::{Class, ClassTable};
+use crate::code_table::CodeTable;
+use crate::function_table::FunctionTable;
+
+/// Maximum number of warm `CodeTable`/`ClassTable::local` pairs kept per
+/// snapshot so steady-state and burst requests (up to the 32-VM worker cap)
+/// skip cloning thousands of `FunctionFacts` + atomic `Arc`s while bounding
+/// idle memory.
+const MAX_RECYCLED_TABLES: usize = 32;
+
+/// Immutable-world tables reused across clean forks of the same snapshot.
+pub(crate) struct RecycledTables {
+    pub(crate) code: CodeTable,
+    pub(crate) local_classes: Vec<Option<Rc<Class>>>,
+}
+
+/// Carried by a forked `Vm` so its teardown can roll back and return tables
+/// back to the originating snapshot's recycle pool. Uses a `Weak` handle so a
+/// replaced snapshot frees immediately with zero cycles.
+pub(crate) struct CodeRecycle {
+    pool: Weak<RefCell<Vec<RecycledTables>>>,
+    units_len: usize,
+    functions_len: usize,
+    trait_names: Rc<Vec<(u32, Rc<str>)>>,
+    declared_classes: usize,
+    local_classes_len: usize,
+    aliases_len: usize,
+    user_functions: usize,
+}
+
+impl CodeRecycle {
+    pub(crate) fn try_return(
+        self,
+        code: &mut CodeTable,
+        classes: &mut ClassTable,
+        function_table: &FunctionTable,
+    ) {
+        let Some(pool) = self.pool.upgrade() else {
+            return;
+        };
+        let Ok(mut pool) = pool.try_borrow_mut() else {
+            return;
+        };
+        if pool.len() >= MAX_RECYCLED_TABLES {
+            return;
+        }
+        if code.units_len() < self.units_len
+            || code.functions_len() < self.functions_len
+            || classes.declared_len() < self.declared_classes
+            || classes.local_len() < self.local_classes_len
+        {
+            return;
+        }
+        let dirty_symbols_or_classes = classes.declared_len() != self.declared_classes
+            || classes.aliases_len() != self.aliases_len
+            || function_table.user_len() != self.user_functions;
+        code.rollback_to_snapshot(
+            self.units_len,
+            self.functions_len,
+            &self.trait_names,
+            dirty_symbols_or_classes,
+        );
+        let placeholder = code.detached();
+        let recycled_code = std::mem::replace(code, placeholder);
+        let local_classes =
+            classes.rollback_local_for_recycle(self.declared_classes, self.local_classes_len);
+        pool.push(RecycledTables {
+            code: recycled_code,
+            local_classes,
+        });
+    }
+}
 
 /// The state of a booted application, kept by one worker thread.
 pub struct Snapshot {
     /// Never run again: it is only copied.
     pub(crate) frozen: Vm,
+    /// Warm `CodeTable` and `ClassTable::local` tables returned by clean
+    /// finished forks of this snapshot.
+    pub(crate) recycled: Rc<RefCell<Vec<RecycledTables>>>,
+    /// Addresses of `Rc<PhpArray>`s in `frozen` proven transitively free of
+    /// objects, references, and resources.
+    pub(crate) pure_arrays: HashSet<usize>,
+}
+
+impl Snapshot {
+    pub(crate) fn new(frozen: Vm, pure_arrays: HashSet<usize>) -> Self {
+        Self {
+            frozen,
+            recycled: Rc::new(RefCell::new(Vec::new())),
+            pure_arrays,
+        }
+    }
 }
 
 /// How a boot run ended.
@@ -105,8 +196,20 @@ impl Snapshot {
     /// The state a request starts from: a copy that shares nothing a
     /// script can change with the snapshot or with other requests.
     pub fn fork(&self) -> Result<Vm, String> {
+        let recycled = self.recycled.borrow_mut().pop();
+        let recycle = CodeRecycle {
+            pool: Rc::downgrade(&self.recycled),
+            units_len: self.frozen.code.units_len(),
+            functions_len: self.frozen.code.functions_len(),
+            trait_names: self.frozen.code.trait_method_names(),
+            declared_classes: self.frozen.classes.declared_len(),
+            local_classes_len: self.frozen.classes.local_len(),
+            aliases_len: self.frozen.classes.aliases_len(),
+            user_functions: self.frozen.function_table.user_len(),
+        };
         self.frozen
-            .fork_vm()
+            .fork_vm_with(recycled, Some(&self.pure_arrays), Some(recycle))
+            .map(|(vm, _)| vm)
             .map_err(|refusal| format!("{}: {}", refusal.class, refusal.reason))
     }
 
@@ -119,5 +222,85 @@ impl Snapshot {
     /// of them changes, the snapshot is out of date.
     pub fn included_files(&self) -> Vec<String> {
         self.frozen.include_state.files().cloned().collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use phera_extension_api::Registry;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn snapshot_recycles_clean_tables_and_isolates_pure_arrays() {
+        let source = r#"<?php
+            define('APP_CFG', ['env' => 'prod', 'nested' => ['a' => 1, 'b' => 2]]);
+            class Boxed {
+                public const TAG = ['v' => 7];
+                public array $cfg;
+                public function __construct() {
+                    $this->cfg = ['nested' => ['x' => 10]];
+                }
+            }
+            $box = new Boxed();
+            Phera\snapshot();
+            $box->cfg['nested']['x'] += 5;
+            echo $box->cfg['nested']['x'], ':', APP_CFG['nested']['a'], ':', Boxed::TAG['v'];
+        "#;
+        let unit = Arc::new(phera_compiler::compile(source, "recycle-clean.php").unwrap());
+        let mut boot = Vm::new(Arc::new(Registry::new()));
+        let BootOutcome::Snapshot(snapshot) = boot.boot(unit).await else {
+            panic!("expected snapshot");
+        };
+        assert!(!snapshot.pure_arrays.is_empty());
+        assert_eq!(snapshot.recycled.borrow().len(), 0);
+
+        let mut first = snapshot.fork().unwrap();
+        assert_eq!(first.resume().await, 0);
+        assert_eq!(first.output, b"15:1:7");
+        first.recycle();
+        drop(first);
+        assert_eq!(snapshot.recycled.borrow().len(), 1);
+
+        let mut second = snapshot.fork().unwrap();
+        assert_eq!(snapshot.recycled.borrow().len(), 0);
+        assert_eq!(second.resume().await, 0);
+        assert_eq!(second.output, b"15:1:7");
+        second.recycle();
+        drop(second);
+        assert_eq!(snapshot.recycled.borrow().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn dirty_fork_rolls_back_and_isolates_recycled_tables() {
+        let source = r#"<?php
+            class Base {}
+            Phera\snapshot();
+            if (!empty($GLOBALS['DECLARE_EXTRA'])) {
+                class RequestOnly {}
+            }
+            echo class_exists('RequestOnly', false) ? 'yes' : 'no';
+        "#;
+        let unit = Arc::new(phera_compiler::compile(source, "recycle-dirty.php").unwrap());
+        let mut boot = Vm::new(Arc::new(Registry::new()));
+        let BootOutcome::Snapshot(snapshot) = boot.boot(unit).await else {
+            panic!("expected snapshot");
+        };
+
+        let mut dirty = snapshot.fork().unwrap();
+        dirty.set_global("DECLARE_EXTRA", Value::Bool(true));
+        assert_eq!(dirty.resume().await, 0);
+        assert_eq!(dirty.output, b"yes");
+        dirty.recycle();
+        drop(dirty);
+        assert_eq!(snapshot.recycled.borrow().len(), 1);
+
+        // Next fork reuses the rolled-back tables and must not see `RequestOnly`.
+        let mut clean = snapshot.fork().unwrap();
+        assert_eq!(snapshot.recycled.borrow().len(), 0);
+        assert_eq!(clean.resume().await, 0);
+        assert_eq!(clean.output, b"no");
     }
 }

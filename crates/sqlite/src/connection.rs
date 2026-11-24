@@ -14,8 +14,8 @@ use crate::{Error, Statement};
 /// connection exclusively owns its worker thread until closed/dropped (preserving
 /// full lock/transaction isolation without deadlocks), then returns the thread
 /// with its live Tokio runtime and allocator heap to avoid per-request OS thread
-/// creation and mimalloc segment abandonment.
-const MAX_IDLE_WORKERS: usize = 8;
+/// creation and mimalloc segment abandonment under concurrent web load.
+const MAX_IDLE_WORKERS: usize = 64;
 
 type Operation = Box<dyn FnOnce(&mut Rc<Connection>) + Send>;
 enum Request {

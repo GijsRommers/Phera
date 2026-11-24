@@ -1,8 +1,8 @@
 //! `array_walk` and `array_walk_recursive`, which give the callback each
 //! value by reference.
 
+use foldhash::{HashSet, HashSetExt};
 use std::cell::RefCell;
-use std::collections::HashSet;
 use std::rc::Rc;
 
 use phera_extension_api::{

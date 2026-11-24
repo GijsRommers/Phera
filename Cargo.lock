@@ -3470,6 +3470,7 @@ dependencies = [
 name = "phera-ext-standard"
 version = "0.1.0"
 dependencies = [
+ "foldhash",
  "hickory-resolver",
  "indexmap",
  "memchr",

@@ -45,6 +45,10 @@ impl FunctionTable {
     pub(crate) fn declaration_order(&self) -> impl Iterator<Item = FunctionIndex> + '_ {
         self.order.iter().copied()
     }
+
+    pub(crate) fn user_len(&self) -> usize {
+        self.order.len()
+    }
 }
 
 impl FunctionTable {

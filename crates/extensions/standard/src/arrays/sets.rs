@@ -2,8 +2,8 @@
 //! `_assoc` forms, and `array_unique`. They keep the keys of the first
 //! array and compare values as strings: `1`, `"1"` and `true` are equal.
 
+use foldhash::{HashSet, HashSetExt};
 use std::cmp::Ordering;
-use std::collections::HashSet;
 
 use phera_extension_api::{
     Context, FunctionEntry, LocalFuture, NativeResult, Param, ParamType, PhpArray, Value, args,

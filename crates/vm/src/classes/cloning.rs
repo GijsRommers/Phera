@@ -1,7 +1,9 @@
 //! `clone($original, ['name' => $name])` copies the object, invokes __clone,
 //! then applies the supplied property updates in order.
 
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{cell::RefCell, rc::Rc};
+
+use foldhash::HashMap;
 
 use phera_bytecode::Reg;
 use phera_extension_api::{NativeClone, NativeError, NativeResult};

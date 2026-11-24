@@ -47,6 +47,12 @@ impl Fork<'_> {
     /// needs copying, otherwise a rebuilt clone.
     pub fn array(&mut self, root: &Rc<PhpArray>) -> Rc<PhpArray> {
         let root_addr = address(root);
+        if self
+            .pure_arrays
+            .is_some_and(|pure| pure.contains(&root_addr))
+        {
+            return root.clone();
+        }
         if let Some(done) = self.arrays.get(&root_addr) {
             return done.clone();
         }
