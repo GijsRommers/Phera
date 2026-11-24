@@ -42,12 +42,12 @@ rustls-native-certs = "0.8"
 tokio-rustls = { version = "0.26", default-features = false, features = ["tls12"] }
 webpki-roots = "1"
 futures-core = "0.3"
-fallible-iterator = "0.2"
+fallible-iterator = "0.3"
 futures-util = { version = "0.3", default-features = false, features = ["alloc", "sink"] }
 rcgen = { version = "0.14", default-features = false, features = ["ring", "pem"] }
 rsa = { version = "0.10", features = ["pkcs1v15"] }
 sha1_011 = { package = "sha1", version = "0.11" }
-redis = { version = "=1.0.5", default-features = false, features = ["tokio-comp"] }
+redis = { version = "=1.8.2", default-features = false, features = ["tokio-comp"] }
 phera-ext-reflection = { path = "crates/extensions/reflection" }
 phera-ext-redis = { path = "crates/extensions/redis" }
 phera-db-drivers = { path = "crates/db-drivers" }
@@ -113,13 +113,13 @@ icu_segmenter = { version = "=2.4.0", default-features = false, features = ["com
 phera-ext-intl = { path = "crates/extensions/intl" }
 phera-ext-http = { path = "crates/extensions/http" }
 phera-ext-mbstring = { path = "crates/extensions/mbstring" }
-iconv-native = "0.1"
+iconv-native = "0.2"
 encoding_rs = "0.8.35"
 base16ct = { version = "1", features = ["alloc"] }
 cssparser = "0.38"
 precomputed-hash = "0.1"
-selectors = "0.41"
-base64 = "0.22"
+selectors = "0.43"
+base64 = "0.23"
 phera-ext-json = { path = "crates/extensions/json" }
 phera-ext-sodium = { path = "crates/extensions/sodium" }
 phera-ext-openssl = { path = "crates/extensions/openssl" }
@@ -143,7 +143,7 @@ phera-ext-tokenizer = { path = "crates/extensions/tokenizer" }
 crypto_secretbox = { version = "0.1.1", default-features = false, features = ["alloc", "salsa20"] }
 blake2b_simd = "1"
 curve25519-dalek = "5"
-hmac = "0.12"
+hmac = "0.13"
 siphasher = "1"
 poly1305 = { version = "0.9", features = ["zeroize"] }
 crypto-bigint = { version = "0.7", features = ["alloc", "zeroize"] }
@@ -175,29 +175,29 @@ sha1-rsa = { package = "sha1", version = "0.11", features = ["oid"] }
 md5-rsa = { package = "md-5", version = "0.11", features = ["oid"] }
 sha3-rsa = { package = "sha3", version = "0.11", features = ["oid"] }
 ripemd-rsa = { package = "ripemd", version = "0.2", features = ["oid"] }
-pbkdf2 = "0.12"
-digest = "0.10"
-md2 = "0.10"
-md4 = "0.10"
-md-5 = "0.10"
-sha1 = "0.10"
-sha2 = "0.10"
-sha3 = "0.10"
-ripemd = "0.1"
-whirlpool = "0.10"
-gost94 = "0.10"
+pbkdf2 = "0.13"
+digest = "0.11"
+md2 = "0.11"
+md4 = "0.11"
+md-5 = "0.11"
+sha1 = "0.11"
+sha2 = "0.11"
+sha3 = "0.11"
+ripemd = "0.2"
+whirlpool = "0.11"
+gost94 = "0.11"
 xxhash-rust = { version = "0.8", features = ["xxh32", "xxh64", "xxh3"] }
 subtle = "2.6"
-bcrypt = "0.17"
-argon2 = "0.5"
+bcrypt = "0.19"
+argon2 = "0.6"
 pwhash = "1"
-getrandom = "0.3"
+getrandom = "0.4"
 bytes = "1"
 percent-encoding = "2"
-nix = { version = "0.31", default-features = false, features = ["user", "resource", "feature", "net"] }
+nix = { version = "0.32", default-features = false, features = ["user", "resource", "feature", "net"] }
 rustix = { version = "1", features = ["fs", "param", "process", "system", "termios", "time"] }
 rustix-libc-wrappers = { version = "0.1.1", features = ["process"] }
-sysinfo = { version = "0.39.3", default-features = false, features = ["system"] }
+sysinfo = { version = "0.40.4", default-features = false, features = ["system"] }
 tempfile = "3"
 async-compression = { version = "0.4", features = ["tokio", "gzip", "zlib", "deflate", "brotli"] }
 cookie_store = { version = "0.22", default-features = false, features = ["preserve_order"] }
@@ -220,7 +220,7 @@ httpdate = "1"
 # flate2 with its default miniz_oxide backend, and Dropbox's brotli.
 flate2 = "1"
 adler2 = "2"
-num-bigint = "0.4"
+num-bigint = "0.5"
 num-integer = "0.1"
 num-traits = "0.2"
 brotli = "9"
@@ -242,7 +242,7 @@ mysql_async = { version = "0.37.1", default-features = false, features = [
 ] }
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 tz-rs = { version = "=0.7.3", default-features = false, features = ["alloc"] }
-jiff-tzdb = "=0.1.9"
+jiff-tzdb = "=1.0.0"
 tzdb_data = "=0.2.5"
 
 # Release builds are what gets measured and deployed. Whole-program
