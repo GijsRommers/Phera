@@ -15,7 +15,7 @@ use hyper::{Request as HyperRequest, Response as HyperResponse};
 use hyper_util::rt::TokioIo;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, watch};
+use tokio::sync::{Semaphore, mpsc, watch};
 use tokio::time::Instant;
 
 use crate::config::ConnectionLimits;
@@ -31,6 +31,7 @@ use crate::websocket::{
     },
     stream::{UpgradedContext, run_upgraded_websocket},
 };
+use crate::worker::ConnectionSlot;
 
 #[derive(Clone)]
 pub(super) struct WebSocketWorkerContext {
@@ -47,7 +48,7 @@ pub(super) struct ConnectionParams {
     pub(super) handler: Rc<dyn Handler>,
     pub(super) shutdown: watch::Receiver<bool>,
     pub(super) limits: ConnectionLimits,
-    pub(super) tcp_slot: OwnedSemaphorePermit,
+    pub(super) tcp_slot: ConnectionSlot,
     pub(super) ws: WebSocketWorkerContext,
 }
 
@@ -140,7 +141,7 @@ struct UpgradeState {
     handler: Rc<dyn Handler>,
     limits: ConnectionLimits,
     started: Instant,
-    tcp_slot: Rc<RefCell<Option<OwnedSemaphorePermit>>>,
+    tcp_slot: Rc<RefCell<Option<ConnectionSlot>>>,
     ws: WebSocketWorkerContext,
     shutdown: watch::Receiver<bool>,
 }

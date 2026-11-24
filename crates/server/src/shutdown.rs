@@ -17,7 +17,7 @@ pub(super) fn spawn_signal_watcher(shutdown: watch::Sender<bool>) -> JoinHandle<
                 Err(_) => return,
             };
             runtime.block_on(wait_for_signal());
-            let _ = shutdown.send(true);
+            shutdown.send_replace(true);
         })
         .expect("failed to spawn the signal watcher thread")
 }
