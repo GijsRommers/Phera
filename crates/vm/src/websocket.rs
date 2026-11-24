@@ -100,8 +100,7 @@ impl Vm {
             && let Some(unit) = unit
             && let Err(error) = self.run_classic_declarations(&unit).await
         {
-            let outcome = self.finish_unhandled_websocket_error(error, false).await;
-            return outcome;
+            return self.finish_unhandled_websocket_error(error, true).await;
         }
 
         let handler = match self.instantiate_websocket_handler(handler_class).await {

@@ -219,6 +219,27 @@ async fn drive_io<S: AsyncRead + AsyncWrite + Unpin>(
                         return Some((code, reason));
                     }
                     Some(Ok(WsMessage::Frame(_))) => {}
+                    Some(Err(tokio_tungstenite::tungstenite::Error::Capacity(_))) => {
+                        send_close(
+                            ws_stream,
+                            1009,
+                            "message too big",
+                            channels.config.write_timeout,
+                        )
+                        .await;
+                        return Some((1009, "message too big".to_string()));
+                    }
+                    Some(Err(
+                        tokio_tungstenite::tungstenite::Error::Protocol(_)
+                        | tokio_tungstenite::tungstenite::Error::Utf8(_),
+                    )) => {
+                        let _ = tokio::time::timeout(
+                            channels.config.write_timeout,
+                            ws_stream.flush(),
+                        )
+                        .await;
+                        return Some((1002, String::new()));
+                    }
                     Some(Err(_)) | None => return Some((1006, String::new())),
                 }
             }

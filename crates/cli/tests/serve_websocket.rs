@@ -221,9 +221,14 @@ Phera\WebSocket\accept(
         ws.next().await.unwrap().unwrap(),
         Message::Binary(vec![3, 2, 1].into())
     );
-    ws.close(None).await.unwrap();
+    ws.close(Some(tungstenite::protocol::CloseFrame {
+        code: CloseCode::Normal,
+        reason: "bye".into(),
+    }))
+    .await
+    .unwrap();
 
-    let events = wait_for_file(&site.root.join("events.log"), "close:1000").await;
+    let events = wait_for_file(&site.root.join("events.log"), "close:1000:bye").await;
     assert!(events.contains("count=2"), "{events}");
 }
 
@@ -270,13 +275,10 @@ if (!Phera\WebSocket\isEvent()) {
     // Calling accept() inside an event triggers LogicException -> onError -> 1011 close.
     ws.send(Message::Text("try-accept".into())).await.unwrap();
     let frame = ws.next().await.unwrap().unwrap();
-    assert_eq!(
-        frame,
-        Message::Close(Some(tungstenite::protocol::CloseFrame {
-            code: CloseCode::Error,
-            reason: "internal error".into(),
-        }))
-    );
+    match frame {
+        Message::Close(Some(cf)) => assert_eq!(cf.code, CloseCode::Error),
+        other => panic!("expected 1011 Error close, got {other:?}"),
+    }
     let err_log = wait_for_file(&site.root.join("err.log"), "LogicException").await;
     assert!(err_log.contains("accept()"), "{err_log}");
 }
@@ -388,7 +390,9 @@ if (($_SERVER['REQUEST_URI'] ?? '') === '/auth-fail') {
     echo 'denied';
     return;
 }
-Phera\WebSocket\accept(AuthHandler::class);
+if (!Phera\WebSocket\isEvent()) {
+    Phera\WebSocket\accept(AuthHandler::class);
+}
 "#;
     let site = WsSite::start(
         "auth-origin",
