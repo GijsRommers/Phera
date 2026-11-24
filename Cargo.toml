@@ -194,10 +194,10 @@ pwhash = "1"
 getrandom = "0.4"
 bytes = "1"
 percent-encoding = "2"
-nix = { version = "0.31", default-features = false, features = ["user", "resource", "feature", "net"] }
+nix = { version = "0.32", default-features = false, features = ["user", "resource", "feature", "net"] }
 rustix = { version = "1", features = ["fs", "param", "process", "system", "termios", "time"] }
 rustix-libc-wrappers = { version = "0.1.1", features = ["process"] }
-sysinfo = { version = "0.39.3", default-features = false, features = ["system"] }
+sysinfo = { version = "0.40.4", default-features = false, features = ["system"] }
 tempfile = "3"
 async-compression = { version = "0.4", features = ["tokio", "gzip", "zlib", "deflate", "brotli"] }
 cookie_store = { version = "0.22", default-features = false, features = ["preserve_order"] }
