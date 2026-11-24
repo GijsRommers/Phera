@@ -46,7 +46,6 @@ fallible-iterator = "0.2"
 futures-util = { version = "0.3", default-features = false, features = ["alloc", "sink"] }
 rcgen = { version = "0.14", default-features = false, features = ["ring", "pem"] }
 rsa = { version = "0.10", features = ["pkcs1v15"] }
-sha1_011 = { package = "sha1", version = "0.11" }
 redis = { version = "=1.8.2", default-features = false, features = ["tokio-comp"] }
 phera-ext-reflection = { path = "crates/extensions/reflection" }
 phera-ext-redis = { path = "crates/extensions/redis" }
@@ -143,7 +142,7 @@ phera-ext-tokenizer = { path = "crates/extensions/tokenizer" }
 crypto_secretbox = { version = "0.1.1", default-features = false, features = ["alloc", "salsa20"] }
 blake2b_simd = "1"
 curve25519-dalek = "5"
-hmac = "0.12"
+hmac = "0.13"
 siphasher = "1"
 poly1305 = { version = "0.9", features = ["zeroize"] }
 crypto-bigint = { version = "0.7", features = ["alloc", "zeroize"] }
@@ -171,25 +170,21 @@ sec1 = "0.8"
 x509-cert = "0.3"
 
 
-sha1-rsa = { package = "sha1", version = "0.11", features = ["oid"] }
-md5-rsa = { package = "md-5", version = "0.11", features = ["oid"] }
-sha3-rsa = { package = "sha3", version = "0.11", features = ["oid"] }
-ripemd-rsa = { package = "ripemd", version = "0.2", features = ["oid"] }
-pbkdf2 = "0.12"
-digest = "0.10"
-md2 = "0.10"
-md4 = "0.10"
-md-5 = "0.10"
-sha1 = "0.10"
-sha2 = "0.10"
-sha3 = "0.10"
-ripemd = "0.1"
-whirlpool = "0.10"
-gost94 = "0.10"
+pbkdf2 = "0.13"
+digest = "0.11"
+md2 = "0.11"
+md4 = "0.11"
+md-5 = "0.11"
+sha1 = "0.11"
+sha2 = "0.11"
+sha3 = "0.11"
+ripemd = "0.2"
+whirlpool = "0.11"
+gost94 = "0.11"
 xxhash-rust = { version = "0.8", features = ["xxh32", "xxh64", "xxh3"] }
 subtle = "2.6"
-bcrypt = "0.17"
-argon2 = "0.5"
+bcrypt = "0.19"
+argon2 = "0.6"
 pwhash = "1"
 getrandom = "0.4"
 bytes = "1"

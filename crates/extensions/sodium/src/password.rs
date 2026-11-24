@@ -1,9 +1,6 @@
 //! `sodium_crypto_pwhash_str($password, 2, 67108864)` creates an Argon2id PHC string.
 
-use argon2::{
-    Algorithm, Argon2, Params, PasswordHash, PasswordHasher, PasswordVerifier, Version,
-    password_hash::SaltString,
-};
+use argon2::{Algorithm, Argon2, Params, PasswordHash, PasswordHasher, PasswordVerifier, Version};
 use phera_extension_api::{
     ConstantValue, Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param,
     ParamType, Value, args,
@@ -67,11 +64,9 @@ fn hash(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'_, NativeRe
         let password = password(context, &args, HASH, 0)?;
         let params = parameters(HASH, 2, ops, mem, 32, Algorithm::Argon2id)?;
         let hash = off_thread(move || {
-            let salt =
-                SaltString::encode_b64(random::<16>().map_err(|_| "internal error")?.as_slice())
-                    .map_err(|_| "internal error")?;
+            let salt = random::<16>().map_err(|_| "internal error")?;
             Argon2::new(Algorithm::Argon2id, Version::V0x13, params)
-                .hash_password(&password, &salt)
+                .hash_password_with_salt(&password, salt.as_slice())
                 .map(|hash| hash.to_string())
                 .map_err(|_| "internal error")
         })
@@ -103,7 +98,7 @@ fn needs_rehash(_: &mut dyn Context, args: &[Value]) -> NativeResult {
     Ok(Value::Bool(!matches))
 }
 
-fn load_hash(input: &[u8]) -> Option<PasswordHash<'_>> {
+fn load_hash(input: &[u8]) -> Option<PasswordHash> {
     if input.len() >= 128 {
         return None;
     }

@@ -49,7 +49,7 @@ pub(super) fn packages(
                 "dist".into(),
                 json!({"type": "path",
                 "url": path.strip_prefix(&project.directory)?.to_string_lossy(),
-                "reference": format!("{:x}", sha1::Sha1::digest(serde_json::to_vec(&manifest)?))}),
+                "reference": base16ct::lower::encode_string(&sha1::Sha1::digest(serde_json::to_vec(&manifest)?))}),
             );
             packages.push(serde_json::from_value(Value::Object(data))?);
         } else {
@@ -75,7 +75,7 @@ pub(super) fn packages(
                     .context("Artifact archive must contain composer.json.")?;
                 let mut data: Value = serde_json::from_slice(&fs::read(manifest.path())?)?;
                 data["dist"] = json!({"type": kind, "url": format!("file://{}", file.display()),
-                    "shasum": format!("{:x}", sha1::Sha1::digest(fs::read(file)?))});
+                    "shasum": base16ct::lower::encode_string(&sha1::Sha1::digest(fs::read(file)?))});
                 packages.push(serde_json::from_value(data)?);
             }
         }

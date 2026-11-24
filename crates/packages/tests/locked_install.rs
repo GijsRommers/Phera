@@ -29,7 +29,7 @@ fn archive(directory: &Path, name: &str, files: &[(&str, &str)]) -> Value {
     fs::write(directory.join(&filename), &bytes).unwrap();
     json!({"name": name, "version": "1.0.0", "type": "library",
         "dist": {"type": "zip", "url": format!("file://{}", directory.join(filename).display()),
-        "shasum": format!("{:x}", Sha1::digest(&bytes)), "reference": "fixture"}})
+        "shasum": base16ct::lower::encode_string(&Sha1::digest(&bytes)), "reference": "fixture"}})
 }
 
 fn php(directory: &Path, code: &str) -> String {

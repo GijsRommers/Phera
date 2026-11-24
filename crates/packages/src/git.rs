@@ -27,7 +27,7 @@ impl Mirror {
         offline: bool,
         refresh: bool,
     ) -> Result<Self> {
-        let key = format!("{:x}", Sha256::digest(remote.url.as_bytes()));
+        let key = base16ct::lower::encode_string(&Sha256::digest(remote.url.as_bytes()));
         let path = store.directory.join("git").join(&key);
         let guard = File::options()
             .read(true)

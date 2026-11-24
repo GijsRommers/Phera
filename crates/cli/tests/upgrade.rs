@@ -171,7 +171,7 @@ async fn release_server(
         let digest = if corrupt {
             "0".repeat(64)
         } else {
-            format!("{:x}", Sha256::digest(&archive))
+            base16ct::lower::encode_string(&Sha256::digest(&archive))
         };
         assets.insert(
             format!("/download/v{version}/SHA256SUMS"),
