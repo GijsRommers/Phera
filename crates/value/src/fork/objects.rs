@@ -16,7 +16,7 @@
 //! object into the fork if the object is copied, and is dead otherwise.
 
 use std::cell::{Cell, RefCell};
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 use super::Fork;
 use crate::destruction::Destruction;
@@ -145,5 +145,18 @@ impl Fork<'_> {
             .into_iter()
             .filter(|copy| Rc::strong_count(copy) > 1)
             .collect()
+    }
+
+    /// Single-pass weak handle collection for `ClassTable::objects`.
+    pub(super) fn into_weak_copies(self) -> Vec<Weak<Object>> {
+        let mut weak = Vec::with_capacity(self.objects.len());
+        for copy in self.objects.into_values() {
+            if Rc::strong_count(&copy) == 1 {
+                copy.mark_destructed();
+            } else {
+                weak.push(Rc::downgrade(&copy));
+            }
+        }
+        weak
     }
 }

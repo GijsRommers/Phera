@@ -185,6 +185,44 @@ impl CodeTable {
         UnitIndex(self.units.len() as u32)
     }
 
+    pub(crate) fn units_len(&self) -> usize {
+        self.units.len()
+    }
+
+    pub(crate) fn functions_len(&self) -> usize {
+        self.functions.len()
+    }
+
+    pub(crate) fn trait_names_len(&self) -> usize {
+        self.trait_method_names.len()
+    }
+
+    /// Discards any request-local site overrides before returning this table
+    /// to a snapshot's recycle pool.
+    pub(crate) fn clear_local_sites(&self) {
+        if self.has_local_sites.get() {
+            self.sites.borrow_mut().clear();
+            self.has_local_sites.set(false);
+        }
+    }
+
+    /// Empty placeholder table with zero heap allocations, used when moving a
+    /// clean `CodeTable` out of a dropping `Vm` back into a snapshot pool.
+    pub(crate) fn detached(&self) -> Self {
+        CodeTable {
+            units: Vec::new(),
+            functions: Vec::new(),
+            worker: self.worker.clone(),
+            leases: Vec::new(),
+            slots: Vec::new(),
+            sites: std::cell::RefCell::new(Vec::new()),
+            has_local_sites: std::cell::Cell::new(false),
+            base_sites: None,
+            trait_method_names: Default::default(),
+            imports: None,
+        }
+    }
+
     /// Adds a compiled file and numbers its functions, or finds it when it
     /// was loaded before. Returns the number of its top-level code.
     pub(crate) fn load(&mut self, unit: &Arc<CompiledUnit>) -> FunctionIndex {
