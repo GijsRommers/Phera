@@ -622,8 +622,8 @@ impl Machine<'_> {
             Instruction::FetchThis { dst } | Instruction::ThisOrNull { dst } => {
                 self.fetch_this(position, dst)
             }
-            Instruction::Return { src } => self.leave_plain::<GUARDED>(position.frame, Some(src)),
-            Instruction::ReturnNull => self.leave_plain::<GUARDED>(position.frame, None),
+            Instruction::Return { src } => self.leave_plain::<GUARDED>(Some(src)),
+            Instruction::ReturnNull => self.leave_plain::<GUARDED>(None),
             // Listed, so that the instructions further_step never takes do
             // not pay for a call to it on their way to the VM.
             Instruction::Binary { .. }
@@ -632,18 +632,9 @@ impl Machine<'_> {
             | Instruction::BinaryBranchIf { .. }
             | Instruction::BinaryIntBranch { .. }
             | Instruction::BinaryIntBranchIf { .. }
-            | Instruction::AssignOp {
-                op: BinaryOp::Concat,
-                ..
-            }
+            | Instruction::AssignOp { .. }
             | Instruction::Unary { .. }
-            | Instruction::Cast {
-                to:
-                    phera_bytecode::CastKind::String
-                    | phera_bytecode::CastKind::Int
-                    | phera_bytecode::CastKind::Float,
-                ..
-            }
+            | Instruction::Cast { .. }
             | Instruction::JumpIfNull { .. }
             | Instruction::JumpIfNotNull { .. }
             | Instruction::NewArray { .. }

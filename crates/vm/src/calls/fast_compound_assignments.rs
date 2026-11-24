@@ -31,7 +31,7 @@ use crate::calls::fast_properties::write_slot_direct;
 use crate::element_writes::{Target, writable, write};
 use crate::fast::{duplicate, store};
 use crate::fast_values::quiet_binary;
-use crate::operators::fast_binary;
+use crate::operators::fast_numeric_binary;
 
 /// What an update stores in the place and what the expression gives:
 /// the same value for `+=`, the old one for `$x++`.
@@ -60,7 +60,7 @@ impl Machine<'_> {
             _ => return Step::Slow,
         };
         self.update_place(position, destination, path, |left| {
-            let value = fast_binary(operator, left, &right)
+            let value = fast_numeric_binary(operator, left, &right)
                 .or_else(|| quiet_binary(operator, left, &right))?;
             Some(Update {
                 stored: duplicate(&value),

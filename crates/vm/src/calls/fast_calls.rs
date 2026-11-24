@@ -95,11 +95,10 @@ impl Machine<'_> {
     /// return type's bit test: write the value (for a constructor, the new
     /// object) into the caller's register and empty the callee's.
     #[inline(always)]
-    pub(super) fn leave_plain<const GUARDED: bool>(
-        &mut self,
-        frame: Frame,
-        source: Option<Reg>,
-    ) -> Step {
+    pub(super) fn leave_plain<const GUARDED: bool>(&mut self, source: Option<Reg>) -> Step {
+        let Some(frame) = self.stack.current().copied() else {
+            return Step::Slow;
+        };
         let Some(destination) = frame.destination() else {
             return if frame.discards_result() {
                 self.leave_discarded(frame, source)

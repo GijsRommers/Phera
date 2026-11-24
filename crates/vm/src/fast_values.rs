@@ -71,7 +71,7 @@ pub(crate) fn value_step<const GUARDED: bool>(
             };
             let left = left.deref();
             let right = right.deref();
-            let result = crate::operators::fast_binary_non_int(op, &left, &right)
+            let result = crate::operators::fast_numeric_binary(op, &left, &right)
                 .or_else(|| quiet_binary(op, &left, &right));
             drop(left);
             drop(right);
@@ -86,7 +86,7 @@ pub(crate) fn value_step<const GUARDED: bool>(
             };
             let left = left.deref();
             let right = Value::Int(i64::from(rhs));
-            let result = crate::operators::fast_binary_non_int(op, &left, &right)
+            let result = crate::operators::fast_numeric_binary(op, &left, &right)
                 .or_else(|| quiet_binary(op, &left, &right));
             drop(left);
             match result {
@@ -99,6 +99,24 @@ pub(crate) fn value_step<const GUARDED: bool>(
             local,
             src,
         } if local != src => assign_concat_plain(slots, local, src),
+        Instruction::AssignOp { op, local, src } if op != BinaryOp::Concat => {
+            let (Some(Some(left)), Some(Some(right))) =
+                (slots.get(local.index()), slots.get(src.index()))
+            else {
+                return ScalarStep::Fallback;
+            };
+            if left.is_reference() {
+                return ScalarStep::Fallback;
+            }
+            let right = right.deref();
+            let result = crate::operators::fast_numeric_binary(op, left, &right)
+                .or_else(|| quiet_binary(op, left, &right));
+            drop(right);
+            match result {
+                Some(value) => store::<GUARDED, _>(slots, local, value),
+                None => ScalarStep::Fallback,
+            }
+        }
         Instruction::BinaryBranch {
             op,
             lhs,
@@ -527,7 +545,7 @@ fn branch_on_binary<const WHEN: bool>(
     target: Target,
     ip: &mut usize,
 ) -> ScalarStep {
-    match crate::operators::fast_binary_non_int(op, left, right)
+    match crate::operators::fast_numeric_binary(op, left, right)
         .or_else(|| quiet_binary(op, left, right))
     {
         Some(value) => {

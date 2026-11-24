@@ -69,7 +69,7 @@ impl Vm {
         };
         let left = left.deref();
         let right = right.deref();
-        let result = match fast_binary(operator, &left, &right) {
+        let result = match fast_numeric_binary(operator, &left, &right) {
             None if crate::object_operators::has_binary(&left, &right) => {
                 return Ok(Some(BatchExit::Instruction(Instruction::Binary {
                     dst: destination,
@@ -276,10 +276,11 @@ impl Vm {
     }
 }
 
-/// Out-of-line numeric fast path for floats, mixed int/float, and division so
-/// `scalar_step` stays lean for integer-only hot loops.
-#[inline(never)]
-pub(crate) fn fast_binary_non_int(
+/// Extended numeric fast path for floats, mixed int/float, and safe division,
+/// called outside `scalar_step` (`value_step`, compound assignments, VM) so
+/// `run_simple` stays a compact leaf loop.
+#[inline]
+pub(crate) fn fast_numeric_binary(
     operator: BinaryOp,
     left: &Value,
     right: &Value,
@@ -381,29 +382,39 @@ pub(crate) fn fast_binary(operator: BinaryOp, left: &Value, right: &Value) -> Op
         NotIdentical, Subtract,
     };
     match (left, right) {
-        (Value::Int(l), Value::Int(r)) => Some(match operator {
-            Add => l
-                .checked_add(*r)
+        (Value::Int(left), Value::Int(right)) => Some(match operator {
+            Add => left
+                .checked_add(*right)
                 .map(Value::Int)
-                .unwrap_or_else(|| overflow_value(OverflowOperation::Add, *l, *r)),
-            Subtract => l
-                .checked_sub(*r)
+                .unwrap_or_else(|| overflow_value(OverflowOperation::Add, *left, *right)),
+            Subtract => left
+                .checked_sub(*right)
                 .map(Value::Int)
-                .unwrap_or_else(|| overflow_value(OverflowOperation::Subtract, *l, *r)),
-            Multiply => l
-                .checked_mul(*r)
+                .unwrap_or_else(|| overflow_value(OverflowOperation::Subtract, *left, *right)),
+            Multiply => left
+                .checked_mul(*right)
                 .map(Value::Int)
-                .unwrap_or_else(|| overflow_value(OverflowOperation::Multiply, *l, *r)),
-            Modulo if *r != 0 => Value::Int(if *r == -1 { 0 } else { l % r }),
-            Less => Value::Bool(l < r),
-            LessEqual => Value::Bool(l <= r),
-            Greater => Value::Bool(l > r),
-            GreaterEqual => Value::Bool(l >= r),
-            Equal | Identical => Value::Bool(l == r),
-            NotEqual | NotIdentical => Value::Bool(l != r),
-            _ => return fast_binary_non_int(operator, left, right),
+                .unwrap_or_else(|| overflow_value(OverflowOperation::Multiply, *left, *right)),
+            Modulo if *right != 0 => Value::Int(if *right == -1 { 0 } else { left % right }),
+            Less => Value::Bool(left < right),
+            LessEqual => Value::Bool(left <= right),
+            Greater => Value::Bool(left > right),
+            GreaterEqual => Value::Bool(left >= right),
+            Equal | Identical => Value::Bool(left == right),
+            NotEqual | NotIdentical => Value::Bool(left != right),
+            _ => return None,
         }),
-        _ => fast_binary_non_int(operator, left, right),
+        (Value::Float(left), Value::Float(right)) => Some(match operator {
+            Add => Value::Float(left + right),
+            Subtract => Value::Float(left - right),
+            Multiply => Value::Float(left * right),
+            Less => Value::Bool(left < right),
+            LessEqual => Value::Bool(left <= right),
+            Greater => Value::Bool(left > right),
+            GreaterEqual => Value::Bool(left >= right),
+            _ => return None,
+        }),
+        _ => None,
     }
 }
 

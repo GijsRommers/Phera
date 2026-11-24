@@ -54,18 +54,9 @@ impl Machine<'_> {
             | Instruction::BinaryBranchIf { .. }
             | Instruction::BinaryIntBranch { .. }
             | Instruction::BinaryIntBranchIf { .. }
-            | Instruction::AssignOp {
-                op: phera_bytecode::BinaryOp::Concat,
-                ..
-            }
+            | Instruction::AssignOp { .. }
             | Instruction::Unary { .. }
-            | Instruction::Cast {
-                to:
-                    phera_bytecode::CastKind::String
-                    | phera_bytecode::CastKind::Int
-                    | phera_bytecode::CastKind::Float,
-                ..
-            }
+            | Instruction::Cast { .. }
             | Instruction::JumpIfNull { .. }
             | Instruction::JumpIfNotNull { .. }
             | Instruction::NewArray { .. }

@@ -13,7 +13,7 @@
 use phera_bytecode::{BinaryOp, IncDec, Instruction, Reg, Target};
 use phera_value::{Value, to_bool};
 
-use crate::operators::fast_binary_non_int;
+use crate::operators::fast_binary;
 
 /// A fast instruction either completes or delegates PHP coercion to the slow handler.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -302,15 +302,14 @@ pub(crate) fn scalar_step<const GUARDED: bool, S: crate::calls::registers::Slots
             op: phera_bytecode::UnaryOp::Negate,
             dst,
             src,
-        } => match slots.slot(src) {
-            Some(Some(Value::Int(value))) => match value.checked_neg() {
-                Some(negative) => store_integer::<GUARDED, _>(slots, dst, negative),
-                None => ScalarStep::Fallback,
-            },
-            _ => ScalarStep::Fallback,
-        },
+        } => {
+            let Some(negative) = integer_at(slots, src).and_then(i64::checked_neg) else {
+                return ScalarStep::Fallback;
+            };
+            store_integer::<GUARDED, _>(slots, dst, negative)
+        }
         Instruction::Cast { to, dst, src } => {
-            // Identity casts need no conversion and emit no diagnostics.
+            // Identity casts need no conversion and cannot warn.
             use phera_bytecode::CastKind;
             match (to, slots.slot(src)) {
                 (CastKind::Bool, Some(Some(Value::Bool(value)))) => {
@@ -411,7 +410,7 @@ pub(crate) fn scalar_step<const GUARDED: bool, S: crate::calls::registers::Slots
             let Some(Some(left)) = slots.slot(lhs) else {
                 return ScalarStep::Fallback;
             };
-            match fast_binary_non_int(op, left, &Value::Int(right)) {
+            match fast_binary(op, left, &Value::Int(right)) {
                 Some(value) => store::<GUARDED, _>(slots, dst, value),
                 None => ScalarStep::Fallback,
             }
@@ -425,7 +424,7 @@ pub(crate) fn scalar_step<const GUARDED: bool, S: crate::calls::registers::Slots
             let (Some(Some(left)), Some(Some(right))) = (slots.slot(lhs), slots.slot(rhs)) else {
                 return ScalarStep::Fallback;
             };
-            match fast_binary_non_int(op, left, right) {
+            match fast_binary(op, left, right) {
                 Some(value) => store::<GUARDED, _>(slots, dst, value),
                 None => ScalarStep::Fallback,
             }
@@ -457,7 +456,7 @@ pub(crate) fn scalar_step<const GUARDED: bool, S: crate::calls::registers::Slots
             let (Some(Some(left)), Some(Some(right))) = (slots.slot(local), slots.slot(src)) else {
                 return ScalarStep::Fallback;
             };
-            match fast_binary_non_int(op, left, right) {
+            match fast_binary(op, left, right) {
                 Some(value) => store::<GUARDED, _>(slots, local, value),
                 None => ScalarStep::Fallback,
             }
@@ -586,7 +585,7 @@ fn binary_int_branch_step<
     let Some(Some(left)) = slots.slot(lhs) else {
         return ScalarStep::Fallback;
     };
-    let Some(value) = fast_binary_non_int(op, left, &Value::Int(right)) else {
+    let Some(value) = fast_binary(op, left, &Value::Int(right)) else {
         return ScalarStep::Fallback;
     };
     if to_bool(&value) == WHEN {
@@ -623,7 +622,7 @@ fn binary_branch_step<
     };
     let left = left.deref();
     let right = right.deref();
-    if let Some(value) = fast_binary_non_int(op, &left, &right) {
+    if let Some(value) = fast_binary(op, &left, &right) {
         let truthy = match value {
             Value::Bool(boolean) => boolean,
             other => to_bool(&other),
@@ -708,7 +707,7 @@ pub(crate) fn array_index_step<const GUARDED: bool, S: crate::calls::registers::
     let Some(Some(Value::Int(index))) = slots.slot(index) else {
         return ScalarStep::Fallback;
     };
-    let Some(value) = array.get_int(*index) else {
+    let Some(value) = crate::array_slots::read_integer(array, *index) else {
         return ScalarStep::Fallback;
     };
     let value = duplicate(&value.deref());
