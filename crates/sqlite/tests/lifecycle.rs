@@ -116,7 +116,8 @@ fn clean_readonly_file_connection_sees_writes_and_invalidates_on_replace_or_muta
             .unwrap();
             drop(seed);
 
-            // Clean read-only sessions (candidate for worker connection cache).
+            // Clean overlapping read-only sessions (exercises worker connection cache).
+            let anchor = Database::open(path_str.clone(), 6, 5000).await.unwrap();
             for _ in 0..8 {
                 let db = Database::open(path_str.clone(), 6, 5000).await.unwrap();
                 let stmt = db.prepare("SELECT v FROM items".into()).await.unwrap();
@@ -129,7 +130,7 @@ fn clean_readonly_file_connection_sees_writes_and_invalidates_on_replace_or_muta
             // Concurrent/subsequent writer updates WAL; cached readers must see 20 immediately.
             let writer = Database::open(path_str.clone(), 6, 5000).await.unwrap();
             writer.exec("UPDATE items SET v = 20".into()).await.unwrap();
-            drop(writer);
+            writer.close().await.unwrap();
 
             for _ in 0..8 {
                 let db = Database::open(path_str.clone(), 6, 5000).await.unwrap();
@@ -142,6 +143,12 @@ fn clean_readonly_file_connection_sees_writes_and_invalidates_on_replace_or_muta
                 drop(stmt);
                 drop(db);
             }
+            // Wait briefly for the last fire-and-forget drop(db) to park into
+            // the cache while `anchor` is still open, then close `anchor` as
+            // the final active handle so all cached handles are evicted and
+            // SQLite checkpoints & removes WAL sidecar files cleanly.
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            anchor.close().await.unwrap();
 
             // Replacing the file on disk (new inode) must invalidate any cached connection.
             let replacement = dir.path().join("replacement.sqlite");
@@ -156,7 +163,19 @@ fn clean_readonly_file_connection_sees_writes_and_invalidates_on_replace_or_muta
             let after = Database::open(path_str, 6, 5000).await.unwrap();
             let stmt = after.prepare("SELECT v FROM items".into()).await.unwrap();
             let exec = stmt.execute(Vec::new()).await.unwrap();
-            assert!(matches!(exec.first.unwrap()[0], Cell::Integer(99)));
+            let first = exec.first.unwrap();
+            assert!(
+                matches!(first[0], Cell::Integer(99)),
+                "expected 99, got {:?}; files: {:?}",
+                first,
+                std::fs::read_dir(dir.path())
+                    .unwrap()
+                    .map(|e| {
+                        let e = e.unwrap();
+                        (e.file_name(), e.metadata().unwrap().len())
+                    })
+                    .collect::<Vec<_>>()
+            );
             drop(stmt);
             after.close().await.unwrap();
         });

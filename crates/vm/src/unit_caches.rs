@@ -186,7 +186,6 @@ impl UnitCache {
 
     /// The record of method site `site` of the function `facts` describes,
     /// which has `sites` method sites.
-    #[inline(always)]
     pub(crate) fn site_record(
         &self,
         facts: &crate::function_facts::FunctionFacts,

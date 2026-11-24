@@ -410,14 +410,18 @@ impl Machine<'_> {
     ) -> Step {
         // The sends, after the `InitMethodCall` that follows `CallMethod`.
         let sends = position.ip + 1;
+        let Some(arguments) = body.site_arguments.get(site.argument_range()) else {
+            return Step::Slow;
+        };
+        let count = arguments.len();
         let facts = self.code.facts(function);
+        let base = position.frame.base();
         // The window, as `InitMethodCall` reserves it, with `$this`.
         let start = self.registers.len();
         let first = start + CallKind::Method.prefix();
         let window = (facts.registers.max(facts.parameters) as usize).max(1);
         self.registers.grow_to(first + window);
         self.registers.put(start, Value::Object(object));
-        let count = site.arguments as usize;
         if facts.shape != FunctionShape::Plain
             || count < facts.required as usize
             || count > facts.parameters as usize
@@ -425,32 +429,26 @@ impl Machine<'_> {
         {
             return self.record_site_call(function, start, sends);
         }
-        if count > 0 {
-            let Some(arguments) = body.site_arguments.get(site.argument_range()) else {
+        for (index, argument) in arguments.iter().enumerate() {
+            // A by-reference parameter binds to the variable itself, which
+            // only the written-out `SendLocal` does.
+            if !facts.takes_value(index) {
                 return self.record_site_call(function, start, sends);
-            };
-            let base = position.frame.base();
-            for (index, argument) in arguments.iter().enumerate() {
-                // A by-reference parameter binds to the variable itself, which
-                // only the written-out `SendLocal` does.
-                if !facts.takes_value(index) {
-                    return self.record_site_call(function, start, sends);
-                }
-                let value = match self.registers.window(base + argument.register().index(), 1) {
-                    [Some(value)] if !value.is_reference() => value,
-                    _ => return self.record_site_call(function, start, sends),
-                };
-                let plain = !facts.is_typed(index)
-                    || facts.parameter_masks[index].intersects(crate::types::own_type(value));
-                let mut value = crate::fast::duplicate(value);
-                if !plain
-                    && !self.accepts_argument(function, index, &value)
-                    && !self.accepts_on_second_look(function, index, &mut value)
-                {
-                    return self.record_site_call(function, start, sends);
-                }
-                self.registers.put(first + index, value);
             }
+            let value = match self.registers.window(base + argument.register().index(), 1) {
+                [Some(value)] if !value.is_reference() => value,
+                _ => return self.record_site_call(function, start, sends),
+            };
+            let plain = !facts.is_typed(index)
+                || facts.parameter_masks[index].intersects(crate::types::own_type(value));
+            let mut value = crate::fast::duplicate(value);
+            if !plain
+                && !self.accepts_argument(function, index, &value)
+                && !self.accepts_on_second_look(function, index, &mut value)
+            {
+                return self.record_site_call(function, start, sends);
+            }
+            self.registers.put(first + index, value);
         }
         // The caller goes on after the call's `Call`.
         self.publish(site.after.index());

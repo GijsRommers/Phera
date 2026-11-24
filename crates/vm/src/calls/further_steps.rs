@@ -18,7 +18,7 @@
 //! them). Each answers [`Step::Slow`], having changed nothing, when its
 //! case is not the plain one, and the VM runs the instruction.
 
-use phera_bytecode::{FetchMode, Instruction, PathBase, PathId, Reg, Step as PathStep};
+use phera_bytecode::{FetchMode, Instruction, PathBase, PathId, Reg};
 use phera_value::Value;
 
 use crate::calls::execution_loop::{Machine, Position, Step};
@@ -82,40 +82,19 @@ impl Machine<'_> {
                 dst,
                 path,
                 mode: FetchMode::Read,
-            } => {
-                let Some(path_body) = self
-                    .code
-                    .function(position.frame.function)
-                    .paths
-                    .get(path.index())
-                else {
-                    return Step::Slow;
-                };
-                match (path_body.base, path_body.steps.last()) {
-                    (PathBase::StaticProperty { .. } | PathBase::NamedStaticProperty { .. }, _) => {
+            } => match self.fetch_property::<GUARDED>(position, dst, path) {
+                Step::Slow => match self.fetch_local_element::<GUARDED>(
+                    position,
+                    dst,
+                    (path, FetchMode::Read),
+                ) {
+                    Step::Slow => {
                         self.fetch_static::<GUARDED>(position, dst, (path, FetchMode::Read))
                     }
-                    (_, Some(PathStep::Property(_) | PathStep::DynamicProperty(_))) => {
-                        self.fetch_property::<GUARDED>(position, dst, path)
-                    }
-                    (PathBase::Register(_), Some(PathStep::Index(_)))
-                        if path_body
-                            .steps
-                            .iter()
-                            .all(|step| matches!(step, PathStep::Index(_))) =>
-                    {
-                        self.fetch_local_element::<GUARDED>(position, dst, (path, FetchMode::Read))
-                    }
-                    _ => match self.fetch_property::<GUARDED>(position, dst, path) {
-                        Step::Slow => self.fetch_local_element::<GUARDED>(
-                            position,
-                            dst,
-                            (path, FetchMode::Read),
-                        ),
-                        done => done,
-                    },
-                }
-            }
+                    done => done,
+                },
+                done => done,
+            },
             Instruction::Fetch {
                 dst,
                 path,
@@ -125,56 +104,23 @@ impl Machine<'_> {
                 dst,
                 path,
                 mode: mode @ (FetchMode::Quiet | FetchMode::Isset | FetchMode::Empty),
-            } => {
-                let Some(path_body) = self
-                    .code
-                    .function(position.frame.function)
-                    .paths
-                    .get(path.index())
-                else {
-                    return Step::Slow;
-                };
-                match (path_body.base, path_body.steps.last()) {
-                    (PathBase::Register(_), None) => match self.quiet_variable(path, position) {
-                        Some(found) => self.store_quiet::<GUARDED>(position, dst, found),
-                        None => Step::Slow,
-                    },
-                    (PathBase::StaticProperty { .. } | PathBase::NamedStaticProperty { .. }, _) => {
-                        self.fetch_static::<GUARDED>(position, dst, (path, mode))
-                    }
-                    (_, Some(PathStep::Property(_) | PathStep::DynamicProperty(_))) => {
-                        self.fetch_property_quietly::<GUARDED>(position, dst, path)
-                    }
-                    (PathBase::Register(_), Some(PathStep::Index(_)))
-                        if path_body
-                            .steps
-                            .iter()
-                            .all(|step| matches!(step, PathStep::Index(_))) =>
-                    {
-                        self.fetch_local_element::<GUARDED>(position, dst, (path, mode))
-                    }
-                    _ => match self.fetch_property_quietly::<GUARDED>(position, dst, path) {
-                        Step::Slow => {
-                            self.fetch_local_element::<GUARDED>(position, dst, (path, mode))
+            } => match self.quiet_variable(path, position) {
+                Some(found) => self.store_quiet::<GUARDED>(position, dst, found),
+                None => match self.fetch_property_quietly::<GUARDED>(position, dst, path) {
+                    Step::Slow => {
+                        match self.fetch_local_element::<GUARDED>(position, dst, (path, mode)) {
+                            Step::Slow => self.fetch_static::<GUARDED>(position, dst, (path, mode)),
+                            done => done,
                         }
-                        done => done,
-                    },
-                }
-            }
-            // Dispatch directly on the path tail so `[Index]`/`[Append]` writes
-            // never pay a wasted `assign_property` call and value clone.
-            Instruction::AssignPath { path, src } => {
-                let tail = self
-                    .code
-                    .function(position.frame.function)
-                    .paths
-                    .get(path.index())
-                    .and_then(|body| body.steps.last().copied());
-                match tail {
-                    Some(PathStep::Property(_) | PathStep::DynamicProperty(_)) => {
-                        self.assign_property::<GUARDED>(position, path, (src, None))
                     }
-                    Some(PathStep::Index(_) | PathStep::Append) => {
+                    done => done,
+                },
+            },
+            // Declared property first (disjoint from `[Index]`/`[Append]` dimensions),
+            // then ArrayAccess dimensions, then plain array element writes.
+            Instruction::AssignPath { path, src } => {
+                match self.assign_property::<GUARDED>(position, path, (src, None)) {
+                    Step::Slow => {
                         let written = if self.classes.has_dimensions {
                             self.write_dimension_path(position, path, src)
                         } else {
@@ -187,46 +133,24 @@ impl Machine<'_> {
                             done => done,
                         }
                     }
-                    None => Step::Slow,
+                    done => done,
                 }
             }
             // Only arrays are written here, so an `ArrayAccess` object on
             // the path is left to the VM as well.
             Instruction::AssignPathFromLocal { path, src, dst } => {
-                let tail = self
-                    .code
-                    .function(position.frame.function)
-                    .paths
-                    .get(path.index())
-                    .and_then(|body| body.steps.last().copied());
-                match tail {
-                    Some(PathStep::Property(_) | PathStep::DynamicProperty(_)) => {
-                        self.assign_property::<GUARDED>(position, path, (src, Some(dst)))
-                    }
-                    Some(PathStep::Index(_) | PathStep::Append) => {
-                        self.assign_element::<GUARDED>(position, path, (src, Some(dst)))
-                    }
-                    None => Step::Slow,
+                match self.assign_property::<GUARDED>(position, path, (src, Some(dst))) {
+                    Step::Slow => self.assign_element::<GUARDED>(position, path, (src, Some(dst))),
+                    done => done,
                 }
             }
             Instruction::AssignOpPath { op, dst, path, src } => {
                 self.assign_operation::<GUARDED>(position, (op, dst), path, src)
             }
             Instruction::IncDecPath { mode, dst, path } => {
-                let tail = self
-                    .code
-                    .function(position.frame.function)
-                    .paths
-                    .get(path.index())
-                    .and_then(|body| body.steps.last().copied());
-                match tail {
-                    Some(PathStep::Property(_) | PathStep::DynamicProperty(_)) => {
-                        self.increment_property::<GUARDED>(position, (mode, dst), path)
-                    }
-                    Some(PathStep::Index(_) | PathStep::Append) => {
-                        self.increment_element::<GUARDED>(position, (mode, dst), path)
-                    }
-                    None => Step::Slow,
+                match self.increment_property::<GUARDED>(position, (mode, dst), path) {
+                    Step::Slow => self.increment_element::<GUARDED>(position, (mode, dst), path),
+                    done => done,
                 }
             }
             Instruction::InitCall { function } => self.prepare_named_call(position, function),
