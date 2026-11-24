@@ -121,7 +121,11 @@ impl Vm {
                     trace,
                 );
                 if cli_stderr {
-                    let _ = std::io::stderr().lock().write_all(&bytes);
+                    if self.output_writer.debugger.as_ref().is_none_or(|debugger| {
+                        debugger.buffer(crate::debugger::Stream::Stderr, &bytes)
+                    }) {
+                        let _ = std::io::stderr().lock().write_all(&bytes);
+                    }
                 } else if let Some(bytes) = self.diagnostic_reporter.display(bytes) {
                     if matches!(phase, DiagnosticPhase::RequestStartup) {
                         self.diagnostic_location = Some(SourceLocation {

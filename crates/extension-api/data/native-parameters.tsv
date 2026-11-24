@@ -857,6 +857,7 @@ explode	ext/standard/basic_functions.stub.php:2329	separator	r--		-	string	r--		
 expm1	ext/standard/basic_functions.stub.php:3163	num	r--		-
 extension_loaded	Zend/zend_builtin_functions.stub.php:193	extension	r--		-
 extract	ext/standard/basic_functions.stub.php:1626	array	r-&		-	flags	o--	EXTR_OVERWRITE	i0	prefix	o--	""	s
+fastcgi_finish_request	sapi/fpm/fpm/fpm_main.stub.php:5
 fclose	ext/standard/basic_functions.stub.php:2746	stream	r--		-
 fdatasync	ext/standard/basic_functions.stub.php:2806	stream	r--		-
 fdiv	ext/standard/basic_functions.stub.php:3255	num1	r--		-	num2	r--		-
@@ -1653,6 +1654,7 @@ limititerator::seek	ext/spl/spl_iterators.stub.php:204	offset	r--		-
 limititerator::valid	ext/spl/spl_iterators.stub.php:198
 link	ext/standard/basic_functions.stub.php:3091	target	r--		-	link	r--		-
 linkinfo	ext/standard/basic_functions.stub.php:3087	path	r--		-
+litespeed_finish_request	sapi/litespeed/lsapi_main.stub.php:20
 locale::acceptfromhttp	ext/intl/locale/locale.stub.php:135	header	r--		-
 locale::addlikelysubtags	ext/intl/locale/locale.stub.php:145	locale	r--		-
 locale::canonicalize	ext/intl/locale/locale.stub.php:129	locale	r--		-
@@ -4086,3 +4088,4 @@ zend_version	Zend/zend_builtin_functions.stub.php:19
 zlib_decode	ext/zlib/zlib.stub.php:186	data	r--		-	max_length	o--	0	i0
 zlib_encode	ext/zlib/zlib.stub.php:183	data	r--		-	encoding	r--		-	level	o--	-1	i-1
 zlib_get_coding_type	ext/zlib/zlib.stub.php:166
+xdebug_break	Xdebug 3.5.0 reflection

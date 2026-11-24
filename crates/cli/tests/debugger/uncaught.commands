@@ -1,0 +1,5 @@
+breakpoint_set -t exception -x UncaughtDebugFailure
+run
+stack_get
+run
+stop

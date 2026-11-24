@@ -27,6 +27,21 @@ impl Diagnostics for Vm {
 }
 
 impl Context for Vm {
+    fn break_into_debugger(&mut self) -> bool {
+        Vm::break_into_debugger(self)
+    }
+
+    fn debugger_output(&mut self, stderr: bool, bytes: &[u8]) -> bool {
+        self.output_writer.debugger.as_ref().is_none_or(|debugger| {
+            let stream = if stderr {
+                crate::debugger::Stream::Stderr
+            } else {
+                crate::debugger::Stream::Stdout
+            };
+            debugger.buffer(stream, bytes)
+        })
+    }
+
     fn replace_caller_variable(&mut self, name: &str, value: Value) -> Result<(), NativeError> {
         if self.current().is_none() {
             self.set_global(name, value);
@@ -91,6 +106,25 @@ impl Context for Vm {
         self.out(bytes)
     }
 
+    fn write_chunk(&mut self, bytes: &[u8]) -> Option<LocalFuture<'_, Result<(), NativeError>>> {
+        self.out(bytes);
+        if self.output_writer.response_pending
+            || (self.headers_pending() && self.output_writer.flushes_writes())
+        {
+            Some(Box::pin(self.drain_output()))
+        } else {
+            None
+        }
+    }
+
+    fn connection_status(&self) -> i64 {
+        i64::from(self.client_aborted()) | (i64::from(self.timed_out()) << 1)
+    }
+
+    fn finish_response(&mut self, function: &'static str) -> LocalFuture<'_, NativeResult> {
+        Box::pin(Vm::finish_response_early(self, function))
+    }
+
     fn pending_output_diagnostics(
         &mut self,
     ) -> Option<LocalFuture<'_, phera_extension_api::OutputDiagnostics>> {
@@ -100,7 +134,6 @@ impl Context for Vm {
             Some(self.drain_output_diagnostics())
         }
     }
-
     fn backtrace(&mut self, objects: bool, arguments: bool, limit: i32) -> Value {
         Value::from(self.capture_trace(phera_value::PhpArray::new(), objects, arguments, limit))
     }

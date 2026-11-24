@@ -1,0 +1,15 @@
+breakpoint_set -t conditional -f {file} -n 15 -- JG1hcmsgPT09IDM=
+breakpoint_set -t exception -x DebugFailure
+run
+stack_get
+eval -- JHRvdGFs
+property_get -n $mode
+property_get -n $now
+property_get -n $lazy
+property_get -n $recursive
+step_into
+stack_get
+run
+stack_get
+run
+stop

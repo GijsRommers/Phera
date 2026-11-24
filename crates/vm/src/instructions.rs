@@ -20,7 +20,9 @@ use crate::calls::sends::SentArgument;
 impl Vm {
     /// Runs one instruction. `Some` hands control back to the async shell:
     /// a native call to run, a finished callback, or an instruction to await.
-    #[inline]
+    /// Inline at each batch call site so the debugger's cold caller cannot
+    /// make the plain batch pay for another dispatch call.
+    #[inline(always)]
     pub(crate) fn execute<const TRACK_GENERATORS: bool>(
         &mut self,
         instruction: Instruction,

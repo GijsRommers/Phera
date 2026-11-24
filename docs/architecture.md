@@ -248,9 +248,9 @@ cleartext HTTP/2 (`h2c`) on one listener, running one worker per core.
    per worker and every request starts from that state. Because a request
    works on a fork, it cannot leak state into the next one, which is the
    known risk of those worker modes.
-7. **Finishing early.** `fastcgi_finish_request()` (send the response, keep
-   working), which Symfony calls when it exists, and Early Hints (103),
-   which the proxy passes on.
+7. **Finishing early.** `fastcgi_finish_request()` sends the response and
+   keeps the script running. Symfony calls it when available. Early Hints
+   (103) remain planned.
 8. **Compression** of PHP's responses (gzip, zstd, brotli) where the proxy
    does not compress.
 9. **Operations.** A `phera.toml`, an access log, metrics, reloading code
@@ -267,6 +267,30 @@ Not planned: speaking FastCGI, that is, being a drop-in for PHP-FPM behind
 an existing nginx `fastcgi_pass`. A proxy reaches Phera over HTTP like any
 other upstream. This can be revisited if someone needs to keep an nginx
 configuration unchanged.
+
+#### Streaming PHP output
+
+`flush()` commits the response head, even if there are no body bytes. PHP
+output buffers keep their nesting rules. When `ob_flush()` or
+`ob_end_flush()` releases bytes to the transport, the server sends them.
+`ob_implicit_flush()` does the same for each write to the transport.
+Hyper writes HTTP/1.1 chunks or HTTP/2 DATA frames. The streaming body has
+one queued chunk of at most 64 KiB and waits asynchronously for room.
+The normal buffered path returns a body with its exact length.
+
+The connection polls PHP directly until the response starts. On an explicit
+handoff it moves pending PHP work into a task on the same worker. Dropping
+the connection also detaches an unfinished request. It retains the
+connection slot and its original deadline, and takes part in graceful
+shutdown. HTTP/2 also limits in-flight requests per worker, including
+detached requests. An excess stream receives HTTP 503. The buffered path
+captures bytes without observing the socket,
+so PHP finishes its work and the server discards the buffered response if
+the client already left. An explicit or implicit flush opens the
+transport. With `ignore_user_abort(false)`, a failed transport write ends
+PHP's execution and runs its shutdown functions and destructors.
+`fastcgi_finish_request()` finalizes PHP's output buffers and ends the body
+while the task continues. Output after that point has no recipient.
 
 #### PHP diagnostics
 
@@ -2482,6 +2506,35 @@ Rector provide starting points for rule semantics. For a future
 `phera fmt`, a lossless token stream needs to retain comments, whitespace
 and PHP/HTML boundaries and associate them with AST nodes. Lint edits only
 need the spans for the particular tokens and trivia a rule examines.
+
+### 11.10 Step debugging
+
+DBGp clients connect by listening for the runtime's outgoing session. The
+runtime selects a session from startup settings and the request's parsed
+trigger fields before executing PHP. Each session owns its own features,
+breakpoints, continuation command, and asynchronous TCP stream.
+
+Workers select their HTTP handler when the server starts. The ordinary
+handler calls the ordinary runtime specialization. Enabling debugging
+registers the debugger's PHP functions and directives at process startup.
+
+The VM selects the debugger batch after a connection succeeds. The debugger
+batch publishes the next instruction before a source stop and uses the same
+guarded register operations and slow instruction handlers as ordinary PHP
+execution. The plain interpreter loop and its destructor checks retain
+their existing instruction dispatch.
+
+A connection belongs to one VM. An IDE stop suspends the PHP request task
+on Tokio and pauses that request's wall-clock timer. The PHP CPU timer
+already charges only while the task is being polled.
+
+With snapshot and fork, the runtime sets up request globals before choosing
+whether to attach the request debugger. A fork has its own connection and
+can stop in request code from files compiled during boot. Breakpoints
+resolve against the fork's copy of the worker's loaded code table.
+A development server can attach to the boot
+VM with `--debug --dev --debug-boot`. Snapshot creation closes the boot's
+debugger session and the snapshot retains no connection state.
 
 ## 12. What to take from Hack and HHVM, and what not
 

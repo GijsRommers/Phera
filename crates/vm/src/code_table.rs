@@ -109,6 +109,10 @@ impl Default for CodeTable {
 }
 
 impl CodeTable {
+    pub(crate) fn loaded_units(&self) -> impl Iterator<Item = &CompiledUnit> {
+        self.units.iter().map(|loaded| loaded.unit.as_ref())
+    }
+
     /// A request's table, numbered by its worker.
     pub(crate) fn for_worker(worker: &std::rc::Rc<crate::worker_code::WorkerCode>) -> Self {
         CodeTable {

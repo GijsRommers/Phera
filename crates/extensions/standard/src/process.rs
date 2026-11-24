@@ -72,22 +72,19 @@ fn set_time_limit(context: &mut dyn Context, arguments: &[Value]) -> NativeResul
 
 /// `connection_aborted(): int`, 1 when the client has gone away.
 ///
-/// When the client goes away Phera stops the request, so a script that is
-/// still running always has its client: 0.
 const CONNECTION_ABORTED_FUNCTION: FunctionEntry =
     FunctionEntry::sync("connection_aborted", &[], connection_aborted);
 
-fn connection_aborted(_: &mut dyn Context, _: &[Value]) -> NativeResult {
-    Ok(Value::Int(0))
+fn connection_aborted(context: &mut dyn Context, _: &[Value]) -> NativeResult {
+    Ok(Value::Int(context.connection_status() & CONNECTION_ABORTED))
 }
 
-/// `connection_status(): int`, for the same reason always
-/// `CONNECTION_NORMAL`.
+/// `connection_status(): int` reports a client abort or a PHP timeout.
 const CONNECTION_STATUS: FunctionEntry =
     FunctionEntry::sync("connection_status", &[], connection_status);
 
-fn connection_status(_: &mut dyn Context, _: &[Value]) -> NativeResult {
-    Ok(Value::Int(CONNECTION_NORMAL))
+fn connection_status(context: &mut dyn Context, _: &[Value]) -> NativeResult {
+    Ok(Value::Int(context.connection_status()))
 }
 
 /// `ignore_user_abort(?bool $enable = null): int` returns the setting as it
@@ -99,8 +96,6 @@ fn connection_status(_: &mut dyn Context, _: &[Value]) -> NativeResult {
 /// ignore_user_abort();     // 1
 /// ```
 ///
-/// The setting is remembered and reported; it does not yet change what
-/// happens when a client disconnects.
 const IGNORE_USER_ABORT: FunctionEntry = FunctionEntry::sync(
     "ignore_user_abort",
     &[Param::new("enable", ParamType::Bool).nullable().optional()],

@@ -12,7 +12,6 @@
 //! idle_timeout = 90
 //! ```
 
-use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -23,6 +22,7 @@ pub(super) struct Settings {
     pub(super) warmup: Vec<String>,
     pub(super) websocket: WebSocketSettings,
     pub(super) path: Option<PathBuf>,
+    pub(super) table: toml::Table,
 }
 
 #[derive(Default)]
@@ -54,14 +54,7 @@ pub(super) fn project_root(document_root: &Path) -> &Path {
 
 pub(super) fn read(project: &Path) -> Result<Settings, String> {
     let path = project.join("phera.toml");
-    let source = match std::fs::read_to_string(&path) {
-        Ok(source) => source,
-        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Settings::default()),
-        Err(error) => return Err(format!("{}: {error}", path.display())),
-    };
-    let table: toml::Table = source
-        .parse()
-        .map_err(|error| format!("{}: {error}", path.display()))?;
+    let (table, config_path) = crate::debug_settings::read_table(project)?;
     let server = table.get("server");
     let preload = server.and_then(|server| server.get("preload"));
     let preload = match preload {
@@ -109,7 +102,8 @@ pub(super) fn read(project: &Path) -> Result<Settings, String> {
         preload,
         warmup,
         websocket,
-        path: path.canonicalize().ok(),
+        path: config_path,
+        table,
     })
 }
 

@@ -249,6 +249,94 @@ effect (logging, counting) is called once per warmed class in the warm-up
 boot and then no longer in requests. `phera serve --no-class-warmup` turns
 this off.
 
+Use `flush()` to stream PHP output before the request ends. If you started
+an output buffer, use `ob_flush()` or `ob_end_flush()` to release its contents.
+An outer buffer can still hold the bytes. `ob_implicit_flush()` sends each
+write that reaches the response. Output uses chunks on HTTP/1.1 and DATA
+frames on cleartext HTTP/2. Configure any reverse proxy to forward chunks
+as they arrive. Phera's `--compress` applies to buffered PHP responses.
+
+```php
+header('Content-Type: text/plain');
+echo "Starting\n";
+flush();
+do_work();
+echo "Done\n";
+```
+
+Call `fastcgi_finish_request()` (also available as
+`litespeed_finish_request()`) to complete the response and continue running
+PHP. Further output is discarded. The request timeout still applies, and
+resources such as session locks are released at their usual points.
+If a client leaves while the response is still buffered, PHP keeps
+running and the server discards the response at request end. PHP observes
+a disconnected client when a transport write fails. Its shutdown
+functions and destructors still run. `ignore_user_abort(true)` also
+lets the script continue after the failed write.
+
+### Step debugging
+
+Phera speaks DBGp, the protocol PHP IDEs use for Xdebug. Start the IDE listener
+and run `phera run --debug script.php` or `phera serve --debug public`.
+
+For request-triggered debugging, set `xdebug.mode=debug` using `-d` or
+`XDEBUG_MODE=debug`, then send `XDEBUG_TRIGGER=1` or `XDEBUG_SESSION=1` as a
+cookie, query parameter, POST form field, or environment variable. The default
+destination is `127.0.0.1:9003`. Set `xdebug.client_host` and `xdebug.client_port`
+with `-d`, or use `XDEBUG_CONFIG="client_host=127.0.0.1 client_port=9003"`.
+You can also set this in your project's `phera.toml`:
+
+```toml
+[debug]
+enabled = true
+start_with_request = "trigger"
+client_host = "127.0.0.1"
+client_port = 9003
+```
+
+The IDE can inspect and change data and evaluate PHP in a stopped request.
+Phera connects only to the configured IDE address. A server enabling
+debugging on a non-loopback listen address needs `--allow-remote-debug`.
+One worker can serve other requests while PHP waits for an IDE command.
+
+A debugged request forks the application's snapshot where one exists.
+To stop in PHP that runs before the snapshot, start the IDE listener and run
+`phera serve --debug --dev --debug-boot --workers 1 public`. The boot debugger
+can pause before the worker accepts requests. The first HTTP request has its
+own debugging session.
+
+With debugging enabled, PHP exposes the active settings through
+`ini_get('xdebug.mode')` and the
+other `xdebug.*` directives above. PhpStorm's validator checks for the
+Xdebug PHP extension. Use **Start Listening for PHP Debug Connections**
+and a breakpoint to verify a Phera session.
+
+#### PhpStorm
+
+1. Open the PHP project in PhpStorm.
+2. Go to **Settings → PHP → Debug**.
+3. Confirm the Xdebug port includes `9003`.
+4. Select **Run → Start Listening for PHP Debug Connections**.
+5. Set a breakpoint on an executable line.
+6. Run `phera run --debug script.php` from the project directory.
+7. For HTTP, run `phera serve --debug public` and load the relevant URL.
+8. If the IDE prompts for a mapping, map the server path to the project file.
+9. Use **Variables**, **Step Into**, **Step Over**, and **Step Out** at the stop.
+10. Resume to let the script finish or the request return its response.
+
+#### VS Code
+
+1. Install the **PHP Debug** extension from Xdebug.
+2. Open the PHP project in VS Code.
+3. In **Run and Debug**, create a PHP launch configuration.
+4. Choose **Listen for Xdebug**, with `"port": 9003`.
+5. Start the listener with **F5**.
+6. Set a breakpoint on an executable line in the PHP file.
+7. Run `phera run --debug script.php` in a separate terminal.
+8. For HTTP, run `phera serve --debug public` and load the relevant URL.
+9. Expand **Variables** and use **Watch** to evaluate an expression.
+10. Step or continue from the **Run and Debug** toolbar.
+
 ### WebSockets
 
 `phera serve` handles RFC 6455 WebSocket connections on the same HTTP listener.

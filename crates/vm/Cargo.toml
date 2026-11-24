@@ -11,7 +11,10 @@ chrono.workspace = true
 foldhash.workspace = true
 phera-value.workspace = true
 phera-extension-api.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["io-util"] }
+base64.workspace = true
+quick-xml.workspace = true
+url.workspace = true
 rustix.workspace = true
 indexmap.workspace = true
 

@@ -25,12 +25,21 @@ impl Vm {
         // Ordinary files count occurrences from zero. Give each evaluated
         // unit its own range even when two executions share the source line.
         let anonymous_seed = u64::from(self.code.next_unit_index().0) << 32;
+        let debug_source = self.debugger.as_ref().map(|_| source.clone());
         let compiled = tokio::task::spawn_blocking(move || {
             phera_compiler::compile_eval_with_seed(&source, &file, anonymous_seed)
         })
         .await
         .map_err(|error| NativeError::error(format!("Eval compiler failed: {error}")))?;
         match compiled {
+            Ok(unit) if debug_source.is_some() => {
+                let unit = Arc::new(unit);
+                self.enter_scoped_unit(unit.clone(), Some(destination))?;
+                if let (Some(debugger), Some(source)) = (&mut self.debugger, debug_source) {
+                    debugger.sources.remember(&unit, source);
+                }
+                Ok(())
+            }
             Ok(unit) => self.enter_scoped_unit(Arc::new(unit), Some(destination)),
             Err(error) => Err(self.dynamic_compile_failure(error).await),
         }

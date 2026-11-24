@@ -52,11 +52,37 @@ pub trait Context {
     /// Appends to the request's output, as `echo` does.
     fn write(&mut self, bytes: &[u8]);
 
+    /// Request a breakpoint if a debugger is attached to this context.
+    fn break_into_debugger(&mut self) -> bool {
+        false
+    }
+
+    /// Return whether a standard descriptor should also receive this write.
+    fn debugger_output(&mut self, _stderr: bool, _bytes: &[u8]) -> bool {
+        true
+    }
+
+    /// Write a piece of an asynchronous transfer, waiting for the web
+    /// transport when it needs to send that piece before the next read.
+    fn write_chunk(&mut self, bytes: &[u8]) -> Option<LocalFuture<'_, Result<(), NativeError>>> {
+        self.write(bytes);
+        None
+    }
+
+    /// PHP's connection status, a bitmask of client abort and script timeout.
+    fn connection_status(&self) -> i64 {
+        0
+    }
+
+    /// Finish the HTTP response while the PHP request keeps running.
+    fn finish_response(&mut self, _function: &'static str) -> LocalFuture<'_, NativeResult> {
+        Box::pin(async { Ok(Value::Bool(false)) })
+    }
+
     /// Delivers diagnostics from conversions before a native emits output.
     fn pending_output_diagnostics(&mut self) -> Option<LocalFuture<'_, OutputDiagnostics>> {
         None
     }
-
     /// Snapshot PHP callers without retaining references to live parameter slots.
     fn backtrace(&mut self, _objects: bool, _arguments: bool, _limit: i32) -> Value {
         Value::from(PhpArray::new())

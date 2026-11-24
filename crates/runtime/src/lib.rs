@@ -10,6 +10,7 @@ mod boot;
 mod boot_changes;
 mod cache;
 mod constant_calls;
+mod debugger;
 mod environment;
 mod error;
 #[cfg(test)]
@@ -36,7 +37,7 @@ use std::sync::Arc;
 
 use phera_bytecode::CompiledUnit;
 use phera_dotenv::Environment;
-use phera_ext_http::{RequestHeaders, ResponseHead, Sapi, UploadedFiles};
+use phera_ext_http::{RequestHeaders, Sapi, UploadedFiles};
 use phera_ext_standard::environment::{RequestEnvironment, php_array};
 use phera_extension_api::Registry;
 use phera_value::{PhpArray, Value};
@@ -47,10 +48,11 @@ use worker_code_cache::{RequestCodeCache, WorkerCodeCache};
 
 pub use boot::BootReport;
 pub use error::RuntimeError;
-pub use http::{HttpRequest, HttpResponse};
+pub use http::{HttpRequest, HttpResponse, web_output::WebOutput};
+pub use phera_ext_http::ResponseHead;
 pub use phera_extension_api::web_log::flush as flush_web_log;
 pub use phera_extension_api::websocket::{WebSocketEvent, WebSocketEventOutcome, WebSocketSink};
-pub use phera_vm::OutputSink;
+pub use phera_vm::{DebugConfig, DebugTimeLimit, OutputSink};
 pub use preload::PreloadSummary;
 pub use snapshots::{remembered as snapshot_remembered, requests_from_the_top};
 
@@ -90,6 +92,7 @@ pub struct Runtime {
     /// Scripts that run PHP source Phera ships in place of the file (an
     /// adapter's entry script), by the script's path.
     entry_scripts: Arc<std::collections::HashMap<std::path::PathBuf, &'static str>>,
+    debug: Option<Arc<DebugConfig>>,
     /// WebSocket hub exposed to `Phera\WebSocket\*` when running under `phera serve`.
     websocket_sink: Option<Arc<dyn phera_extension_api::websocket::WebSocketSink>>,
     /// Maximum number of active request VMs running concurrently on one worker
@@ -112,11 +115,25 @@ pub struct WebWorker {
     /// the background (`phera serve`); see [`WebWorker::with_background_boots`].
     background_boots: bool,
     code: Rc<WorkerCodeCache>,
+    output_factory: Option<Rc<dyn phera_vm::WebOutputFactory>>,
     /// Bounds concurrently forked request VMs on this worker thread.
     active_requests: Option<Rc<tokio::sync::Semaphore>>,
 }
 
 impl WebWorker {
+    /// A debug-enabled server can pause its request deadline while PHP waits for the IDE.
+    pub async fn handle_debug_request(
+        &self,
+        script: &Path,
+        document_root: &Path,
+        request: HttpRequest,
+        time_limit: Option<DebugTimeLimit>,
+    ) -> HttpResponse {
+        self.runtime
+            .handle_web_request::<true>(self, script, document_root, request, time_limit)
+            .await
+    }
+
     /// Lets this worker boot scripts in the background (a first request
     /// that reached `Phera\snapshot()`, a changed file). Only for a worker
     /// whose requests run on a Tokio `LocalSet`, as `phera serve`'s do.
@@ -128,6 +145,16 @@ impl WebWorker {
     /// The worker's number.
     pub fn index(&self) -> usize {
         self.index
+    }
+
+    /// Give scripts a way to open a transport if they flush or finish early.
+    pub fn with_web_output<F, T>(mut self, factory: F) -> Self
+    where
+        F: Fn(Option<&[u8]>) -> Option<T> + 'static,
+        T: WebOutput + 'static,
+    {
+        self.output_factory = Some(Rc::new(http::web_output::TransportFactory(factory)));
+        self
     }
 
     /// The classes this worker's requests of `script` autoloaded so far.
@@ -148,7 +175,7 @@ impl WebWorker {
         request: HttpRequest,
     ) -> HttpResponse {
         self.runtime
-            .handle_web_request(self, script, document_root, request)
+            .handle_web_request::<false>(self, script, document_root, request, None)
             .await
     }
 
@@ -224,6 +251,7 @@ impl Runtime {
             startup_ini: Arc::new([]),
             web_development: false,
             no_process: false,
+            debug: None,
             class_warmup: true,
             include_policy: phera_vm::IncludeCachePolicy::default(),
             entry_scripts: Arc::default(),
@@ -369,6 +397,9 @@ impl Runtime {
             phera_ext_streams::track_standard(vm.state_mut(), &stream);
             vm.set_constant(name, stream);
         }
+        if self.debug.is_some() {
+            self.connect_debugger(&mut vm, &unit.file, None).await;
+        }
         let status = vm.run(unit).await;
         Ok(RunResult {
             executed_instructions: vm.executed_instructions,
@@ -389,6 +420,7 @@ impl Runtime {
             snapshots: Default::default(),
             background_boots: false,
             code: Rc::new(WorkerCodeCache::new(self.web_cache.clone())),
+            output_factory: None,
             active_requests: self
                 .max_concurrent_requests_per_worker
                 .map(|limit| Rc::new(tokio::sync::Semaphore::new(limit))),
@@ -533,12 +565,13 @@ impl Runtime {
         outcome
     }
 
-    async fn handle_web_request(
+    async fn handle_web_request<const DEBUG: bool>(
         &self,
         worker: &WebWorker,
         script: &Path,
         document_root: &Path,
         request: HttpRequest,
+        debug_time_limit: Option<DebugTimeLimit>,
     ) -> HttpResponse {
         let code = Rc::new(RequestCodeCache::new(worker.code.clone()));
         let compiled = match self.entry_unit(&code, script).await {
@@ -615,6 +648,9 @@ impl Runtime {
             protocol: request.protocol,
         };
         vm.prepare_web_headers_with(ResponseHead::prepare, ResponseHead::set_error_status);
+        if let Some(factory) = &worker.output_factory {
+            vm.set_web_output_factory(factory.clone());
+        }
         vm.configure_web_diagnostics(self.web_development, RequestHeaders::request_line);
         *vm.state_mut().get_or_default::<UploadedFiles>() = UploadedFiles::new(uploads);
         phera_ext_streams::set_request(
@@ -627,6 +663,10 @@ impl Runtime {
         }
         if let Some(warning) = form_warning {
             vm.request_startup_warning(warning);
+        }
+        if DEBUG && let Ok(unit) = &compiled {
+            self.connect_debugger(&mut vm, &unit.file, debug_time_limit)
+                .await;
         }
         match compiled {
             Ok(_) if forked => {

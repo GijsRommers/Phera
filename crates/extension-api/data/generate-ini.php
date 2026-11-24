@@ -60,7 +60,7 @@ $integers = ['error_reporting', 'filter.default_flags', 'mbstring.substitute_cha
 
 $storageOnly = ($argv[1] ?? null) === '--storage-only';
 $applied = explode(' ', 'arg_separator.output assert.active assert.exception assert.warning '
-    . 'date.timezone default_charset display_errors error_reporting fiber.stack_size ignore_user_abort '
+    . 'date.timezone default_charset display_errors error_reporting fiber.stack_size ignore_user_abort implicit_flush '
     . 'include_path internal_encoding output_encoding mbstring.detect_order '
     . 'mail.add_x_header mail.cr_lf_mode mail.force_extra_parameters mail.log mail.mixed_lf_and_crlf sendmail_path '
     . 'mbstring.http_output mbstring.internal_encoding mbstring.language mbstring.substitute_character '
@@ -125,4 +125,12 @@ if (!$storageOnly) {
     echo "phera_server\topcache.revalidate_freq\tint\t7\t32\n";
     echo "phera_server\topcache.revalidate_path\tbool\t7\t30\n";
     echo "phera_server\topcache.validate_timestamps\tbool\t7\t31\n";
+    // Phera exposes debugger settings without loading the Xdebug extension.
+    echo "phera_debugger\txdebug.mode\tlist\t4\t6f6666\n";
+    echo "phera_debugger\txdebug.client_host\tstring\t4\t3132372e302e302e31\n";
+    echo "phera_debugger\txdebug.client_port\tint\t4\t39303033\n";
+    echo "phera_debugger\txdebug.start_with_request\tstring\t4\t64656661756c74\n";
+    echo "phera_debugger\txdebug.idekey\tstring\t4\t=\n";
+    echo "phera_debugger\txdebug.connect_timeout_ms\tint\t4\t323030\n";
+    echo "phera_debugger\txdebug.log\tstring\t4\t=\n";
 }

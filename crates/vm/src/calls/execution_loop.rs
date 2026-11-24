@@ -14,6 +14,8 @@
 //! [`LoopExit::Slow`]; the VM runs that one instruction through
 //! `Vm::execute` and starts the loop again where the frame now is.
 
+mod debug_step;
+
 use phera_bytecode::{BinaryOp, Instruction, Reg, Target};
 use phera_extension_api::NativeError;
 use phera_value::Value;

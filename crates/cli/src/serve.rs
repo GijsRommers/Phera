@@ -13,6 +13,7 @@ mod forwarded;
 mod precompressed;
 mod site;
 mod static_file;
+mod web_output;
 
 use std::future::Future;
 use std::net::SocketAddr;
@@ -21,14 +22,15 @@ use std::pin::Pin;
 use std::process::ExitCode;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Duration;
 
 use phera_runtime::{
-    HttpRequest, HttpResponse, Runtime, WebSocketEvent as RuntimeWebSocketEvent, WebSocketSink,
-    WebWorker,
+    DebugTimeLimit, HttpRequest, HttpResponse, Runtime, WebSocketEvent as RuntimeWebSocketEvent,
+    WebSocketSink, WebWorker,
 };
 use phera_server::{
-    Handler, HandlerFactory, HttpVersion, Request, Response, Server, ServerConfig, WebSocketEvent,
-    WebSocketEventKind, WebSocketHub, WebSocketOutcome, WebSocketUpgrade,
+    Handler, HandlerFactory, HttpVersion, Request, Response, ResponseWriter, Server, ServerConfig,
+    WebSocketEvent, WebSocketEventKind, WebSocketHub, WebSocketOutcome, WebSocketUpgrade,
 };
 
 use crate::arguments::ServeOptions;
@@ -98,6 +100,33 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
         None => TrustedProxies::default(),
     };
     let listen = options.listen.unwrap_or_else(default_address);
+    if options.debug_boot && (!options.debug || !options.dev) {
+        eprintln!("--debug-boot requires --debug --dev");
+        return ExitCode::FAILURE;
+    }
+    let mut debug = match crate::debug_settings::configure(
+        options.debug,
+        &settings.table,
+        &options.ini,
+        &loaded.environment,
+    ) {
+        Ok(debug) => debug,
+        Err(error) => {
+            eprintln!("{error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    if let Some(debug) = &mut debug {
+        debug.boot = options.debug_boot;
+        if !listen.ip().is_loopback() && !options.allow_remote_debug {
+            eprintln!("Debugging on a non-loopback address requires --allow-remote-debug");
+            return ExitCode::FAILURE;
+        }
+        eprintln!(
+            "WARNING: PHP step debugging is enabled. Debug sessions connect to {}:{}.",
+            debug.host, debug.port,
+        );
+    }
     let mut config = ServerConfig {
         addr: listen,
         ..ServerConfig::default()
@@ -113,6 +142,9 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
     }
     apply_websocket_config(&mut config, &settings.websocket, &options);
     let workers = config.workers;
+    let debug_server = debug.as_ref().map(|_| DebugServer {
+        timeout: config.request_timeout.take(),
+    });
     let ws_hub = Arc::new(WebSocketHub::new(
         config.websocket.send_queue_len,
         config.websocket.send_queue_bytes,
@@ -124,6 +156,9 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
         .without_web_processes(options.no_process)
         .without_class_warmup(!options.class_warmup)
         .with_websocket_sink(Arc::new(HubSink(ws_hub.clone())));
+    if let Some(debug) = debug {
+        runtime = runtime.with_debug(debug);
+    }
     if let (Adapter::Laravel, Some(front_controller)) = (adapter, site.front_controller()) {
         runtime = runtime.with_entry_script(
             front_controller.to_path_buf(),
@@ -151,6 +186,7 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
     let factory = SiteHandlerFactory {
         runtime,
         adapter,
+        debug_server,
         site: site.clone(),
         compress: options.compress,
         trusted_proxies: Arc::new(trusted_proxies),
@@ -237,6 +273,7 @@ struct SiteHandlerFactory {
     /// The framework adapter in use, which makes the front controller boot
     /// at start.
     adapter: Adapter,
+    debug_server: Option<DebugServer>,
     site: Arc<Site>,
     compress: bool,
     trusted_proxies: Arc<TrustedProxies>,
@@ -245,18 +282,38 @@ struct SiteHandlerFactory {
 
 impl HandlerFactory for SiteHandlerFactory {
     fn create(&self, worker_index: usize) -> Rc<dyn Handler> {
-        Rc::new(SiteHandler {
+        let compress = self.compress;
+        let site = SiteHandler {
             runtime: self
                 .runtime
                 .web_worker(worker_index)
-                .with_background_boots(),
+                .with_background_boots()
+                .with_web_output(move |encoding| {
+                    let writer = ResponseWriter::take_current()?;
+                    let encoding = encoding
+                        .filter(|_| compress)
+                        .map(|value| String::from_utf8_lossy(value).into_owned());
+                    Some(web_output::HttpOutput::new(writer, compress, encoding))
+                }),
             adapter: self.adapter,
             site: self.site.clone(),
             compress: self.compress,
             trusted_proxies: self.trusted_proxies.clone(),
             health_path: self.health_path.clone(),
-        })
+        };
+        match self.debug_server {
+            Some(debug) => Rc::new(DebugSiteHandler {
+                site,
+                timeout: debug.timeout,
+            }),
+            None => Rc::new(site),
+        }
     }
+}
+
+#[derive(Clone, Copy)]
+struct DebugServer {
+    timeout: Option<Duration>,
 }
 
 struct SiteHandler {
@@ -273,7 +330,7 @@ struct SiteHandler {
 
 impl Handler for SiteHandler {
     fn handle(&self, request: Request) -> Pin<Box<dyn Future<Output = Response> + '_>> {
-        Box::pin(self.respond(request))
+        Box::pin(self.respond::<false>(request, None))
     }
 
     fn start(&self) -> Pin<Box<dyn Future<Output = ()> + '_>> {
@@ -334,6 +391,46 @@ impl Handler for SiteHandler {
     }
 }
 
+/// Installed by the worker only when debugger startup is enabled.
+struct DebugSiteHandler {
+    site: SiteHandler,
+    timeout: Option<Duration>,
+}
+
+impl Handler for DebugSiteHandler {
+    fn handle(&self, request: Request) -> Pin<Box<dyn Future<Output = Response> + '_>> {
+        match self.timeout {
+            None => Box::pin(self.site.respond::<true>(request, None)),
+            Some(timeout) => Box::pin(async move {
+                let clock = DebugTimeLimit::new(timeout);
+                clock
+                    .run(self.site.respond::<true>(request, Some(clock.clone())))
+                    .await
+                    .unwrap_or_else(|| Response::text(504, "the request took too long\n"))
+            }),
+        }
+    }
+
+    fn start(&self) -> Pin<Box<dyn Future<Output = ()> + '_>> {
+        Box::pin(self.site.boot())
+    }
+
+    fn handle_websocket(
+        &self,
+        event: WebSocketEvent,
+    ) -> Pin<Box<dyn Future<Output = WebSocketOutcome> + '_>> {
+        self.site.handle_websocket(event)
+    }
+
+    fn websocket_origin_allowed(
+        &self,
+        request: &Request,
+        allowed_origins: Option<&[String]>,
+    ) -> bool {
+        self.site.websocket_origin_allowed(request, allowed_origins)
+    }
+}
+
 impl SiteHandler {
     /// Boots the front controller before the first connection when it is
     /// known to call `Phera\snapshot()` (see `phera_runtime::BootReport`).
@@ -341,7 +438,10 @@ impl SiteHandler {
         let Some(script) = self.site.front_controller() else {
             return;
         };
-        if self.adapter == Adapter::None && !phera_runtime::snapshot_remembered(script) {
+        if self.adapter == Adapter::None
+            && !self.runtime.debug_boot_enabled()
+            && !phera_runtime::snapshot_remembered(script)
+        {
             return;
         }
         let worker = self.runtime.index();
@@ -362,7 +462,11 @@ impl SiteHandler {
         }
     }
 
-    async fn respond(&self, request: Request) -> Response {
+    async fn respond<const DEBUG: bool>(
+        &self,
+        request: Request,
+        time_limit: Option<DebugTimeLimit>,
+    ) -> Response {
         // A platform asks "are you alive?" every few seconds. The answer
         // must not depend on the application, its database or a free worker
         // slot in PHP.
@@ -375,30 +479,36 @@ impl SiteHandler {
                 .with_header("Phera-From-The-Top", from_the_top);
         }
         let site = self.site.clone();
-        let path = request.path.clone();
-        let conditions = Conditions::of(&request, self.compress);
-        let accept_encoding = request
-            .header("accept-encoding")
-            .filter(|_| self.compress)
-            .map(|value| String::from_utf8_lossy(value).into_owned());
+        let compress = self.compress;
         // Looking at the file system blocks, so it runs off the worker
         // thread, which must stay free for other requests.
-        let found = tokio::task::spawn_blocking(move || match site.resolve(&path) {
-            Resolved::Script(script) => Found::Script(script),
-            Resolved::File(file) => Found::Answer(static_file::answer(&site, &file, &conditions)),
+        let found = tokio::task::spawn_blocking(move || match site.resolve(&request.path) {
+            Resolved::Script(script) => Found::Script(script, request),
+            Resolved::File(file) => {
+                let conditions = Conditions::of(&request, compress);
+                Found::Answer(static_file::answer(&site, &file, &conditions))
+            }
             Resolved::NotFound => Found::Answer(Response::text(404, "Not Found\n")),
         })
         .await;
         match found {
-            Ok(Found::Script(script)) => {
-                let response = self
-                    .runtime
-                    .handle_request(
-                        &script,
-                        self.site.document_root(),
-                        to_runtime(request, &self.trusted_proxies),
-                    )
-                    .await;
+            Ok(Found::Script(script, request)) => {
+                let accept_encoding = if compress {
+                    request
+                        .header("accept-encoding")
+                        .map(|value| String::from_utf8_lossy(value).into_owned())
+                } else {
+                    None
+                };
+                let request = to_runtime(request, &self.trusted_proxies);
+                let root = self.site.document_root();
+                let response = if DEBUG {
+                    self.runtime
+                        .handle_debug_request(&script, root, request, time_limit)
+                        .await
+                } else {
+                    self.runtime.handle_request(&script, root, request).await
+                };
                 let response = from_runtime(response, &script);
                 if self.compress && response.upgrade.is_none() {
                     compress::php_response(response, accept_encoding.as_deref()).await
@@ -415,7 +525,7 @@ impl SiteHandler {
 /// What looking up a request path on disk led to.
 enum Found {
     /// A PHP file to run.
-    Script(std::path::PathBuf),
+    Script(std::path::PathBuf, Request),
     /// A response that is ready: a static file, or "not found".
     Answer(Response),
 }

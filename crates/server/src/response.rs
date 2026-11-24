@@ -2,6 +2,7 @@
 
 use std::fs::File;
 
+use crate::StreamBody;
 use crate::websocket::WebSocketUpgrade;
 
 /// An HTTP response. Repeated header names (Set-Cookie) are allowed and
@@ -23,6 +24,8 @@ pub enum Body {
     /// Part of a file, read from disk a chunk at a time while it is sent,
     /// so that a large download never sits in memory.
     File(FileSlice),
+    /// Chunks produced while a handler is still running.
+    Stream(StreamBody),
 }
 
 impl Default for Body {

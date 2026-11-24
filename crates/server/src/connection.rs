@@ -1,6 +1,6 @@
-//! Per-connection HTTP/1.1, HTTP/2 (h2c), and WebSocket upgrade handling.
+//! Per-connection HTTP/1.1, HTTP/2 (h2c), streaming response, and WebSocket
+//! upgrade handling. A PHP `flush()` becomes an HTTP/1.1 chunk or HTTP/2 DATA.
 
-use std::cell::RefCell;
 use std::error::Error as StdError;
 use std::future::Future;
 use std::net::SocketAddr;
@@ -10,7 +10,7 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use http_body_util::BodyExt;
-use hyper::body::Incoming;
+use hyper::body::{Body as HyperBody, Bytes, Incoming};
 use hyper::header::{HeaderName, HeaderValue};
 use hyper::service::service_fn;
 use hyper::{Request as HyperRequest, Response as HyperResponse};
@@ -26,7 +26,8 @@ use crate::file_body::WireBody;
 use crate::handler::Handler;
 use crate::receive_timeout::{HeadTimer, PrefaceTimeoutStream, TimeoutStream};
 use crate::request::{HttpVersion, Request};
-use crate::response::{Body, Response};
+use crate::response::Response;
+use crate::response_task::{ConnectionWork, answer};
 use crate::websocket::{
     WebSocketConfig, WebSocketHub,
     handshake::{
@@ -34,7 +35,6 @@ use crate::websocket::{
     },
     stream::{UpgradedContext, run_upgraded_websocket},
 };
-use crate::worker::ConnectionSlot;
 
 /// Runs Hyper's HTTP/2 stream tasks on the worker's `LocalSet` so handlers
 /// stay on the thread that created them and keep their `Rc` state.
@@ -62,14 +62,14 @@ pub(super) struct ConnectionParams {
     pub(super) handler: Rc<dyn Handler>,
     pub(super) shutdown: watch::Receiver<bool>,
     pub(super) limits: ConnectionLimits,
-    pub(super) tcp_slot: ConnectionSlot,
+    pub(super) work: Rc<ConnectionWork>,
     pub(super) ws: WebSocketWorkerContext,
 }
 
 /// Serve one connection over HTTP/1.1, prior-knowledge HTTP/2 (h2c), or
 /// upgraded WebSocket until closed or shutdown.
 pub(super) async fn handle_connection(mut params: ConnectionParams) {
-    let tcp_slot = Rc::new(RefCell::new(Some(params.tcp_slot)));
+    let work = params.work;
     let timer = HeadTimer::default();
     let head_timer = timer.clone();
     let ws_shutdown = params.shutdown.clone();
@@ -78,15 +78,17 @@ pub(super) async fn handle_connection(mut params: ConnectionParams) {
     let local_addr = params.local_addr;
     let service = service_fn(move |hyper_request: HyperRequest<Incoming>| {
         let handler = params.handler.clone();
+        let work = work.clone();
         let http2 = hyper_request.version() == hyper::Version::HTTP_2;
         // HTTP/2 requests multiplex over one connection, so each stream starts
         // its body clock when Hyper delivers its HEADERS frame.
-        let started = if http2 {
-            Instant::now()
-        } else {
-            head_timer.started()
-        };
-        let tcp_slot = tcp_slot.clone();
+        let started = (!hyper_request.body().is_end_stream()).then(|| {
+            if http2 {
+                Instant::now()
+            } else {
+                head_timer.started()
+            }
+        });
         let ws = params.ws.clone();
         let ws_shutdown = ws_shutdown.clone();
         async move {
@@ -103,7 +105,7 @@ pub(super) async fn handle_connection(mut params: ConnectionParams) {
                     handler,
                     limits,
                     started,
-                    tcp_slot,
+                    work,
                     ws,
                     shutdown: ws_shutdown,
                 };
@@ -111,7 +113,8 @@ pub(super) async fn handle_connection(mut params: ConnectionParams) {
             } else {
                 match to_request(hyper_request, peer, local_addr, limits, started, false).await {
                     Ok(request) => {
-                        let mut response = answer(handler, request, limits.request_timeout).await;
+                        let mut response =
+                            answer(handler, request, limits.request_timeout, work).await;
                         if response.upgrade.take().is_some() {
                             UpgradeRejection::UpgradeRequired.into_response()
                         } else {
@@ -193,8 +196,8 @@ struct UpgradeState {
     local_addr: SocketAddr,
     handler: Rc<dyn Handler>,
     limits: ConnectionLimits,
-    started: Instant,
-    tcp_slot: Rc<RefCell<Option<ConnectionSlot>>>,
+    started: Option<Instant>,
+    work: Rc<ConnectionWork>,
     ws: WebSocketWorkerContext,
     shutdown: watch::Receiver<bool>,
 }
@@ -233,11 +236,17 @@ async fn handle_ws_upgrade(
     let client_subprotocols = request
         .header("sec-websocket-protocol")
         .map(ToOwned::to_owned);
-    let mut response = answer(state.handler.clone(), request, state.limits.request_timeout).await;
+    let mut response = answer(
+        state.handler.clone(),
+        request,
+        state.limits.request_timeout,
+        state.work.clone(),
+    )
+    .await;
     let Some(upgrade) = response.upgrade.take() else {
         return response;
     };
-    let Some(tcp_slot) = state.tcp_slot.borrow_mut().take() else {
+    let Some(tcp_slot) = state.work.tcp_slot.borrow_mut().take() else {
         return Response::text(503, "connection already upgraded\n");
     };
     let accepted = build_101_response(
@@ -309,42 +318,6 @@ fn is_ordinary_end(error: &(dyn StdError + 'static)) -> bool {
     false
 }
 
-/// When the connection goes away, dropping its service also stops the request.
-struct AbortRequest(tokio::task::AbortHandle);
-
-impl Drop for AbortRequest {
-    fn drop(&mut self) {
-        self.0.abort();
-    }
-}
-
-/// Runs the handler for one request, for at most `time_limit`.
-async fn answer(
-    handler: Rc<dyn Handler>,
-    request: Request,
-    time_limit: Option<Duration>,
-) -> Response {
-    // The handler runs on its own task so that a panic becomes a 500
-    // instead of tearing down the connection task or the worker.
-    let mut task = tokio::task::spawn_local(async move { handler.handle(request).await });
-    let _request = AbortRequest(task.abort_handle());
-    let finished = match time_limit {
-        None => (&mut task).await,
-        Some(limit) => match tokio::time::timeout(limit, &mut task).await {
-            Ok(finished) => finished,
-            Err(_too_long) => {
-                // Stopping the task drops everything the request held. It
-                // takes effect the next time the handler waits or yields,
-                // which a running PHP script does regularly.
-                task.abort();
-                let _ = task.await;
-                return Response::text(504, "the request took too long\n");
-            }
-        },
-    };
-    finished.unwrap_or_else(|_| Response::text(500, "internal server error\n"))
-}
-
 /// Turn a hyper request into a [`Request`] for the handler, buffering the
 /// body under `max_body_bytes`.
 async fn to_request(
@@ -352,7 +325,7 @@ async fn to_request(
     peer: SocketAddr,
     local_addr: SocketAddr,
     limits: ConnectionLimits,
-    started: Instant,
+    started: Option<Instant>,
     is_websocket_upgrade: bool,
 ) -> Result<Request, BodyError> {
     let (parts, body) = request.into_parts();
@@ -384,7 +357,10 @@ async fn to_request(
             ("host".to_string(), authority.as_str().as_bytes().to_vec()),
         );
     }
-    let body = read_body(body, limits, started).await?;
+    let body = match started {
+        Some(started) => read_body(body, limits, started).await?,
+        None => Vec::new(),
+    };
     Ok(Request {
         method: parts.method.as_str().to_string(),
         target,
@@ -421,11 +397,12 @@ fn to_hyper_response(response: Response, http2: bool) -> HyperResponse<WireBody>
     let is_switching_protocols = response.status == 101;
     let status = hyper::StatusCode::from_u16(response.status)
         .unwrap_or(hyper::StatusCode::INTERNAL_SERVER_ERROR);
-    let mut builder = HyperResponse::builder().status(status);
-    for (name, value) in &response.headers {
+    let mut wire = HyperResponse::new(WireBody::from(response.body));
+    *wire.status_mut() = status;
+    for (name, value) in response.headers {
         if let (Ok(name), Ok(value)) = (
             HeaderName::try_from(name.as_str()),
-            HeaderValue::from_bytes(value),
+            HeaderValue::from_maybe_shared(Bytes::from(value)),
         ) {
             // The server alone says where a response ends. A handler (a PHP
             // script calling `header('Content-Length: 5')`) could otherwise
@@ -447,12 +424,10 @@ fn to_hyper_response(response: Response, http2: bool) -> HyperResponse<WireBody>
             {
                 continue;
             }
-            builder = builder.header(name, value);
+            wire.headers_mut().append(name, value);
         }
     }
-    builder
-        .body(WireBody::from(response.body))
-        .unwrap_or_else(|_| HyperResponse::new(WireBody::from(Body::default())))
+    wire
 }
 
 enum BodyError {

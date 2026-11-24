@@ -67,7 +67,9 @@ impl Vm {
         sent: &Value,
         result: impl FnOnce(&Generator) -> T,
     ) -> Option<Result<T, NativeError>> {
-        if self.pending_callbacks || self.generator_releases_pending() {
+        // The regular driver publishes the resumed frame so a connected IDE
+        // can stop before the generator's next source line.
+        if self.debugger.is_some() || self.pending_callbacks || self.generator_releases_pending() {
             return None;
         }
         match state(object, |generator| {

@@ -205,6 +205,8 @@ impl Vm {
                 fiber_bailout: false,
                 suspended_fibers: Default::default(),
                 snapshot: self.snapshot.forked(),
+                debugger: None,
+                debug_evaluating: false,
                 websocket_sink: self.websocket_sink.clone(),
                 websocket_resolver,
                 websocket_is_event: false,
