@@ -53,6 +53,7 @@ pub(crate) struct ArgumentFacts {
 
 impl ArgumentFacts {
     /// One argument per parameter, nothing saved.
+    #[inline(always)]
     fn is_default(&self) -> bool {
         self.supplied.is_none() && self.count.is_none() && self.extra == 0 && self.saved.is_none()
     }
@@ -75,6 +76,7 @@ impl FrameExtras {
 
     /// A fast return to a register can release the called class alone.
     /// Suspended hooks have no return register and never take that path.
+    #[inline(always)]
     pub(crate) fn plain_return_can_release(&self) -> bool {
         self.dynamic_count.is_none()
             && self.dynamic.is_empty()

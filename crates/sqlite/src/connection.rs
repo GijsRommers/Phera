@@ -1,5 +1,6 @@
 //! `exec('BEGIN; INSERT ...; COMMIT')` runs entirely on the database's owning thread.
 
+use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::{Mutex, OnceLock, PoisonError};
 use std::time::Duration;
@@ -17,9 +18,22 @@ use crate::{Error, Statement};
 /// creation and mimalloc segment abandonment under concurrent web load.
 const MAX_IDLE_WORKERS: usize = 64;
 
+/// How long an idle worker retains a clean, read-only file-backed SQLite
+/// connection before closing it while staying parked in the worker pool.
+#[cfg(unix)]
+const IDLE_CACHE_TTL: Duration = Duration::from_secs(5);
+
 type Operation = Box<dyn FnOnce(&mut Rc<Connection>) + Send>;
 enum Request {
-    Call(Operation),
+    Call {
+        operation: Operation,
+        mutates: bool,
+    },
+    Prepare {
+        database: Database,
+        sql: String,
+        ready: oneshot::Sender<Result<Statement, Error>>,
+    },
     Close(oneshot::Sender<()>),
     FinishCursor(tokio::task::JoinHandle<()>),
 }
@@ -34,6 +48,33 @@ struct OpenTask {
 
 struct IdleWorker {
     sender: std::sync::mpsc::SyncSender<OpenTask>,
+    cached_key: Option<(String, i32)>,
+}
+
+#[cfg(unix)]
+struct CachedConnection {
+    filename: String,
+    flags: i32,
+    timeout_ms: u64,
+    file_id: (u64, u64),
+    connection: Rc<Connection>,
+}
+
+#[cfg(not(unix))]
+struct CachedConnection;
+
+#[cfg(unix)]
+fn file_identity(path: &str) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    let meta = std::fs::metadata(path).ok()?;
+    Some((meta.dev(), meta.ino()))
+}
+
+fn cacheable_path(filename: &str, flags: OpenFlags) -> bool {
+    !filename.is_empty()
+        && filename != ":memory:"
+        && !filename.starts_with("file:")
+        && !flags.contains(OpenFlags::SQLITE_OPEN_MEMORY)
 }
 
 fn idle_workers() -> &'static Mutex<Vec<IdleWorker>> {
@@ -41,11 +82,19 @@ fn idle_workers() -> &'static Mutex<Vec<IdleWorker>> {
     POOL.get_or_init(|| Mutex::new(Vec::new()))
 }
 
-fn pop_idle_worker() -> Option<IdleWorker> {
-    idle_workers()
+fn pop_idle_worker(filename: &str, flags: i32) -> Option<IdleWorker> {
+    let mut pool = idle_workers()
         .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .pop()
+        .unwrap_or_else(PoisonError::into_inner);
+    if let Some(pos) = pool.iter().rposition(|worker| {
+        worker
+            .cached_key
+            .as_ref()
+            .is_some_and(|(f, fl)| *fl == flags && f == filename)
+    }) {
+        return Some(pool.swap_remove(pos));
+    }
+    pool.pop()
 }
 
 fn return_idle_worker(worker: IdleWorker) -> bool {
@@ -71,20 +120,59 @@ fn run_worker(first: OpenTask) {
             return;
         }
     };
-    serve_connection(&runtime, first);
+    let mut cached = serve_connection(&runtime, first, None);
     loop {
+        #[cfg(unix)]
+        let cached_key = cached
+            .as_ref()
+            .map(|entry| (entry.filename.clone(), entry.flags));
+        #[cfg(not(unix))]
+        let cached_key = None;
         let (sender, receiver) = std::sync::mpsc::sync_channel::<OpenTask>(1);
-        if !return_idle_worker(IdleWorker { sender }) {
+        if !return_idle_worker(IdleWorker { sender, cached_key }) {
             return;
         }
-        let Ok(next) = receiver.recv() else {
+        let next = recv_next_task(&receiver, &mut cached);
+        let Some(next) = next else {
             return;
         };
-        serve_connection(&runtime, next);
+        cached = serve_connection(&runtime, next, cached);
     }
 }
 
-fn serve_connection(runtime: &tokio::runtime::Runtime, task: OpenTask) {
+#[cfg(unix)]
+fn recv_next_task(
+    receiver: &std::sync::mpsc::Receiver<OpenTask>,
+    cached: &mut Option<CachedConnection>,
+) -> Option<OpenTask> {
+    if cached.is_some() {
+        match receiver.recv_timeout(IDLE_CACHE_TTL) {
+            Ok(task) => return Some(task),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                // Drop the cached connection after an idle period so file locks
+                // and descriptors are released once traffic stops, while keeping
+                // the worker thread parked.
+                *cached = None;
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return None,
+        }
+    }
+    receiver.recv().ok()
+}
+
+#[cfg(not(unix))]
+fn recv_next_task(
+    receiver: &std::sync::mpsc::Receiver<OpenTask>,
+    _cached: &mut Option<CachedConnection>,
+) -> Option<OpenTask> {
+    receiver.recv().ok()
+}
+
+fn serve_connection(
+    runtime: &tokio::runtime::Runtime,
+    task: OpenTask,
+    cached: Option<CachedConnection>,
+) -> Option<CachedConnection> {
     let OpenTask {
         filename,
         flags,
@@ -92,29 +180,108 @@ fn serve_connection(runtime: &tokio::runtime::Runtime, task: OpenTask) {
         ready,
         mut requests,
     } = task;
-    let connection = OpenFlags::from_bits(flags)
-        .ok_or_else(|| Error {
+    let Some(open_flags) = OpenFlags::from_bits(flags) else {
+        drop(cached);
+        let _ = ready.send(Err(Error {
             code: SQLITE_MISUSE,
             message: "bad parameter or other API misuse".into(),
-        })
-        .and_then(|flags| Connection::open_with_flags(filename, flags).map_err(Error::from))
-        .and_then(|connection| {
-            connection.busy_timeout(Duration::from_millis(timeout_ms))?;
-            Ok(connection)
-        });
-    let mut connection = match connection {
-        Ok(connection) => Rc::new(connection),
-        Err(error) => {
-            let _ = ready.send(Err(error));
-            return;
+        }));
+        return None;
+    };
+
+    #[cfg(unix)]
+    let (mut connection, file_id) = {
+        let mut reused: Option<(Rc<Connection>, (u64, u64))> = None;
+        if let Some(entry) = cached
+            && entry.filename == filename
+            && entry.flags == flags
+            && file_identity(&filename).is_some_and(|id| id == entry.file_id)
+        {
+            let ok = if entry.timeout_ms != timeout_ms {
+                entry
+                    .connection
+                    .busy_timeout(Duration::from_millis(timeout_ms))
+                    .is_ok()
+            } else {
+                true
+            };
+            if ok {
+                reused = Some((entry.connection, entry.file_id));
+            }
+        }
+        if let Some((conn, id)) = reused {
+            (conn, Some(id))
+        } else {
+            let opened = Connection::open_with_flags(&filename, open_flags)
+                .map_err(Error::from)
+                .and_then(|conn| {
+                    conn.busy_timeout(Duration::from_millis(timeout_ms))?;
+                    Ok(conn)
+                });
+            match opened {
+                Ok(conn) => {
+                    let id = if cacheable_path(&filename, open_flags) {
+                        file_identity(&filename)
+                    } else {
+                        None
+                    };
+                    (Rc::new(conn), id)
+                }
+                Err(error) => {
+                    let _ = ready.send(Err(error));
+                    return None;
+                }
+            }
         }
     };
+
+    #[cfg(not(unix))]
+    let mut connection = {
+        drop(cached);
+        let opened = Connection::open_with_flags(&filename, open_flags)
+            .map_err(Error::from)
+            .and_then(|conn| {
+                conn.busy_timeout(Duration::from_millis(timeout_ms))?;
+                Ok(conn)
+            });
+        match opened {
+            Ok(conn) => Rc::new(conn),
+            Err(error) => {
+                let _ = ready.send(Err(error));
+                return None;
+            }
+        }
+    };
+
     let _ = ready.send(Ok(()));
+    let dirty = Rc::new(Cell::new(false));
     let local = tokio::task::LocalSet::new();
-    let closed = local.block_on(runtime, async move {
+    let closed = local.block_on(runtime, async {
         while let Some(request) = requests.recv().await {
             match request {
-                Request::Call(operation) => operation(&mut connection),
+                Request::Call { operation, mutates } => {
+                    if mutates {
+                        dirty.set(true);
+                    }
+                    operation(&mut connection);
+                }
+                Request::Prepare {
+                    database,
+                    sql,
+                    ready,
+                } => {
+                    let conn = connection.clone();
+                    let dirty_flag = dirty.clone();
+                    let lifetime = std::sync::Arc::new(crate::lifetime::CursorTask {
+                        database,
+                        task: std::sync::OnceLock::new(),
+                    });
+                    let cursor_lifetime = lifetime.clone();
+                    let task = tokio::task::spawn_local(async move {
+                        crate::cursor::serve(conn, cursor_lifetime, sql, ready, dirty_flag).await;
+                    });
+                    let _ = lifetime.task.set(task);
+                }
                 Request::Close(reply) => return Some(reply),
                 Request::FinishCursor(task) => {
                     task.abort();
@@ -124,11 +291,36 @@ fn serve_connection(runtime: &tokio::runtime::Runtime, task: OpenTask) {
         }
         None
     });
-    // Finalize all cursors and close the database before acknowledging close().
+    // Finalize all cursors before acknowledging close() or deciding cache eligibility.
     drop(local);
     if let Some(reply) = closed {
+        drop(connection);
         let _ = reply.send(());
+        return None;
     }
+
+    #[cfg(unix)]
+    {
+        if !dirty.get()
+            && Rc::strong_count(&connection) == 1
+            && connection.is_autocommit()
+            && connection.changes() == 0
+            && connection.last_insert_rowid() == 0
+            && let Some(id) = file_id
+            && cacheable_path(&filename, open_flags)
+            && file_identity(&filename).is_some_and(|current| current == id)
+        {
+            return Some(CachedConnection {
+                filename,
+                flags,
+                timeout_ms,
+                file_id: id,
+                connection,
+            });
+        }
+    }
+    let _ = (&filename, open_flags, timeout_ms, dirty, connection);
+    None
 }
 
 #[derive(Clone)]
@@ -155,7 +347,7 @@ impl Database {
             ready,
             requests,
         };
-        while let Some(worker) = pop_idle_worker() {
+        while let Some(worker) = pop_idle_worker(&task.filename, task.flags) {
             match worker.sender.send(task) {
                 Ok(()) => {
                     opened.await.map_err(|_| Error::closed())??;
@@ -189,19 +381,23 @@ impl Database {
         T: Send + 'static,
         F: FnOnce(&Connection) -> Result<T, Error> + Send + 'static,
     {
-        self.run(move |connection| operation(connection)).await
+        self.run(true, move |connection| operation(connection))
+            .await
     }
 
-    async fn run<T, F>(&self, operation: F) -> Result<T, Error>
+    async fn run<T, F>(&self, mutates: bool, operation: F) -> Result<T, Error>
     where
         T: Send + 'static,
         F: FnOnce(&mut Rc<Connection>) -> Result<T, Error> + Send + 'static,
     {
         let (sender, receiver) = oneshot::channel();
         self.sender
-            .send(Request::Call(Box::new(move |connection| {
-                let _ = sender.send(operation(connection));
-            })))
+            .send(Request::Call {
+                operation: Box::new(move |connection| {
+                    let _ = sender.send(operation(connection));
+                }),
+                mutates,
+            })
             .map_err(|_| Error::closed())?;
         receiver.await.map_err(|_| Error::closed())?
     }
@@ -210,18 +406,11 @@ impl Database {
         let (sender, receiver) = oneshot::channel();
         let database = self.clone();
         self.sender
-            .send(Request::Call(Box::new(move |connection| {
-                let connection = connection.clone();
-                let lifetime = std::sync::Arc::new(crate::lifetime::CursorTask {
-                    database,
-                    task: std::sync::OnceLock::new(),
-                });
-                let cursor_lifetime = lifetime.clone();
-                let task = tokio::task::spawn_local(async move {
-                    crate::cursor::serve(connection, cursor_lifetime, sql, sender).await;
-                });
-                let _ = lifetime.task.set(task);
-            })))
+            .send(Request::Prepare {
+                database,
+                sql,
+                ready: sender,
+            })
             .map_err(|_| Error::closed())?;
         receiver.await.map_err(|_| Error::closed())?
     }
@@ -237,7 +426,7 @@ impl Database {
         T: Send + 'static,
         F: FnOnce(&mut Connection) -> Result<T, Error> + Send + 'static,
     {
-        self.run(move |connection| match Rc::get_mut(connection) {
+        self.run(true, move |connection| match Rc::get_mut(connection) {
             Some(connection) => operation(connection),
             None => Err(Error {
                 code: SQLITE_LOCKED,
@@ -260,16 +449,16 @@ impl Database {
     }
 
     pub async fn last_id(&self) -> Result<i64, Error> {
-        self.call(|connection| Ok(connection.last_insert_rowid()))
+        self.run(false, |connection| Ok(connection.last_insert_rowid()))
             .await
     }
 
     pub async fn changes(&self) -> Result<u64, Error> {
-        self.call(|connection| Ok(connection.changes())).await
+        self.run(false, |connection| Ok(connection.changes())).await
     }
 
     pub async fn transaction(&self) -> Result<bool, Error> {
-        self.call(|connection| Ok(!connection.is_autocommit()))
+        self.run(false, |connection| Ok(!connection.is_autocommit()))
             .await
     }
 

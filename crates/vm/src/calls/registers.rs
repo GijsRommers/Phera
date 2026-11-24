@@ -164,8 +164,7 @@ impl Registers {
     /// with `$this` or the closure below `base`) up. PHP releases a
     /// function's variables first, in order, and `$this` after them, so a
     /// destructor of a local runs before the destructor of `$this`.
-    #[cold]
-    #[inline(never)]
+    #[inline]
     pub(crate) fn release_frame(&mut self, start: usize, base: usize) {
         let prefix = [start, start + 1].map(|slot| {
             if slot < base {
@@ -174,7 +173,11 @@ impl Registers {
                 None
             }
         });
-        self.truncate(start);
+        let clear_from = if base <= start + 2 { base } else { start };
+        self.truncate(clear_from);
+        if start < self.top {
+            self.top = start;
+        }
         drop(prefix);
     }
 

@@ -126,6 +126,29 @@ impl SiteRecord {
     };
 }
 
+/// How a cached static call (`self::`, `parent::`, or `Class::`) passes
+/// `$this` or late-static-binding `called` class.
+#[repr(u8)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StaticCallMode {
+    /// Non-forwarding static method call (`Class::foo()`): called class is `called`.
+    Static,
+    /// Forwarding static method call (`self::foo()` / `parent::foo()`): forwards
+    /// the caller's called class if present, else `called`.
+    Forward,
+    /// Instance method invoked through `self::foo()` / `parent::foo()` on `$this`.
+    Instance,
+}
+
+/// Cached resolution for an `InitStaticCall` site whose target class is fixed
+/// (`self::`, `parent::`, or a named class — never `static::` and never inside a closure).
+#[derive(Clone, Copy)]
+pub(crate) struct StaticCallCache {
+    pub(crate) function: crate::code_table::FunctionIndex,
+    pub(crate) called: crate::classes::ClassIndex,
+    pub(crate) mode: StaticCallMode,
+}
+
 /// One cache cell per unit/function/instruction, not a hash lookup per access.
 /// Cells start empty at first unit use. Their payload is made after successful
 /// resolution; class/scope guards in each payload replace polymorphic entries.
@@ -137,7 +160,10 @@ pub(crate) enum CachedSite {
     /// ran (see `crate::builtin_guards`).
     BuiltinGuard(crate::builtin_guards::Resolution),
     Function(Box<crate::calls::pending::LinkedFunction>),
+    StaticCall(StaticCallCache),
 }
+
+const _: () = assert!(std::mem::size_of::<CachedSite>() == 16);
 
 impl UnitCache {
     /// What a fork's copy of this cache holds on the heap, in bytes: the
@@ -160,6 +186,7 @@ impl UnitCache {
 
     /// The record of method site `site` of the function `facts` describes,
     /// which has `sites` method sites.
+    #[inline(always)]
     pub(crate) fn site_record(
         &self,
         facts: &crate::function_facts::FunctionFacts,
@@ -448,6 +475,7 @@ impl CachedSite {
                 Some(linked) => CachedSite::Function(Box::new(linked)),
                 None => CachedSite::Empty,
             },
+            CachedSite::StaticCall(entry) => CachedSite::StaticCall(*entry),
         }
     }
 }

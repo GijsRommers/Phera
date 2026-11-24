@@ -628,7 +628,8 @@ impl Machine<'_> {
 
 /// Whether a returned value passes the bit test of the declared return
 /// type: `return;` of a `void` function returns null.
-fn return_fits(mask: phera_bytecode::TypeMask, value: &Value) -> bool {
+#[inline(always)]
+pub(crate) fn return_fits(mask: phera_bytecode::TypeMask, value: &Value) -> bool {
     mask.intersects(crate::types::own_type(value))
         || (mask.intersects(phera_bytecode::TypeMask::VOID) && value.is_null())
 }

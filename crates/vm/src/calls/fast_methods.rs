@@ -32,7 +32,7 @@ use crate::calls::window_context::WindowContext;
 use crate::classes::method_table::{MethodExtra, MethodKind, PackedMethod};
 use crate::classes::{Class, ClassIndex, ClassTable, MethodBody};
 use crate::code_table::{FunctionIndex, FunctionShape, NameKey};
-use crate::unit_caches::{SiteOutcome, SiteRecord};
+use crate::unit_caches::{CachedSite, SiteOutcome, SiteRecord, StaticCallCache, StaticCallMode};
 
 impl Machine<'_> {
     /// `InitMethodCall` of a public instance method written in PHP: reserve
@@ -410,18 +410,14 @@ impl Machine<'_> {
     ) -> Step {
         // The sends, after the `InitMethodCall` that follows `CallMethod`.
         let sends = position.ip + 1;
-        let Some(arguments) = body.site_arguments.get(site.argument_range()) else {
-            return Step::Slow;
-        };
-        let count = arguments.len();
         let facts = self.code.facts(function);
-        let base = position.frame.base();
         // The window, as `InitMethodCall` reserves it, with `$this`.
         let start = self.registers.len();
         let first = start + CallKind::Method.prefix();
         let window = (facts.registers.max(facts.parameters) as usize).max(1);
         self.registers.grow_to(first + window);
         self.registers.put(start, Value::Object(object));
+        let count = site.arguments as usize;
         if facts.shape != FunctionShape::Plain
             || count < facts.required as usize
             || count > facts.parameters as usize
@@ -429,26 +425,32 @@ impl Machine<'_> {
         {
             return self.record_site_call(function, start, sends);
         }
-        for (index, argument) in arguments.iter().enumerate() {
-            // A by-reference parameter binds to the variable itself, which
-            // only the written-out `SendLocal` does.
-            if !facts.takes_value(index) {
+        if count > 0 {
+            let Some(arguments) = body.site_arguments.get(site.argument_range()) else {
                 return self.record_site_call(function, start, sends);
-            }
-            let value = match self.registers.window(base + argument.register().index(), 1) {
-                [Some(value)] if !value.is_reference() => value,
-                _ => return self.record_site_call(function, start, sends),
             };
-            let plain = !facts.is_typed(index)
-                || facts.parameter_masks[index].intersects(crate::types::own_type(value));
-            let mut value = crate::fast::duplicate(value);
-            if !plain
-                && !self.accepts_argument(function, index, &value)
-                && !self.accepts_on_second_look(function, index, &mut value)
-            {
-                return self.record_site_call(function, start, sends);
+            let base = position.frame.base();
+            for (index, argument) in arguments.iter().enumerate() {
+                // A by-reference parameter binds to the variable itself, which
+                // only the written-out `SendLocal` does.
+                if !facts.takes_value(index) {
+                    return self.record_site_call(function, start, sends);
+                }
+                let value = match self.registers.window(base + argument.register().index(), 1) {
+                    [Some(value)] if !value.is_reference() => value,
+                    _ => return self.record_site_call(function, start, sends),
+                };
+                let plain = !facts.is_typed(index)
+                    || facts.parameter_masks[index].intersects(crate::types::own_type(value));
+                let mut value = crate::fast::duplicate(value);
+                if !plain
+                    && !self.accepts_argument(function, index, &value)
+                    && !self.accepts_on_second_look(function, index, &mut value)
+                {
+                    return self.record_site_call(function, start, sends);
+                }
+                self.registers.put(first + index, value);
             }
-            self.registers.put(first + index, value);
         }
         // The caller goes on after the call's `Call`.
         self.publish(site.after.index());
@@ -778,6 +780,47 @@ impl Machine<'_> {
         symbols: (SymbolId, SymbolId),
         binding: ClassBinding,
     ) -> Step {
+        if position.frame.kind() != CallKind::Closure
+            && let Some(Some(cached)) =
+                self.code
+                    .read_site(position.frame.function, position.ip, |site| match site {
+                        CachedSite::StaticCall(cached) => Some(*cached),
+                        _ => None,
+                    })
+        {
+            return match cached.mode {
+                StaticCallMode::Static => {
+                    self.prepare_php_method(position, cached.function, None, Some(cached.called))
+                }
+                StaticCallMode::Forward => {
+                    let called = match self.current_context() {
+                        Some(context) => context
+                            .called_index()
+                            .or_else(|| context.called().map(|called| called.index)),
+                        None => Some(cached.called),
+                    };
+                    self.prepare_php_method(position, cached.function, None, called)
+                }
+                StaticCallMode::Instance => {
+                    let receiver = match self.registers.window(position.frame.base() - 1, 1) {
+                        [Some(Value::Object(this))] => Some(this.clone()),
+                        _ => return Step::Slow,
+                    };
+                    self.prepare_php_method(position, cached.function, receiver, None)
+                }
+            };
+        }
+        self.resolve_static_call::<GUARDED>(position, symbols, binding)
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn resolve_static_call<const GUARDED: bool>(
+        &mut self,
+        position: Position,
+        symbols: (SymbolId, SymbolId),
+        binding: ClassBinding,
+    ) -> Step {
         use phera_bytecode::name_keys::{key_parent, key_self, key_static};
 
         let (class_symbol, method_symbol) = symbols;
@@ -785,12 +828,13 @@ impl Machine<'_> {
         let class_key = self.code.unit_symbol_key(function, class_symbol);
         let owned_called: Option<Rc<Class>>;
         let scope = self.caller_scope(position);
+        let is_late_static = class_key == key_static();
         let (class_ref, relative): (&Class, bool) = if class_key == key_self() {
             match scope {
                 Some(scope) => (scope.as_ref(), true),
                 None => return Step::Slow,
             }
-        } else if class_key == key_static() {
+        } else if is_late_static {
             let Some(context) = self.current_context() else {
                 return Step::Slow;
             };
@@ -854,6 +898,25 @@ impl Machine<'_> {
         {
             return Step::Slow;
         }
+        let class_index = class_ref.index;
+        if !is_late_static && position.frame.kind() != CallKind::Closure {
+            let mode = if receiver.is_some() {
+                StaticCallMode::Instance
+            } else if binding == ClassBinding::Forward {
+                StaticCallMode::Forward
+            } else {
+                StaticCallMode::Static
+            };
+            self.code.write_site(
+                function,
+                position.ip,
+                CachedSite::StaticCall(StaticCallCache {
+                    function: target_function,
+                    called: class_index,
+                    mode,
+                }),
+            );
+        }
         // A call with `$this` takes its called class from `$this`; only a
         // static call needs it worked out here.
         let called = match (receiver.is_some(), binding) {
@@ -862,9 +925,9 @@ impl Machine<'_> {
                 Some(context) => context
                     .called_index()
                     .or_else(|| context.called().map(|called| called.index)),
-                None => Some(class_ref.index),
+                None => Some(class_index),
             },
-            (false, _) => Some(class_ref.index),
+            (false, _) => Some(class_index),
         };
         self.prepare_php_method(position, target_function, receiver, called)
     }

@@ -95,3 +95,69 @@ fn pooled_workers_isolate_sequential_and_failed_connections() {
             }
         });
 }
+
+#[test]
+fn clean_readonly_file_connection_sees_writes_and_invalidates_on_replace_or_mutation() {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("cache_test.sqlite");
+            let path_str = path.to_string_lossy().into_owned();
+            // Seed WAL database.
+            let seed = Database::open(path_str.clone(), 6, 5000).await.unwrap();
+            seed.exec(
+                "PRAGMA journal_mode=WAL; CREATE TABLE items(v INT); INSERT INTO items VALUES(10)"
+                    .into(),
+            )
+            .await
+            .unwrap();
+            drop(seed);
+
+            // Clean read-only sessions (candidate for worker connection cache).
+            for _ in 0..8 {
+                let db = Database::open(path_str.clone(), 6, 5000).await.unwrap();
+                let stmt = db.prepare("SELECT v FROM items".into()).await.unwrap();
+                let exec = stmt.execute(Vec::new()).await.unwrap();
+                assert!(matches!(exec.first.unwrap()[0], Cell::Integer(10)));
+                drop(stmt);
+                drop(db);
+            }
+
+            // Concurrent/subsequent writer updates WAL; cached readers must see 20 immediately.
+            let writer = Database::open(path_str.clone(), 6, 5000).await.unwrap();
+            writer.exec("UPDATE items SET v = 20".into()).await.unwrap();
+            drop(writer);
+
+            for _ in 0..8 {
+                let db = Database::open(path_str.clone(), 6, 5000).await.unwrap();
+                assert_eq!(db.changes().await.unwrap(), 0);
+                assert_eq!(db.last_id().await.unwrap(), 0);
+                assert!(!db.transaction().await.unwrap());
+                let stmt = db.prepare("SELECT v FROM items".into()).await.unwrap();
+                let exec = stmt.execute(Vec::new()).await.unwrap();
+                assert!(matches!(exec.first.unwrap()[0], Cell::Integer(20)));
+                drop(stmt);
+                drop(db);
+            }
+
+            // Replacing the file on disk (new inode) must invalidate any cached connection.
+            let replacement = dir.path().join("replacement.sqlite");
+            let rep_str = replacement.to_string_lossy().into_owned();
+            let rep = Database::open(rep_str.clone(), 6, 5000).await.unwrap();
+            rep.exec("CREATE TABLE items(v INT); INSERT INTO items VALUES(99)".into())
+                .await
+                .unwrap();
+            rep.close().await.unwrap();
+            std::fs::rename(&replacement, &path).unwrap();
+
+            let after = Database::open(path_str, 6, 5000).await.unwrap();
+            let stmt = after.prepare("SELECT v FROM items".into()).await.unwrap();
+            let exec = stmt.execute(Vec::new()).await.unwrap();
+            assert!(matches!(exec.first.unwrap()[0], Cell::Integer(99)));
+            drop(stmt);
+            after.close().await.unwrap();
+        });
+}
