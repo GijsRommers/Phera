@@ -48,7 +48,7 @@ a round trip before it is lent.
 
 | Environment setting | Default | |
 | --- | ---: | --- |
-| `PHERA_PDO_POOL_SIZE` | 20 | open pooled connections per database, over all workers |
+| `PHERA_PDO_POOL_SIZE` | 64 | open pooled connections per database, over all workers |
 | `PHERA_PDO_POOL_IDLE_SECONDS` | 60 | how long a returned connection may stay idle |
 | `PHERA_PDO_POOL_LIFETIME_SECONDS` | 1800 | how old a connection may get; a borrowed one retires when returned |
 | `PHERA_PDO_POOL_WAIT_SECONDS` | 30 | how long `new PDO` waits for a connection |

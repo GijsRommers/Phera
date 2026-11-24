@@ -1,6 +1,6 @@
 //! Optional names for functions that expose PHP's dynamic variable scope.
 
-use std::collections::HashMap;
+use foldhash::{HashMap, HashMapExt};
 
 use phera_bytecode::Reg;
 
