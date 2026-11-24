@@ -14,19 +14,32 @@ use phera_bytecode::{BinaryOp, Function, Instruction, PathBase, Reg, Target};
 
 use crate::passes::integer_operands::fuse_integer_operands;
 
-/// Optimize operands in place while retaining source locations and valid branch targets.
-pub(crate) fn optimize(function: &mut Function) {
-    // Exception edges carry live temporaries not described by ordinary branch operands.
-    // Preserve their layout until the optimizer models exceptional successors.
-    if !function.handlers.is_empty() {
-        return;
-    }
-    let boundaries: HashSet<_> = function
+/// Collect every control-flow entry boundary: branch targets plus exception
+/// handler starts, ends, catch entries, and finally entries.
+pub(crate) fn block_boundaries(function: &Function) -> HashSet<usize> {
+    let mut boundaries: HashSet<usize> = function
         .instructions
         .iter()
         .filter_map(target)
         .map(|target| target.index())
         .collect();
+    for handler in &function.handlers {
+        boundaries.insert(handler.start.index());
+        boundaries.insert(handler.end.index());
+        if let Some(catch) = handler.catch {
+            boundaries.insert(catch.index());
+        }
+        if let Some(finally) = handler.finally {
+            boundaries.insert(finally.index());
+        }
+    }
+    boundaries
+}
+
+/// Optimize operands in place while retaining source locations and valid branch targets.
+pub(crate) fn optimize(function: &mut Function) {
+    let has_handlers = !function.handlers.is_empty();
+    let boundaries = block_boundaries(function);
     let mut facts = vec![Fact::Unknown; function.registers as usize];
     let mut offsets = Vec::new();
     let mut instructions = Vec::new();
@@ -38,16 +51,28 @@ pub(crate) fn optimize(function: &mut Function) {
         }
         let remove = match instruction {
             Instruction::Nop => true,
-            // A named local is never a temporary to drop early.
+            // A named local is never a temporary to drop early. In functions
+            // with exception handlers, only drop clears of proven scalar
+            // temporaries so handler cleanups never see stale heap refs.
             Instruction::Clear { reg } => {
-                reg.index() >= function.locals.len() && fact(&facts, reg) != Fact::Unknown
+                reg.index() >= function.locals.len()
+                    && if has_handlers {
+                        fact(&facts, reg) == Fact::Scalar
+                    } else {
+                        fact(&facts, reg) != Fact::Unknown
+                    }
             }
-            Instruction::Move { dst, .. } => function
-                .instructions
-                .iter()
-                .skip(index + 1)
-                .take_while(|instruction| matches!(instruction, Instruction::Clear { .. }))
-                .any(|instruction| matches!(instruction,Instruction::Clear { reg } if *reg == dst)),
+            Instruction::Move { dst, .. } => {
+                !has_handlers
+                    && function
+                        .instructions
+                        .iter()
+                        .skip(index + 1)
+                        .take_while(|instruction| matches!(instruction, Instruction::Clear { .. }))
+                        .any(|instruction| {
+                            matches!(instruction, Instruction::Clear { reg } if *reg == dst)
+                        })
+            }
             _ => false,
         };
         update_facts(function, &mut facts, instruction);
@@ -57,6 +82,16 @@ pub(crate) fn optimize(function: &mut Function) {
         }
     }
     offsets.push(instructions.len() as u32);
+    for handler in &mut function.handlers {
+        handler.start.0 = offsets[handler.start.index()];
+        handler.end.0 = offsets[handler.end.index()];
+        for target in [&mut handler.catch, &mut handler.finally]
+            .into_iter()
+            .flatten()
+        {
+            target.0 = offsets[target.index()];
+        }
+    }
     for instruction in &mut instructions {
         if let Some(target) = target_mut(instruction) {
             target.0 = offsets.get(target.index()).copied().unwrap_or(target.0);

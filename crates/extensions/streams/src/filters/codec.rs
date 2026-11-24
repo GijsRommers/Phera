@@ -6,7 +6,9 @@ use base64::{
     Engine,
     engine::general_purpose::{STANDARD, STANDARD_NO_PAD},
 };
-use phera_extension_api::{ArrayKey, IconvConverter, IconvFailure, Value};
+use phera_extension_api::{
+    ArrayKey, IconvConvert, IconvConverter, IconvFailure, IconvStream, Value,
+};
 
 use super::{
     Flush, MAX_BUCKET, bounded,
@@ -199,27 +201,44 @@ fn decode_base64(remainder: &mut Vec<u8>, data: Vec<u8>, flush: Flush) -> io::Re
     Ok(result)
 }
 
-pub(super) struct Iconv {
-    convert: IconvConverter,
+pub(super) enum Iconv {
+    Streaming(Box<dyn IconvStream>),
+    Stateless(StatelessIconv),
+}
+
+pub(super) struct StatelessIconv {
+    convert: IconvConvert,
     from: String,
     to: String,
     remainder: Vec<u8>,
 }
 
 impl Iconv {
-    fn parse(name: &[u8], convert: IconvConverter) -> Option<Self> {
+    fn parse(name: &[u8], converter: IconvConverter) -> Option<Self> {
         let name = std::str::from_utf8(name.strip_prefix(b"convert.iconv.")?).ok()?;
         let split = name.find(['.', '/'])?;
         let (from, to) = (&name[..split], &name[split + 1..]);
-        convert(b"", from, to).ok()?;
-        Some(Self {
-            convert,
+        (converter.convert)(b"", from, to).ok()?;
+        if let Some(stream) = (converter.stream)(from, to) {
+            return Some(Self::Streaming(stream));
+        }
+        Some(Self::Stateless(StatelessIconv {
+            convert: converter.convert,
             from: from.into(),
             to: to.into(),
             remainder: Vec::new(),
-        })
+        }))
     }
 
+    fn run(&mut self, data: Vec<u8>, flush: Flush) -> io::Result<Vec<u8>> {
+        match self {
+            Self::Streaming(stream) => stream.convert(&data, flush != Flush::No, MAX_BUCKET),
+            Self::Stateless(iconv) => iconv.run(data, flush),
+        }
+    }
+}
+
+impl StatelessIconv {
     fn run(&mut self, data: Vec<u8>, flush: Flush) -> io::Result<Vec<u8>> {
         let mut bytes = std::mem::take(&mut self.remainder);
         bounded(bytes.len() + data.len())?;

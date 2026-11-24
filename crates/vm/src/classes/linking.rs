@@ -37,7 +37,7 @@ impl Vm {
                     }
                     return Err(error);
                 }
-                self.prelinked_classes
+                Rc::make_mut(&mut self.prelinked_classes)
                     .insert((Arc::as_ptr(unit) as usize, index.index()));
             }
         }
@@ -53,8 +53,10 @@ impl Vm {
         let unit = frame.unit().clone();
         if self
             .prelinked_classes
-            .remove(&(Arc::as_ptr(&unit) as usize, index.index()))
+            .contains(&(Arc::as_ptr(&unit) as usize, index.index()))
         {
+            Rc::make_mut(&mut self.prelinked_classes)
+                .remove(&(Arc::as_ptr(&unit) as usize, index.index()));
             return Ok(());
         }
         let declaration = &unit.classes[index.index()];

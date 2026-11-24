@@ -122,12 +122,18 @@ pub fn run(counts: Counts) -> std::process::ExitCode {
         match mode.as_str() {
             "fork" => {
                 for _ in 0..3 {
-                    drop(worker.fork_snapshot(&script));
+                    if let Some(Ok(mut fork)) = worker.fork_snapshot(&script) {
+                        fork.recycle();
+                    }
                 }
                 let (allocations, bytes, started) = counters(counts);
                 for _ in 0..count {
-                    let fork = worker.fork_snapshot(&script).expect("a snapshot");
-                    drop(fork.map_err(|error| format!("fork: {error}"))?);
+                    let mut fork = worker
+                        .fork_snapshot(&script)
+                        .expect("a snapshot")
+                        .map_err(|error| format!("fork: {error}"))?;
+                    fork.recycle();
+                    drop(fork);
                 }
                 report("fork", count, (allocations, bytes), started, counts);
             }

@@ -221,11 +221,18 @@ impl Vm {
                 .copied()
                 .ok_or_else(|| internal_error!("include return without frame"))?;
         }
-        let property_hook = if frame.has_extras()
-            && frame.destination().is_none()
-            && self.call_stack.depth() > stop + 1
-        {
-            self.call_stack.current_extras_mut().property_hook.take()
+        let property_hook = if frame.has_extras() {
+            let take_hook = frame.destination().is_none() && self.call_stack.depth() > stop + 1;
+            let extras = self.call_stack.current_extras_mut();
+            if extras.magic_guard {
+                extras.magic_guard = false;
+                self.property_guards.pop();
+            }
+            if take_hook {
+                extras.property_hook.take()
+            } else {
+                None
+            }
         } else {
             None
         };

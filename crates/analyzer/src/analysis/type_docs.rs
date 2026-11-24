@@ -1,11 +1,19 @@
 //! `/** @param User $u */ function f($u)` makes $u a User inside f.
 //! A valid annotation refines its native type. Diagnostics point at the tag or declaration.
+//! `/** @var list<Row> */ return $query->getResult();` types the returned expression.
 
 use super::*;
 use crate::{
     phpdoc::{Annotation, Documentation},
     types::{Compatibility, TypePolicy},
 };
+use std::collections::BTreeMap;
+
+#[derive(Default)]
+pub(super) struct StatementAnnotations {
+    pub assignments: BTreeMap<String, ValueType>,
+    pub returned: Option<ValueType>,
+}
 
 impl Analyzer<'_> {
     pub fn function_documentation(
@@ -15,7 +23,7 @@ impl Analyzer<'_> {
         declaration: Span,
         scope: &mut Scope,
     ) -> Option<ValueType> {
-        if self.level < 2 || doc.is_none() {
+        if !self.index.read_type_docs || doc.is_none() {
             return None;
         }
         let docs = self.read_documentation(doc);
@@ -25,11 +33,13 @@ impl Analyzer<'_> {
                 .iter()
                 .find(|parameter| parameter.name == *name)
             else {
-                self.diagnose(
-                    "parameter.notFound",
-                    declaration,
-                    format!("PHPDoc tag @param references unknown parameter: ${name}"),
-                );
+                if self.level >= 2 {
+                    self.diagnose(
+                        "parameter.notFound",
+                        declaration,
+                        format!("PHPDoc tag @param references unknown parameter: ${name}"),
+                    );
+                }
                 continue;
             };
             if self.check_doc_annotation(
@@ -43,6 +53,9 @@ impl Analyzer<'_> {
                     &parameter.ty,
                     annotated.ty.clone(),
                 );
+                if parameter.default_is_null {
+                    ty = ty.join(&ValueType::Null);
+                }
                 if parameter.variadic {
                     ty = ValueType::Collection(std::sync::Arc::new(crate::types::Collection {
                         kind: crate::types::CollectionKind::Array,
@@ -96,8 +109,10 @@ impl Analyzer<'_> {
             .and_then(|class| self.index.class(class))
             .map_or(&empty, |class| &class.documented.templates);
         let docs = crate::phpdoc::read(&self.file.source, doc, &self.context.names, templates);
-        for invalid in &docs.errors {
-            self.diagnose("phpDoc.parseError", invalid.span, invalid.message.clone());
+        if self.level >= 2 {
+            for invalid in &docs.errors {
+                self.diagnose("phpDoc.parseError", invalid.span, invalid.message.clone());
+            }
         }
         docs
     }
@@ -112,6 +127,13 @@ impl Analyzer<'_> {
     ) -> bool {
         if annotation.ty == ValueType::Mixed {
             return false;
+        }
+        if annotation.ty == ValueType::ExplicitMixed && native.is_mixed() {
+            return true;
+        }
+        if self.level < 2 {
+            return native.accepts(&annotation.ty, self.index, TypePolicy::Documentation)
+                == Compatibility::Accepts;
         }
         let known = self.check_doc_classes(&annotation.ty, span);
         let expected = self.context.class.as_ref().map_or_else(
@@ -206,11 +228,11 @@ pub(super) fn statement_comments(source: &str) -> std::collections::BTreeMap<usi
 }
 
 impl Analyzer<'_> {
-    pub fn statement_var_annotations(
+    pub(super) fn statement_var_annotations(
         &mut self,
         statement: &Statement,
         scope: &mut Scope,
-    ) -> std::collections::BTreeMap<String, ValueType> {
+    ) -> StatementAnnotations {
         let Some(doc) = self.statement_docs.get(&statement.span.start).copied() else {
             return Default::default();
         };
@@ -225,16 +247,18 @@ impl Analyzer<'_> {
             _ => None,
         };
         let docs = self.read_documentation(Some(doc));
-        let mut after = std::collections::BTreeMap::new();
+        let mut annotations = StatementAnnotations::default();
         for (name, annotation) in docs.variables {
-            if let Some(name) = name.as_deref().or(assigned) {
+            if name.is_none() && matches!(statement.kind, StatementKind::Return(Some(_))) {
+                annotations.returned = Some(annotation.ty);
+            } else if let Some(name) = name.as_deref().or(assigned) {
                 if assigned == Some(name) {
-                    after.insert(name.into(), annotation.ty);
+                    annotations.assignments.insert(name.into(), annotation.ty);
                 } else if scope.get(name).definition == Definition::Definite {
                     scope.define(name, annotation.ty);
                 }
             }
         }
-        after
+        annotations
     }
 }

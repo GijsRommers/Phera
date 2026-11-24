@@ -53,6 +53,23 @@ pub use phera_vm::OutputSink;
 pub use preload::PreloadSummary;
 pub use snapshots::{remembered as snapshot_remembered, requests_from_the_top};
 
+/// Default cap on concurrently forked request VMs per worker thread.
+/// Extra HTTP requests stay parked as lightweight Tokio futures until an
+/// active VM drops, keeping memory bounded under high-concurrency spikes
+/// while keeping database connection pools saturated.
+const DEFAULT_MAX_CONCURRENT_REQUESTS_PER_WORKER: usize = 32;
+
+fn default_max_concurrent_requests_per_worker() -> Option<usize> {
+    match std::env::var("PHERA_MAX_CONCURRENT_REQUESTS_PER_WORKER") {
+        Ok(value) => match value.trim().parse::<usize>() {
+            Ok(0) => None,
+            Ok(limit) => Some(limit),
+            Err(_) => Some(DEFAULT_MAX_CONCURRENT_REQUESTS_PER_WORKER),
+        },
+        Err(_) => Some(DEFAULT_MAX_CONCURRENT_REQUESTS_PER_WORKER),
+    }
+}
+
 #[derive(Clone)]
 pub struct Runtime {
     registry: Arc<Registry>,
@@ -74,6 +91,9 @@ pub struct Runtime {
     entry_scripts: Arc<std::collections::HashMap<std::path::PathBuf, &'static str>>,
     /// WebSocket hub exposed to `Phera\WebSocket\*` when running under `phera serve`.
     websocket_sink: Option<Arc<dyn phera_extension_api::websocket::WebSocketSink>>,
+    /// Maximum number of active request VMs running concurrently on one worker
+    /// thread (`None` means unbounded).
+    max_concurrent_requests_per_worker: Option<usize>,
 }
 
 /// A web worker links the process's native definitions once on its own
@@ -91,6 +111,8 @@ pub struct WebWorker {
     /// the background (`phera serve`); see [`WebWorker::with_background_boots`].
     background_boots: bool,
     code: Rc<WorkerCodeCache>,
+    /// Bounds concurrently forked request VMs on this worker thread.
+    active_requests: Option<Rc<tokio::sync::Semaphore>>,
 }
 
 impl WebWorker {
@@ -271,6 +293,7 @@ impl Runtime {
             include_policy: phera_vm::IncludeCachePolicy::default(),
             entry_scripts: Arc::default(),
             websocket_sink: None,
+            max_concurrent_requests_per_worker: default_max_concurrent_requests_per_worker(),
         }
     }
 
@@ -280,6 +303,13 @@ impl Runtime {
         sink: Arc<dyn phera_extension_api::websocket::WebSocketSink>,
     ) -> Self {
         self.websocket_sink = Some(sink);
+        self
+    }
+
+    /// Caps how many request VMs may run concurrently on a single worker thread.
+    /// `None` removes the cap.
+    pub fn with_max_concurrent_requests_per_worker(mut self, limit: Option<usize>) -> Self {
+        self.max_concurrent_requests_per_worker = limit.filter(|&limit| limit > 0);
         self
     }
 
@@ -413,6 +443,9 @@ impl Runtime {
             snapshots: Default::default(),
             background_boots: false,
             code: Rc::new(WorkerCodeCache::new(self.web_cache.clone())),
+            active_requests: self
+                .max_concurrent_requests_per_worker
+                .map(|limit| Rc::new(tokio::sync::Semaphore::new(limit))),
         }
     }
 
@@ -583,8 +616,35 @@ impl Runtime {
             http::Boundary::OtherMediaType => (None, None),
         };
 
-        let (mut vm, carried, warmup_before) =
+        let _vm_permit = match &worker.active_requests {
+            Some(semaphore) => semaphore.acquire().await.ok(),
+            None => None,
+        };
+
+        struct ManagedVm(Vm);
+
+        impl std::ops::Deref for ManagedVm {
+            type Target = Vm;
+            fn deref(&self) -> &Self::Target {
+                &self.0
+            }
+        }
+
+        impl std::ops::DerefMut for ManagedVm {
+            fn deref_mut(&mut self) -> &mut Self::Target {
+                &mut self.0
+            }
+        }
+
+        impl Drop for ManagedVm {
+            fn drop(&mut self) {
+                self.0.recycle();
+            }
+        }
+
+        let (vm, carried, warmup_before) =
             self.prepare_worker_vm(worker, script, document_root, compiled.is_ok());
+        let mut vm = ManagedVm(vm);
         let forked = vm.is_fork();
         vm.set_local_loader(code);
         let uploads = http::define_superglobals(
@@ -650,10 +710,14 @@ impl Runtime {
             .state_mut()
             .take::<websocket::PendingWebSocketAccept>()
             .and_then(|pending| pending.0);
+        let body = std::mem::take(&mut vm.output);
+        // Free the forked VM before waking the next parked request.
+        drop(vm);
+        drop(_vm_permit);
         HttpResponse {
             status: head.status,
             headers: head.headers,
-            body: std::mem::take(&mut vm.output),
+            body,
             websocket,
         }
     }

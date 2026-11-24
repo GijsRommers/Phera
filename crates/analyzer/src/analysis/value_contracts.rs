@@ -31,6 +31,8 @@ impl Analyzer<'_> {
             )
             .value_choices();
         let name = &self.context.function;
+        let template =
+            expression.and_then(|expr| self.mismatched_template_return(expr, &expected, given));
         match (expression, &expected) {
             (_, ValueType::Never) => self.diagnose(
                 "return.never",
@@ -52,13 +54,23 @@ impl Analyzer<'_> {
             }
             (Some(expr), _)
                 if expected != ValueType::Void
-                    && self.incompatible(&expected, given, self.value_policy()) =>
+                    && (template.is_some()
+                        || self.incompatible(&expected, given, self.value_policy())) =>
             {
                 let provenance = self.narrowed_at(expr, scope);
+                let callable = if name == "Closure" {
+                    "Anonymous function".to_owned()
+                } else if let Some(class) = &self.context.class {
+                    format!("Method {class}::{name}()")
+                } else {
+                    format!("Function {name}()")
+                };
+                let given = super::argument_contracts::type_for_message(given, &expected);
+                let expected = template.unwrap_or_else(|| expected.to_string());
                 self.diagnose(
                     "return.type",
                     span,
-                    format!("{name}() should return {expected}, but returns {given}.{provenance}"),
+                    format!("{callable} should return {expected} but returns {given}.{provenance}"),
                 );
             }
             _ => {}
@@ -84,14 +96,34 @@ impl Analyzer<'_> {
             ValueType::Union(types) => types.as_ref(),
             _ => std::slice::from_ref(&given),
         };
-        // Before PHPStan's union checks at level 7, a union with an
-        // acceptable value is sufficient. Level 8 adds nullable checks.
-        variants
-            .iter()
-            .filter(|ty| {
-                **ty != ValueType::Null || variants.len() == 1 || !expected.excludes_null()
-            })
-            .all(|ty| expected.accepts(ty, self.index, policy) == Compatibility::Rejects)
+        let checked = variants.iter().filter(|ty| {
+            self.level >= 8
+                || **ty != ValueType::Null
+                || variants.len() == 1
+                || !expected.excludes_null()
+        });
+        let rejects = |ty: &ValueType| {
+            if self.strict_mixed(ty) && !super::strict_mixed::accepts_mixed(expected) {
+                return true;
+            }
+            if self.level >= 7
+                && matches!((expected, ty), (ValueType::ClassString(bound), ValueType::ClassString(actual))
+                    if bound.class_name().is_some() && **actual == ValueType::Object)
+            {
+                return true;
+            }
+            if self.level >= 7
+                && super::integer_range_contracts::range_excludes_values(expected, ty)
+            {
+                return true;
+            }
+            expected.accepts(ty, self.index, policy) == Compatibility::Rejects
+        };
+        if self.level >= 7 {
+            checked.into_iter().any(rejects)
+        } else {
+            checked.into_iter().all(rejects)
+        }
     }
 
     pub fn narrowed_at(&self, expression: &Expression, scope: &Scope) -> String {
@@ -111,8 +143,10 @@ impl Analyzer<'_> {
     pub fn check_property_assignment(
         &mut self,
         target: &Expression,
+        place: Option<&crate::scope::Place>,
         expected: &ValueType,
         given: &ValueType,
+        scope: &Scope,
     ) {
         if self.level >= 3 && self.incompatible(expected, given, self.value_policy()) {
             let name = match &target.kind {
@@ -127,10 +161,18 @@ impl Analyzer<'_> {
                 _ => None,
             };
             if let Some(name) = name {
+                let property = place
+                    .and_then(|place| self.resolved_property(place, scope))
+                    .map_or_else(
+                        || format!("${name}"),
+                        |(class, _)| format!("{}::${name}", class.name),
+                    );
+                let expected = super::member_checks::receiver_name(expected);
+                let given = super::member_checks::receiver_name(given);
                 self.diagnose(
                     "assign.propertyType",
                     target.span,
-                    format!("Property ${name} ({expected}) does not accept {given}."),
+                    format!("Property {property} ({expected}) does not accept {given}."),
                 );
             }
         }
@@ -157,19 +199,15 @@ impl Analyzer<'_> {
             self.void_returns(body);
             return;
         }
-        let requires_value = self.context.declared_return
-            || self.level >= 3
-                && self
-                    .context
-                    .documented_return
-                    .as_ref()
-                    .is_some_and(|ty| !allows_empty_return(ty));
         if self.context.incomplete
             || flow != Flow::Next
-            || !requires_value
             || self.context.generator
             || (self.context.returns == ValueType::Never && self.level == 0)
         {
+            return;
+        }
+        let documented = self.fallthrough_doc_type();
+        if !self.context.declared_return && documented.is_none() {
             return;
         }
         let mut blocks = vec![body];
@@ -185,7 +223,7 @@ impl Analyzer<'_> {
         }
         let span = body.last().map_or_else(
             || {
-                if self.level >= 3 && !self.context.declared_return {
+                if documented.is_some() {
                     empty_body_location(&self.file.source, span)
                 } else {
                     span
@@ -193,7 +231,11 @@ impl Analyzer<'_> {
             },
             |statement| statement.span,
         );
-        self.report(Finding::MissingReturn(self.context.function.clone()), span);
+        if let Some(documented) = documented {
+            self.report_doc_fallthrough(&documented, span);
+        } else {
+            self.report(Finding::MissingReturn(self.context.function.clone()), span);
+        }
     }
     fn void_returns(&mut self, body: &[Statement]) {
         let mut pending = vec![body];
@@ -212,7 +254,7 @@ pub(super) fn allows_empty_return(ty: &ValueType) -> bool {
     let mut pending = vec![ty];
     while let Some(ty) = pending.pop() {
         match ty {
-            ValueType::Mixed | ValueType::Void => return true,
+            ty if ty.is_mixed() || *ty == ValueType::Void => return true,
             ValueType::Union(types) => pending.extend(types.iter()),
             ValueType::Template(template) => pending.push(&template.bound),
             ValueType::Conditional(conditional) => {

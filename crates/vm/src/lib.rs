@@ -225,7 +225,7 @@ pub struct Vm {
     native_callback_sites: Vec<error_traces::NativeCallbackSite>,
     debug_objects: Vec<u32>,
     property_guards: Vec<magic_properties::PropertyGuard>,
-    unset_typed_properties: std::collections::HashMap<u32, magic_properties::UnsetProperties>,
+    unset_typed_properties: foldhash::HashMap<u32, magic_properties::UnsetProperties>,
     clone_scopes: classes::cloning::CloneScopes,
     closure_captures: Vec<closures::PendingCapture>,
     /// Pure defaults retain lexical class scope while running outside a method frame.
@@ -236,14 +236,14 @@ pub struct Vm {
     pending_dimension: Option<dimensions::DimensionPath>,
     returned_hook: Option<property_hook_continuation::ReturnedHook>,
     native_view_depth: Option<usize>,
-    prelinked_classes: std::collections::HashSet<(usize, usize)>,
+    prelinked_classes: Rc<foldhash::HashSet<(usize, usize)>>,
     function_table: function_table::FunctionTable,
     /// Every loaded file and function of the request, by number.
     code: code_table::CodeTable,
     /// Static properties and evaluated class constants of this request.
     class_states: classes::class_state::ClassStates,
     globals: globals::Globals,
-    extension_values: std::collections::HashMap<&'static str, Value>,
+    extension_values: foldhash::HashMap<&'static str, Value>,
     static_variables: static_variables::StaticVariables,
     diagnostic_reporter: diagnostic_reporter::DiagnosticReporter,
     diagnostic_location: Option<diagnostics::SourceLocation>,
@@ -277,7 +277,7 @@ pub struct Vm {
     missed_native: Option<Vec<Value>>,
     /// What extensions remember during this request (response headers, ...).
     state: RequestState,
-    reflection_cache: Option<Box<reflection::ReflectionCache>>,
+    reflection_cache: Option<Rc<reflection::ReflectionCache>>,
     property_references: std::rc::Rc<std::cell::RefCell<reference_holders::ReferenceHolders>>,
     autoload: autoload::Autoloaders,
     request_end: request_end::RequestEnd,
@@ -292,6 +292,22 @@ pub struct Vm {
     websocket_sink: Option<Arc<dyn phera_extension_api::websocket::WebSocketSink>>,
     websocket_resolver: Option<Value>,
     websocket_is_event: bool,
+    /// When this VM was forked from a snapshot, allows clean teardown to
+    /// return its unmodified `CodeTable` and `ClassTable::local` back to the
+    /// snapshot's recycle pool.
+    code_recycle: Option<snapshot::CodeRecycle>,
+}
+
+impl Vm {
+    /// Returns unmodified snapshot-shared tables (`CodeTable`,
+    /// `ClassTable::local`) back to the originating snapshot's recycle pool
+    /// before this VM is dropped. Safe to call on any VM (no-op for classic
+    /// runs or forks that loaded/declared new symbols).
+    pub fn recycle(&mut self) {
+        if let Some(recycle) = self.code_recycle.take() {
+            recycle.try_return(&mut self.code, &mut self.classes, &self.function_table);
+        }
+    }
 }
 
 impl Vm {
@@ -325,6 +341,7 @@ impl Vm {
             websocket_sink: None,
             websocket_resolver: None,
             websocket_is_event: false,
+            code_recycle: None,
             native_callback_sites: Vec::new(),
             debug_objects: Vec::new(),
             property_guards: Vec::new(),
@@ -339,7 +356,7 @@ impl Vm {
             pending_dimension: None,
             returned_hook: None,
             native_view_depth: None,
-            prelinked_classes: std::collections::HashSet::new(),
+            prelinked_classes: Default::default(),
             function_table: function_table::FunctionTable::new(),
             code: code_table::CodeTable::for_worker(&native.code),
             class_states: classes::class_state::ClassStates::for_worker(&native.slots),

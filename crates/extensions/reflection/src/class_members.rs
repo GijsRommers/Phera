@@ -11,7 +11,7 @@ use phera_extension_api::{
 };
 
 use crate::class::{ReflectedClass, reflected_class};
-use crate::{allocate, engine, exception};
+use crate::{allocate, engine, exception, inspect};
 
 mod instance;
 
@@ -110,16 +110,14 @@ fn has(
     kind: MemberKind,
 ) -> NativeResult {
     let name = argument_name(args);
-    let class = reflected_class(this)?;
     if matches!(kind, MemberKind::Method) {
-        let target = phera_extension_api::reflection::FunctionTarget::Method {
-            class: class.info.name.clone(),
-            name,
-        };
+        let class = inspect(this, |class: &ReflectedClass| class.info.id)?;
+        let target = phera_extension_api::reflection::FunctionTarget::LinkedMethod { class, name };
         return Ok(Value::Bool(
             engine(context)?.reflect_function(&target).is_ok(),
         ));
     }
+    let class = reflected_class(this)?;
     if matches!(kind, MemberKind::Property) {
         let declared = engine(context)?.reflect_members(ClassSelector::Linked(class.info.id), kind);
         if find(declared, &name, kind).is_some() {
@@ -142,16 +140,14 @@ fn one(
     kind: MemberKind,
 ) -> NativeResult {
     let name = argument_name(args);
-    let class = reflected_class(this)?;
     if matches!(kind, MemberKind::Method) {
+        let class = inspect(this, |class: &ReflectedClass| class.info.id)?;
         return crate::function::make(
             context,
-            phera_extension_api::reflection::FunctionTarget::Method {
-                class: class.info.name.clone(),
-                name,
-            },
+            phera_extension_api::reflection::FunctionTarget::LinkedMethod { class, name },
         );
     }
+    let class = reflected_class(this)?;
     let declared = engine(context)?.reflect_members(ClassSelector::Linked(class.info.id), kind);
     if let Some(member) = find(declared, &name, kind) {
         return member_object(context, member, kind);
@@ -246,14 +242,16 @@ fn constant(context: &mut dyn Context, this: Option<&Rc<Object>>, args: &[Value]
 }
 
 fn constructor(context: &mut dyn Context, this: Option<&Rc<Object>>, _: &[Value]) -> NativeResult {
-    let class = reflected_class(this)?;
-    let Some(_) = &class.info.constructor else {
+    let class = inspect(this, |class: &ReflectedClass| {
+        class.info.constructor.as_ref().map(|_| class.info.id)
+    })?;
+    let Some(class) = class else {
         return Ok(Value::Null);
     };
     crate::function::make(
         context,
-        phera_extension_api::reflection::FunctionTarget::Method {
-            class: class.info.name.clone(),
+        phera_extension_api::reflection::FunctionTarget::LinkedMethod {
+            class,
             name: "__construct".into(),
         },
     )

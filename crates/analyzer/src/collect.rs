@@ -223,6 +223,7 @@ fn collect_constants(
             names.declaration(&item.name.name),
             ConstantInfo {
                 ty,
+                literal: crate::constant_types::literal(&item.value),
                 modifiers: Modifiers::default(),
                 location,
             },

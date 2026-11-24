@@ -38,7 +38,11 @@ pub async fn execute(
                     .description
                     .parameters
                     .iter()
-                    .position(|name| name.as_ref().is_some_and(|name| name == &format!(":{key}")))
+                    .position(|name| {
+                        name.as_deref()
+                            .and_then(|name| name.strip_prefix(':'))
+                            .is_some_and(|stripped| stripped == key)
+                    })
                     .map(|i| i + 1)
             });
             let Some(index) = index.filter(|i| *i <= handle.description.parameters.len()) else {
