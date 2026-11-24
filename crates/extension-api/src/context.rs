@@ -736,6 +736,31 @@ pub trait Context {
     fn deprecated(&mut self, message: String) {
         self.diagnostics().deprecated(message);
     }
+
+    /// Host WebSocket hub when running inside `phera serve`.
+    fn websocket_sink(&self) -> Option<&std::sync::Arc<dyn crate::websocket::WebSocketSink>> {
+        None
+    }
+
+    /// Whether the current VM run is handling a WebSocket lifecycle event.
+    fn is_websocket_event(&self) -> bool {
+        false
+    }
+
+    /// Stores a PHP handler resolver callable kept across snapshot forks.
+    fn set_websocket_resolver(&mut self, _resolver: Value) -> Result<(), NativeError> {
+        Err(NativeError::error(
+            "WebSocket handler resolvers require a Phera VM",
+        ))
+    }
+
+    /// Checks that `handler` resolves to an instantiable `Phera\WebSocket\Handler`.
+    fn verify_websocket_handler<'a>(
+        &'a mut self,
+        handler: &'a str,
+    ) -> LocalFuture<'a, Result<String, NativeError>> {
+        Box::pin(std::future::ready(Ok(handler.to_owned())))
+    }
 }
 
 /// What an output native must do after running its diagnostic handler.

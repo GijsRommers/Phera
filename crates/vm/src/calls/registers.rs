@@ -331,9 +331,60 @@ impl Slots for Window {
 
 impl crate::snapshot::ForkCopy for Registers {
     fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
+        let live = self.top.min(self.slots.len());
         Registers {
-            slots: self.slots.fork_copy(fork),
-            top: self.top,
+            slots: self.slots[..live]
+                .iter()
+                .map(|slot| slot.fork_copy(fork))
+                .collect(),
+            top: live,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::any::Any;
+    use std::rc::Rc;
+
+    use super::Registers;
+    use crate::snapshot::ForkCopy;
+    use phera_value::{Fork, NativeFork, Object, ObjectIds, Resource, Value};
+
+    struct TestNatives;
+
+    impl NativeFork for TestNatives {
+        fn fork_native(
+            &self,
+            _object: &Object,
+            _state: &dyn Any,
+            _fork: &mut Fork<'_>,
+        ) -> Result<Box<dyn Any>, String> {
+            Err("unexpected native".into())
+        }
+
+        fn fork_resource(
+            &self,
+            _resource: &Resource,
+            _fork: &mut Fork<'_>,
+        ) -> Result<Resource, String> {
+            Err("unexpected resource".into())
+        }
+    }
+
+    #[test]
+    fn fork_copy_trims_unused_register_tail() {
+        let mut registers = Registers::new();
+        registers.grow_to(512);
+        registers.put(0, Value::Int(42));
+        registers.truncate(1);
+        assert!(registers.slots.len() >= 512);
+
+        let ids = Rc::new(ObjectIds::default());
+        let mut fork = Fork::new(&ids, &TestNatives);
+        let copied = registers.fork_copy(&mut fork);
+        assert_eq!(copied.len(), 1);
+        assert_eq!(copied.slots.len(), 1);
+        assert_eq!(copied.window(0, 1), &[Some(Value::Int(42))]);
     }
 }

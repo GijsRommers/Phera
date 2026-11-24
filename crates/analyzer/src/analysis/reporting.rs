@@ -12,6 +12,7 @@ impl Analyzer<'_> {
             line: self.file.lines.line(span.start),
             identifier: identifier.into(),
             message,
+            source_range: Some((span.start, span.end)),
         });
     }
 
@@ -20,10 +21,19 @@ impl Analyzer<'_> {
             file: self.file.path.clone(),
             line: self.file.lines.line(span.start),
         };
-        self.report_location(finding, &location);
+        self.report_at(finding, &location, Some((span.start, span.end)));
     }
 
     pub fn report_location(&mut self, finding: Finding, location: &Location) {
+        self.report_at(finding, location, None);
+    }
+
+    fn report_at(
+        &mut self,
+        finding: Finding,
+        location: &Location,
+        source_range: Option<(usize, usize)>,
+    ) {
         for rule in rules::all() {
             if rule.level() <= self.level
                 && let Some(message) = rule.message(&finding)
@@ -34,6 +44,7 @@ impl Analyzer<'_> {
                     line: location.line,
                     identifier: rule.identifier().into(),
                     message,
+                    source_range,
                 });
             }
         }

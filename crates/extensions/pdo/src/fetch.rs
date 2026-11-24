@@ -114,6 +114,7 @@ pub fn convert(
             FetchMode::Assoc | FetchMode::Named | FetchMode::Object
         )
     {
+        let capacity = row.len().min(keys.len());
         let entries = row.zip(keys).map(|(value, key)| {
             let key = if matches!(mode, FetchMode::Object) {
                 &key.property
@@ -122,7 +123,7 @@ pub fn convert(
             };
             stringify(context, value, attributes).map(|value| (key.clone(), value))
         });
-        let array = PhpArray::try_from_distinct(entries)?;
+        let array = PhpArray::try_from_distinct_with_capacity(entries, capacity)?;
         return if matches!(mode, FetchMode::Object) {
             context.create_object("stdClass", array)
         } else {

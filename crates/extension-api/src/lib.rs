@@ -65,8 +65,19 @@ pub enum IconvFailure {
     IllegalCharacter,
 }
 
+pub type IconvConvert = fn(&[u8], &str, &str) -> Result<Vec<u8>, IconvFailure>;
+
 /// Byte conversion for `iconv()` and `convert.iconv.*`, without PHP diagnostics.
-pub type IconvConverter = fn(&[u8], &str, &str) -> Result<Vec<u8>, IconvFailure>;
+#[derive(Clone, Copy)]
+pub struct IconvConverter {
+    pub convert: IconvConvert,
+    pub stream: fn(&str, &str) -> Option<Box<dyn IconvStream>>,
+}
+
+/// A filter converter keeps its shift state between buckets until flushed.
+pub trait IconvStream: Send {
+    fn convert(&mut self, bytes: &[u8], flush: bool, limit: usize) -> std::io::Result<Vec<u8>>;
+}
 
 /// The PHP version exposed by the engine and its built-in modules.
 pub const PHP_VERSION: &str = "8.5.13";
@@ -93,4 +104,5 @@ pub trait Extension {
 pub mod fiber;
 pub mod ini;
 pub mod reflection;
+pub mod websocket;
 pub mod zend_sort;

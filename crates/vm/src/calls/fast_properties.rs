@@ -99,7 +99,10 @@ impl Machine<'_> {
         let slot = packed.slot();
         let found = object.with_properties(|properties| {
             properties.layout()?;
-            Some(properties.slot(slot).map(|value| value.deref().clone()))
+            Some(properties.slot(slot).map(|value| match value {
+                Value::Reference(_) => value.deref().clone(),
+                other => crate::fast::duplicate(other),
+            }))
         })??;
         match found {
             Some(value) => Some(value),
@@ -512,12 +515,11 @@ impl Machine<'_> {
             return Step::Slow;
         }
         let mut value = match self.registers.window(base + source.index(), 1) {
-            [Some(value)] => value.deref().clone(),
+            [Some(Value::Reference(_))] => return Step::Slow,
+            [Some(value)] => Some(crate::fast::duplicate(value)),
             _ => return Step::Slow,
         };
-        if value.is_reference() {
-            return Step::Slow;
-        }
+        let result_value = result.map(|_| crate::fast::duplicate(value.as_ref().unwrap()));
         let body = self.code.function(position.frame.function);
         let Some(path_body) = body.paths.get(path.index()) else {
             return Step::Slow;
@@ -566,8 +568,15 @@ impl Machine<'_> {
         if !written {
             return Step::Slow;
         }
-        if let Some(result) = result {
-            let _ = store::<GUARDED, _>(self.registers.tail_mut(base), result, value);
+        if let (Some(result), Some(result_value)) = (result, result_value) {
+            // If int->float widening occurred, `value` is None and the slot holds
+            // the widened float; preserve exact PHP semantics by using the widened
+            // value if present (only float-widened int differs from result_value).
+            let stored = match value {
+                Some(widened) => widened,
+                None => result_value,
+            };
+            let _ = store::<GUARDED, _>(self.registers.tail_mut(base), result, stored);
         }
         Step::Done(position.ip)
     }
@@ -582,7 +591,7 @@ impl Machine<'_> {
         object: &Object,
         name: NameId,
         scope: Option<ClassIndex>,
-        value: &mut Value,
+        value: &mut Option<Value>,
     ) -> bool {
         let Some((table, packed)) = self.resolve_prop(position, object, name, scope) else {
             return self.write_dynamic_prop_named(position, object, name, scope, value);
@@ -591,7 +600,7 @@ impl Machine<'_> {
     }
 
     /// Apply visibility, type, and readonly checks for a resolved [`PackedProp`]
-    /// and store `value` directly into `object`'s property slot.
+    /// and move `value` directly into `object`'s property slot (zero second clone).
     #[inline(always)]
     fn write_packed_prop(
         &self,
@@ -599,7 +608,7 @@ impl Machine<'_> {
         table: &crate::classes::property_table::PropertyTable,
         packed: PackedProp,
         scope: Option<ClassIndex>,
-        value: &mut Value,
+        value: &mut Option<Value>,
     ) -> bool {
         if !packed.is_direct_assignable() {
             return false;
@@ -607,15 +616,21 @@ impl Machine<'_> {
         if packed.has_set_visibility() && !packed.set_visible_to(scope, self.classes) {
             return false;
         }
-        let type_ok = if packed.allows_type(crate::types::own_type(value)) {
+        let Some(current) = value.as_mut() else {
+            return false;
+        };
+        let mut widened_float = None;
+        let type_ok = if packed.allows_type(crate::types::own_type(current)) {
             true
-        } else if let Value::Int(integer) = *value
+        } else if let Value::Int(integer) = *current
             && packed.allows_type(TypeMask::FLOAT)
         {
-            *value = Value::Float(integer as f64);
+            let float = Value::Float(integer as f64);
+            *current = float.clone();
+            widened_float = Some(float);
             true
         } else if packed.has_class_type()
-            && let Value::Object(val_obj) = value
+            && let Value::Object(val_obj) = current
             && let Some(val_class) = val_obj.class.as_any().downcast_ref::<Class>()
             && table.allows_object_class(packed.slot(), val_class, self.classes)
         {
@@ -626,12 +641,17 @@ impl Machine<'_> {
         if !type_ok {
             return false;
         }
-        if packed.is_readonly() {
-            return table.fills_missing_directly()
+        let ok = if packed.is_readonly() {
+            table.fills_missing_directly()
                 && !self.class_states.clone_scopes.covers(object)
-                && write_readonly_init_direct(object, packed.slot(), value);
+                && write_readonly_init_direct(object, packed.slot(), value)
+        } else {
+            write_slot_direct(object, packed.slot(), value, table.fills_missing_directly())
+        };
+        if ok && let Some(float) = widened_float {
+            *value = Some(float);
         }
-        write_slot_direct(object, packed.slot(), value, table.fills_missing_directly())
+        ok
     }
 
     /// Cold fallback for writing an undeclared dynamic property on `stdClass`
@@ -644,7 +664,7 @@ impl Machine<'_> {
         object: &Object,
         name: NameId,
         scope: Option<ClassIndex>,
-        value: &Value,
+        value: &mut Option<Value>,
     ) -> bool {
         if self.classes.has_lazy_objects && object.lazy().is_some() {
             return false;
@@ -691,7 +711,7 @@ impl Machine<'_> {
         object: &Object,
         name_reg: Reg,
         scope: Option<ClassIndex>,
-        value: &mut Value,
+        value: &mut Option<Value>,
     ) -> bool {
         if self.classes.has_lazy_objects && object.lazy().is_some() {
             return false;
@@ -877,14 +897,14 @@ impl Machine<'_> {
     }
 }
 
-/// Writes `value` into a declared property's slot, or says `false` so that
+/// Moves `value` into a declared property's slot, or says `false` so that
 /// the general path does it: for a reference in the slot, and for an empty
 /// slot unless `fill_missing` (see `PropertyTable::fills_missing_directly`).
 #[inline(always)]
 pub(super) fn write_slot_direct(
     object: &Object,
     slot: usize,
-    value: &Value,
+    value: &mut Option<Value>,
     fill_missing: bool,
 ) -> bool {
     object
@@ -893,12 +913,20 @@ pub(super) fn write_slot_direct(
             match properties.slot_mut(slot) {
                 Some(Value::Reference(_)) => Some(false),
                 Some(destination) => {
-                    *destination = value.clone();
-                    Some(true)
+                    if let Some(moved) = value.take() {
+                        *destination = moved;
+                        Some(true)
+                    } else {
+                        Some(false)
+                    }
                 }
                 None if fill_missing => {
-                    properties.set_slot(slot, value.clone());
-                    Some(true)
+                    if let Some(moved) = value.take() {
+                        properties.set_slot(slot, moved);
+                        Some(true)
+                    } else {
+                        Some(false)
+                    }
                 }
                 None => Some(false),
             }
@@ -910,15 +938,19 @@ pub(super) fn write_slot_direct(
 /// Initializes an uninitialized `readonly` property slot; returns `false` if
 /// already initialized so the VM handles the error or `__clone` reinitialization.
 #[inline(always)]
-fn write_readonly_init_direct(object: &Object, slot: usize, value: &Value) -> bool {
+fn write_readonly_init_direct(object: &Object, slot: usize, value: &mut Option<Value>) -> bool {
     object
         .update(|properties| {
             properties.layout()?;
             if properties.slot(slot).is_some() {
                 return Some(false);
             }
-            properties.set_slot(slot, value.clone());
-            Some(true)
+            if let Some(moved) = value.take() {
+                properties.set_slot(slot, moved);
+                Some(true)
+            } else {
+                Some(false)
+            }
         })
         .flatten()
         .unwrap_or(false)
@@ -928,7 +960,7 @@ fn write_readonly_init_direct(object: &Object, slot: usize, value: &Value) -> bo
 fn read_dynamic_key(object: &Object, key: &ArrayKey, quiet: bool) -> Option<Value> {
     let found = object.with_properties(|properties| match properties.get(key) {
         Some(Value::Reference(_)) => None,
-        Some(value) => Some(Some(value.clone())),
+        Some(value) => Some(Some(crate::fast::duplicate(value))),
         None => Some(None),
     })??;
     match found {
@@ -939,14 +971,18 @@ fn read_dynamic_key(object: &Object, key: &ArrayKey, quiet: bool) -> Option<Valu
 }
 
 #[inline]
-fn write_dynamic_key(object: &Object, key: ArrayKey, value: &Value) -> bool {
+fn write_dynamic_key(object: &Object, key: ArrayKey, value: &mut Option<Value>) -> bool {
     object
         .update(|properties| {
             if matches!(properties.get(&key), Some(Value::Reference(_))) {
                 return false;
             }
-            properties.insert(key, value.clone());
-            true
+            if let Some(moved) = value.take() {
+                properties.insert(key, moved);
+                true
+            } else {
+                false
+            }
         })
         .unwrap_or(false)
 }

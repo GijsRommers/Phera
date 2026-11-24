@@ -6,6 +6,7 @@ use std::rc::Rc;
 
 use crate::request::Request;
 use crate::response::Response;
+use crate::websocket::{WebSocketEvent, WebSocketOutcome};
 
 /// Handles one request.
 ///
@@ -20,6 +21,32 @@ pub trait Handler: 'static {
     /// that connect meanwhile wait in the operating system's queue.
     fn start(&self) -> Pin<Box<dyn Future<Output = ()> + '_>> {
         Box::pin(async {})
+    }
+
+    /// Runs one WebSocket lifecycle event (`Open`, `Message`, or `Close`) on a
+    /// dedicated worker-local task. Events for one connection execute strictly
+    /// sequentially in arrival order.
+    fn handle_websocket(
+        &self,
+        _event: WebSocketEvent,
+    ) -> Pin<Box<dyn Future<Output = WebSocketOutcome> + '_>> {
+        Box::pin(async { WebSocketOutcome::default() })
+    }
+
+    /// Checks whether a browser `Origin` header is allowed to upgrade to a
+    /// WebSocket. Handlers behind trusted reverse proxies override this using
+    /// the proxy-resolved `HTTPS` flag and `Host`.
+    fn websocket_origin_allowed(
+        &self,
+        request: &Request,
+        allowed_origins: Option<&[String]>,
+    ) -> bool {
+        crate::websocket::handshake::validate_origin(
+            request.header("origin"),
+            false,
+            request.header("host"),
+            allowed_origins,
+        )
     }
 }
 

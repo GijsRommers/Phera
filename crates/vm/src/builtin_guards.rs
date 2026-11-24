@@ -44,13 +44,15 @@ impl Vm {
         let frame = self
             .current()
             .ok_or_else(|| internal_error!("builtin guard frame"))?;
-        let site = frame
-            .site_cache()
-            .ok_or_else(|| internal_error!("builtin guard site"))?;
-        let found = match &*site.borrow() {
-            CachedSite::BuiltinGuard(resolution) => Some(*resolution),
-            _ => None,
-        };
+        let function_index = frame.frame.function;
+        let ip = frame.ip();
+        let found = self
+            .code
+            .read_site(function_index, ip, |site| match site {
+                CachedSite::BuiltinGuard(resolution) => Some(*resolution),
+                _ => None,
+            })
+            .flatten();
         let resolution = match found {
             Some(resolution) => resolution,
             None => {
@@ -65,7 +67,8 @@ impl Vm {
                 } else {
                     Resolution::Builtin
                 };
-                *site.borrow_mut() = CachedSite::BuiltinGuard(resolution);
+                self.code
+                    .write_site(function_index, ip, CachedSite::BuiltinGuard(resolution));
                 resolution
             }
         };

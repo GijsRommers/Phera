@@ -258,6 +258,7 @@ pub(crate) enum ConstantInitializer {
 }
 
 /// A failed evaluation restores Uninitialized so later accesses can retry.
+#[derive(Clone)]
 pub(crate) enum ConstantState {
     Uninitialized,
     Evaluating,

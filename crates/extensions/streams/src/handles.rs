@@ -4,7 +4,7 @@ use std::io::{self, SeekFrom, Write};
 
 use phera_extension_api::{
     ConstantValue, Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param,
-    ParamType, Registry, Value, args,
+    ParamType, Registry, Value, args, value::Resource,
 };
 
 use crate::context_options::{OPTIONAL_CONTEXT, validate};
@@ -191,6 +191,14 @@ pub(crate) async fn close_arguments(
         file.close(context).await?;
         return Ok(Value::Bool(true));
     }
+    finish_native(context, resource, function).await
+}
+
+pub(crate) async fn finish_native(
+    context: &mut dyn Context,
+    resource: &Resource,
+    function: &str,
+) -> NativeResult {
     let (gzip, filtered) = with_stream(resource, |stream| {
         if let crate::stream::Backing::Socket(socket) = &stream.backing {
             socket.retire();

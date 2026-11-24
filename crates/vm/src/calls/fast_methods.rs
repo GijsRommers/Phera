@@ -188,6 +188,9 @@ impl Machine<'_> {
                 };
                 self.enter_site_method(position, (body, site), function, object, destination)
             }
+            SiteOutcome::MagicCall(function) => {
+                self.enter_site_magic_call(position, (body, site), function, receiver, destination)
+            }
             // A native getter's value goes where the call's result goes; a
             // lazy object, or a getter that declines, takes the general
             // sequence.
@@ -248,7 +251,7 @@ impl Machine<'_> {
             .unit_name_key(position.frame.function, site.method);
         let table = self.classes.method_table(class);
         let Some(packed) = table.get(key) else {
-            return SiteOutcome::Vm;
+            return self.resolve_magic_call_site(position, key, class);
         };
         if packed.is_abstract() || packed.is_static() {
             return SiteOutcome::Vm;
@@ -438,7 +441,7 @@ impl Machine<'_> {
             };
             let plain = !facts.is_typed(index)
                 || facts.parameter_masks[index].intersects(crate::types::own_type(value));
-            let mut value = value.clone();
+            let mut value = crate::fast::duplicate(value);
             if !plain
                 && !self.accepts_argument(function, index, &value)
                 && !self.accepts_on_second_look(function, index, &mut value)
@@ -453,6 +456,158 @@ impl Machine<'_> {
         if count < facts.parameters as usize {
             frame = frame.with_passed(count);
         }
+        self.stack.push(frame);
+        if self.spend_work() {
+            return Step::Yield;
+        }
+        Step::Switched(Position { frame, ip: 0 })
+    }
+
+    /// Resolves a missing method on `class` to `SiteOutcome::MagicCall` when
+    /// `class` has a plain public PHP `__call($name, $arguments)` handler and
+    /// no private method in the caller's scope shadows it.
+    #[cold]
+    #[inline(never)]
+    fn resolve_magic_call_site(
+        &self,
+        position: Position,
+        key: NameKey,
+        class: &Class,
+    ) -> SiteOutcome {
+        if class.name == phera_extension_api::serialization::INCOMPLETE_CLASS
+            || class
+                .hooks
+                .as_ref()
+                .and_then(|hooks| hooks.forward_method)
+                .is_some()
+        {
+            return SiteOutcome::Vm;
+        }
+        if let Some(scope) = self.caller_scope(position)
+            && self.classes.method_table(scope).private(key).is_some()
+        {
+            return SiteOutcome::Vm;
+        }
+        let Some(magic) = class.magic.as_deref().and_then(|magic| magic.call.as_ref()) else {
+            return SiteOutcome::Vm;
+        };
+        if magic.visibility != Visibility::Public {
+            return SiteOutcome::Vm;
+        }
+        let MethodBody::User(function) = magic.body else {
+            return SiteOutcome::Vm;
+        };
+        let facts = self.code.facts(function);
+        if facts.shape != FunctionShape::Plain
+            || facts.parameters != 2
+            || !facts.takes_values_only()
+        {
+            return SiteOutcome::Vm;
+        }
+        if facts.is_typed(0)
+            && !facts
+                .parameter_masks
+                .first()
+                .is_some_and(|mask| mask.intersects(phera_bytecode::TypeMask::STRING))
+        {
+            return SiteOutcome::Vm;
+        }
+        if facts.is_typed(1)
+            && !facts
+                .parameter_masks
+                .get(1)
+                .is_some_and(|mask| mask.intersects(phera_bytecode::TypeMask::ARRAY))
+        {
+            return SiteOutcome::Vm;
+        }
+        SiteOutcome::MagicCall(function)
+    }
+
+    /// Direct in-loop entry into a PHP `__call(string $name, array $arguments)`
+    /// method without leaving `Machine::run`, allocating a `MagicCall`
+    /// trampoline, or preparing the call twice.
+    #[cold]
+    #[inline(never)]
+    fn enter_site_magic_call(
+        &mut self,
+        position: Position,
+        (body, site): (&phera_bytecode::Function, &MethodSite),
+        function: FunctionIndex,
+        receiver: usize,
+        destination: Reg,
+    ) -> Step {
+        if self.stack.depth() >= self.frame_limit {
+            return Step::Done(position.ip);
+        }
+        let Some(arguments) = body.site_arguments.get(site.argument_range()) else {
+            return Step::Done(position.ip);
+        };
+        let base = position.frame.base();
+        // Verify receiver (non-lazy) and every argument before mutating state
+        // so any fallback cleanly re-enters the written-out `InitMethodCall`.
+        {
+            let [Some(Value::Object(object))] = self.registers.window(receiver, 1) else {
+                return Step::Done(position.ip);
+            };
+            if self.classes.has_lazy_objects && object.lazy().is_some() {
+                return Step::Done(position.ip);
+            }
+            for argument in arguments {
+                match self.registers.window(base + argument.register().index(), 1) {
+                    [Some(value)] if !value.is_reference() => {}
+                    _ => return Step::Done(position.ip),
+                }
+            }
+        }
+        let Some(method_name) = self
+            .code
+            .cache(position.frame.function)
+            .names
+            .get(site.method.index())
+            .cloned()
+        else {
+            return Step::Done(position.ip);
+        };
+        let args_array = if arguments.is_empty() {
+            phera_value::PhpArray::new()
+        } else {
+            let mut values = Vec::with_capacity(arguments.len());
+            for argument in arguments {
+                let [Some(value)] = self.registers.window(base + argument.register().index(), 1)
+                else {
+                    return Step::Done(position.ip);
+                };
+                values.push(crate::fast::duplicate(value));
+            }
+            phera_value::PhpArray::from_values(values, arguments.len())
+        };
+        let object = if site.receiver_taken {
+            match self.registers.take_defined(receiver) {
+                Some(Value::Object(object)) => object,
+                other => {
+                    if let Some(value) = other {
+                        self.registers.put(receiver, value);
+                    }
+                    return Step::Done(position.ip);
+                }
+            }
+        } else {
+            let [Some(Value::Object(object))] = self.registers.window(receiver, 1) else {
+                return Step::Done(position.ip);
+            };
+            object.clone()
+        };
+        let facts = self.code.facts(function);
+        let start = self.registers.len();
+        let first = start + CallKind::Method.prefix();
+        let window = (facts.registers.max(facts.parameters) as usize).max(1);
+        self.registers.grow_to(first + window);
+        self.registers.put(start, Value::Object(object));
+        self.registers.put(first, Value::String(method_name));
+        self.registers
+            .put(first + 1, Value::Array(Rc::new(args_array)));
+        self.publish(site.after.index());
+        let frame = Frame::of_kind(function, CallKind::Method, first, Some(destination));
         self.stack.push(frame);
         if self.spend_work() {
             return Step::Yield;

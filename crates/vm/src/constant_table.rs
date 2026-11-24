@@ -1,8 +1,9 @@
 //! Resolve constant symbols once, invalidating fallbacks when PHP defines names.
 
 use crate::code_table::FunctionIndex;
-use std::{collections::HashMap, rc::Rc, sync::Arc};
+use std::{rc::Rc, sync::Arc};
 
+use foldhash::{HashMap, HashMapExt};
 use phera_bytecode::{CompiledUnit, SymbolId};
 use phera_extension_api::NativeError;
 use phera_value::Value;
@@ -30,9 +31,9 @@ pub(crate) struct GlobalConstant {
 #[derive(Default)]
 pub(crate) struct ConstantTable {
     native: Rc<NativeConstants>,
-    values: HashMap<String, GlobalConstant>,
-    user_order: Vec<String>,
-    origins: HashMap<String, ConstantOrigin>,
+    values: Rc<HashMap<String, GlobalConstant>>,
+    user_order: Rc<Vec<String>>,
+    origins: Rc<HashMap<String, ConstantOrigin>>,
     resolved: HashMap<ConstantSite, ResolvedConstant>,
 }
 
@@ -80,9 +81,9 @@ impl ConstantTable {
     pub(crate) fn new(native: Rc<NativeConstants>) -> Self {
         Self {
             native,
-            values: HashMap::new(),
-            user_order: Vec::new(),
-            origins: HashMap::new(),
+            values: Rc::new(HashMap::new()),
+            user_order: Rc::new(Vec::new()),
+            origins: Rc::new(HashMap::new()),
             resolved: HashMap::new(),
         }
     }
@@ -108,11 +109,11 @@ impl ConstantTable {
         deprecated: Option<String>,
     ) {
         self.resolved.clear();
-        self.user_order.push(name.clone());
+        Rc::make_mut(&mut self.user_order).push(name.clone());
         if let Some(origin) = origin {
-            self.origins.insert(name.clone(), origin);
+            Rc::make_mut(&mut self.origins).insert(name.clone(), origin);
         }
-        self.values.insert(
+        Rc::make_mut(&mut self.values).insert(
             name,
             GlobalConstant {
                 value,
@@ -189,12 +190,22 @@ impl crate::snapshot::ForkCopy for GlobalConstant {
 }
 
 /// A constant can hold an object (an enum case); the fork's is its copy.
-/// The resolved sites are a cache of the same constants.
+/// When every user constant is trivially shareable (scalars, strings, pure
+/// arrays), share the whole table copy-on-write in O(1).
 impl crate::snapshot::ForkCopy for ConstantTable {
     fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
+        let values = if self
+            .values
+            .values()
+            .all(|constant| fork.is_trivially_shared(&constant.value))
+        {
+            self.values.clone()
+        } else {
+            Rc::new(self.values.fork_copy(fork))
+        };
         ConstantTable {
             native: self.native.clone(),
-            values: self.values.fork_copy(fork),
+            values,
             user_order: self.user_order.clone(),
             origins: self.origins.clone(),
             resolved: Default::default(),

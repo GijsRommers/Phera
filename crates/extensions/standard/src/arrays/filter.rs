@@ -2,7 +2,8 @@
 
 use phera_extension_api::value::cast_to_bool;
 use phera_extension_api::{
-    Context, FunctionEntry, LocalFuture, NativeResult, Param, ParamType, PhpArray, Value, args,
+    Context, FunctionEntry, LocalFuture, NativeResult, Param, ParamType, PhpArray, Registry, Value,
+    args,
 };
 
 use super::callback::{check_callback, check_callback_or_null};
@@ -10,6 +11,29 @@ use crate::arguments::required_array;
 use crate::constants::{ARRAY_FILTER_USE_BOTH, ARRAY_FILTER_USE_KEY};
 
 pub(super) const FUNCTIONS: &[FunctionEntry] = &[ARRAY_FILTER, ARRAY_REDUCE];
+
+pub(super) fn register_sync_selectors(registry: &mut Registry) {
+    registry.register_sync_selector("array_filter", |slots| match slots {
+        [Some(Value::Array(_))]
+        | [Some(Value::Array(_)), Some(Value::Null)]
+        | [
+            Some(Value::Array(_)),
+            Some(Value::Null),
+            Some(Value::Int(_)),
+        ] => Some(array_filter_truthy),
+        _ => None,
+    });
+}
+
+fn array_filter_truthy(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let mut result = PhpArray::new();
+    for (key, value) in required_array(arguments, 0).iter() {
+        if cast_to_bool(&value.deref(), context.diagnostics()) {
+            result.insert(key, value.clone());
+        }
+    }
+    Ok(Value::from(result))
+}
 
 /// `array_filter(array $array, ?callable $callback = null, int $mode = 0):
 /// array`, the entries the callback accepts, keys kept. Without a callback,

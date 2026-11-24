@@ -4,6 +4,7 @@
 use crate::{index::Index, types::ValueType};
 
 pub fn refine(index: &mut Index) {
+    preserve_false_return(index);
     // These take either an array or Traversable, as in php-src's `iterable`
     // declarations. Older generated tables stored only the array alternative.
     for name in ["iterator_to_array", "iterator_count"] {
@@ -35,6 +36,16 @@ pub fn refine(index: &mut Index) {
             }
         }
     }
+    // `$date->getTimezone()` returns a zone for an initialized native date.
+    for class in ["datetime", "datetimeimmutable", "datetimeinterface"] {
+        if let Some(method) = index
+            .classes
+            .get_mut(class)
+            .and_then(|class| class.methods.get_mut("gettimezone"))
+        {
+            method.returns = ValueType::Class("DateTimeZone".into());
+        }
+    }
     if let Some(period) = index.classes.get_mut("dateperiod") {
         let date =
             ValueType::Class("DateTime".into()).join(&ValueType::Class("DateTimeImmutable".into()));
@@ -47,5 +58,60 @@ pub fn refine(index: &mut Index) {
                 };
             }
         }
+    }
+}
+
+fn preserve_false_return(index: &mut Index) {
+    // The committed table widened literal false to bool for these APIs.
+    for name in [
+        "strpos",
+        "strrpos",
+        "stripos",
+        "strripos",
+        "strstr",
+        "stristr",
+        "strpbrk",
+        "strrchr",
+        "mb_strpos",
+        "mb_strrpos",
+        "mb_stripos",
+        "mb_strripos",
+        "mb_strstr",
+        "mb_stristr",
+        "mb_strrchr",
+        "mb_strrichr",
+        "imagecreatefromstring",
+        "imagecreatetruecolor",
+        "imagecreate",
+        "ob_get_contents",
+        "ob_get_clean",
+        "iconv",
+        "normalizer_normalize",
+        "parse_ini_file",
+        "parse_ini_string",
+    ] {
+        literal_false(index, name);
+    }
+}
+
+pub(super) fn literal_false(index: &mut Index, name: &str) {
+    if let Some(signature) = index.functions.get_mut(name) {
+        boolean_failure(&mut signature.returns);
+    }
+}
+
+pub(super) fn boolean_failure(returns: &mut ValueType) {
+    if let ValueType::Union(arms) = returns {
+        *returns = ValueType::Union(
+            arms.iter()
+                .map(|arm| {
+                    if *arm == ValueType::Bool {
+                        ValueType::BoolLiteral(false)
+                    } else {
+                        arm.clone()
+                    }
+                })
+                .collect(),
+        );
     }
 }

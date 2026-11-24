@@ -14,8 +14,6 @@ executed. The checker itself never runs PHP. Oracle examples and results are bel
 
 | File | Level | PHPStan lines | Phera lines | Decision and reason |
 | --- | --- | --- | --- | --- |
-| `abstract_late_new.php` | 0 | [3] | [] | PHPStan reports new.static (constructor compatibility advice). PHP permits new static in an abstract base when the called class is concrete; the PHP 8.5 oracle returned true for the subclass example. Phera avoids calling that an abstract instantiation. |
-| `abstract_late_new.php` | 1 | [3] | [] | PHPStan reports new.static (constructor compatibility advice). PHP permits new static in an abstract base when the called class is concrete; the PHP 8.5 oracle returned true for the subclass example. Phera avoids calling that an abstract instantiation. |
 | `arguments_bad_arrow_named.php` | 1 | [] | [3] | The task requires known-callable named parameters at level 1; PHPStan defers this check beyond 1. PHP 8.5 exits 255 with Unknown named parameter $wrong for all three callable forms. |
 | `arguments_bad_builtin_many.php` | 0 | [] | [3] | The task requires excessive argument counts at level 0; PHPStan enables this check at level 1. PHP accepts surplus positional arguments in user functions, but the requested static arity rule (also PHPStan level 1) deliberately reports them. |
 | `arguments_bad_closure_named.php` | 1 | [] | [3] | The task requires known-callable named parameters at level 1; PHPStan defers this check beyond 1. PHP 8.5 exits 255 with Unknown named parameter $wrong for all three callable forms. |

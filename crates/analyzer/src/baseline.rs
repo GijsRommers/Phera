@@ -5,7 +5,7 @@ use crate::diagnostic::Diagnostic;
 use std::collections::BTreeSet;
 use std::path::Path;
 
-mod neon;
+pub(crate) mod neon;
 
 pub fn write(path: &str, diagnostics: &[Diagnostic]) -> Result<(), String> {
     let entries = diagnostics

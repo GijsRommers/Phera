@@ -59,7 +59,7 @@ impl SlotNumbers {
 pub(crate) struct ClassStates {
     /// Made on first use from the declaration's default value.
     statics: Vec<Option<Rc<StaticProperty>>>,
-    constants: Vec<ConstantState>,
+    constants: Rc<Vec<ConstantState>>,
     numbers: Rc<SlotNumbers>,
     /// The clones whose `clone with` updates are running, in which each
     /// readonly property may change once. Kept here, where the interpreter
@@ -87,7 +87,7 @@ impl ClassStates {
     pub(crate) fn for_worker(numbers: &Rc<SlotNumbers>) -> Self {
         ClassStates {
             statics: Vec::new(),
-            constants: Vec::new(),
+            constants: Rc::new(Vec::new()),
             numbers: numbers.clone(),
             clone_scopes: Default::default(),
         }
@@ -159,11 +159,11 @@ impl ClassStates {
 
     pub(crate) fn set_constant(&mut self, ConstantSlot(slot): ConstantSlot, state: ConstantState) {
         let slot = slot as usize;
-        if self.constants.len() <= slot {
-            self.constants
-                .resize_with(slot + 1, || ConstantState::Uninitialized);
+        let constants = Rc::make_mut(&mut self.constants);
+        if constants.len() <= slot {
+            constants.resize_with(slot + 1, || ConstantState::Uninitialized);
         }
-        self.constants[slot] = state;
+        constants[slot] = state;
     }
 }
 
@@ -183,16 +183,26 @@ impl crate::snapshot::ForkCopy for ClassStates {
                 })
             })
             .collect();
-        let constants = self
-            .constants
-            .iter()
-            .map(|state| match state {
-                ConstantState::Ready(value) => ConstantState::Ready(fork.value(value)),
-                ConstantState::Evaluating | ConstantState::Uninitialized => {
-                    ConstantState::Uninitialized
-                }
-            })
-            .collect();
+        let share_constants = self.constants.iter().all(|state| match state {
+            ConstantState::Ready(value) => fork.is_trivially_shared(value),
+            ConstantState::Uninitialized => true,
+            ConstantState::Evaluating => false,
+        });
+        let constants = if share_constants {
+            self.constants.clone()
+        } else {
+            Rc::new(
+                self.constants
+                    .iter()
+                    .map(|state| match state {
+                        ConstantState::Ready(value) => ConstantState::Ready(fork.value(value)),
+                        ConstantState::Evaluating | ConstantState::Uninitialized => {
+                            ConstantState::Uninitialized
+                        }
+                    })
+                    .collect(),
+            )
+        };
         // No clone is being made while a snapshot is forked.
         ClassStates {
             statics,

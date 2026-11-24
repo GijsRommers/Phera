@@ -113,16 +113,16 @@ pub(crate) struct ClassTable {
     /// table's answer, never the worker's.
     local: Vec<Option<Rc<Class>>>,
     /// The worker positions of the declared classes, in declaration order.
-    declared: Vec<u32>,
+    declared: Rc<Vec<u32>>,
     /// What was declared, in order, aliases included (`get_declared_classes`):
     /// a position of `local` or an index of `aliases`, so that declaring a
     /// class copies no name.
-    order: Vec<Declared>,
+    order: Rc<Vec<Declared>>,
     /// This request's `class_alias` names, with their process key and the
     /// number of the class they name (which may be a built-in). Checked
     /// after the worker's names and the built-ins, so that a lookup of a
     /// declared class never walks it.
-    aliases: Vec<(Rc<str>, phera_bytecode::NameKey, u32)>,
+    aliases: Rc<Vec<(Rc<str>, phera_bytecode::NameKey, u32)>>,
     /// The position reserved for the class being linked.
     linking: Option<u32>,
     /// While a class links: every class name it looked up, and what it was.
@@ -154,9 +154,9 @@ impl ClassTable {
         Self {
             leases: vec![super::worker_classes::PositionLeases::new(&worker)],
             worker,
-            declared: Vec::new(),
-            order: Vec::new(),
-            aliases: Vec::new(),
+            declared: Rc::new(Vec::new()),
+            order: Rc::new(Vec::new()),
+            aliases: Rc::new(Vec::new()),
             linking: None,
             recording: Default::default(),
             has_dimensions: false,
@@ -291,9 +291,9 @@ impl ClassTable {
         if self.local.len() <= index {
             self.local.resize(index + 1, None);
         }
-        self.order.push(Declared::Class(position));
+        Rc::make_mut(&mut self.order).push(Declared::Class(position));
         self.local[index] = Some(class);
-        self.declared.push(position);
+        Rc::make_mut(&mut self.declared).push(position);
     }
 
     /// The class's methods by name key, built once on the class itself and
@@ -343,9 +343,10 @@ impl ClassTable {
         if self.get_lowercase(&name).is_some() {
             return false;
         }
-        self.order.push(Declared::Alias(self.aliases.len() as u32));
+        let alias_index = self.aliases.len() as u32;
+        Rc::make_mut(&mut self.order).push(Declared::Alias(alias_index));
         let key = phera_bytecode::name_keys::key(&name);
-        self.aliases.push((name.into(), key, class.index.0));
+        Rc::make_mut(&mut self.aliases).push((name.into(), key, class.index.0));
         true
     }
 
@@ -548,14 +549,49 @@ impl Drop for ClassTable {
 }
 
 impl ClassTable {
+    pub(crate) fn declared_len(&self) -> usize {
+        self.declared.len()
+    }
+
+    pub(crate) fn local_len(&self) -> usize {
+        self.local.len()
+    }
+
+    pub(crate) fn aliases_len(&self) -> usize {
+        self.aliases.len()
+    }
+
+    pub(crate) fn rollback_local_for_recycle(
+        &mut self,
+        snapshot_declared_len: usize,
+        snapshot_local_len: usize,
+    ) -> Vec<Option<Rc<Class>>> {
+        if self.declared.len() > snapshot_declared_len {
+            for &pos in &self.declared[snapshot_declared_len..] {
+                if let Some(slot) = self.local.get_mut(pos as usize) {
+                    *slot = None;
+                }
+            }
+        }
+        if self.local.len() > snapshot_local_len {
+            self.local.truncate(snapshot_local_len);
+        }
+        std::mem::take(&mut self.local)
+    }
+
     /// The class table of a fork: the same classes (immutable, shared), the
     /// method tables built so far (they use name numbers the fork shares),
     /// and the fork's own objects and id pool.
-    pub(crate) fn forked(&self, ids: Rc<ObjectIds>, objects: Vec<Weak<Object>>) -> ClassTable {
+    pub(crate) fn forked(
+        &self,
+        ids: Rc<ObjectIds>,
+        objects: Vec<Weak<Object>>,
+        recycled_local: Option<Vec<Option<Rc<Class>>>>,
+    ) -> ClassTable {
         ClassTable {
             native: self.native.clone(),
             worker: self.worker.clone(),
-            local: self.local.clone(),
+            local: recycled_local.unwrap_or_else(|| self.local.clone()),
             declared: self.declared.clone(),
             order: self.order.clone(),
             aliases: self.aliases.clone(),

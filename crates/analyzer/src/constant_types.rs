@@ -8,6 +8,18 @@ use crate::{
 };
 use phera_ast::*;
 
+pub fn literal(expression: &Expression) -> Option<ValueType> {
+    Some(match &expression.kind {
+        ExpressionKind::Literal(Literal::Null) => ValueType::Null,
+        ExpressionKind::Literal(Literal::Int(value)) => ValueType::IntLiteral(*value),
+        ExpressionKind::Literal(Literal::Bool(value)) => ValueType::BoolLiteral(*value),
+        ExpressionKind::Literal(Literal::String(value)) => {
+            ValueType::StringLiteral(value.as_slice().into())
+        }
+        _ => return None,
+    })
+}
+
 pub fn infer(
     expression: &Expression,
     names: &Names,
@@ -68,5 +80,14 @@ pub fn infer(
             .find_map(|name| index.constants.get(name))
             .map_or(ValueType::Mixed, |c| c.ty.clone()),
         _ => ValueType::Mixed,
+    }
+}
+
+pub(crate) fn int_bounds(ty: &ValueType) -> Option<(i64, i64)> {
+    match ty {
+        ValueType::Int => Some((i64::MIN, i64::MAX)),
+        ValueType::IntRange(min, max) => Some((*min, *max)),
+        ValueType::IntLiteral(value) => Some((*value, *value)),
+        _ => None,
     }
 }

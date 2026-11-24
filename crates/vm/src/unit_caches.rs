@@ -96,6 +96,9 @@ pub(crate) enum SiteOutcome {
     /// A method written in PHP the site's scope may call: entered from the
     /// site.
     Enter(crate::code_table::FunctionIndex),
+    /// A public PHP `__call(string $name, array $arguments)` handler invoked
+    /// directly from the site when the class does not declare the method.
+    MagicCall(crate::code_table::FunctionIndex),
     /// A public native getter with no parameters and a direct handler
     /// (`$method->getName()`): the site runs it and stores its value.
     Getter(Getter),
@@ -192,19 +195,18 @@ impl UnitCache {
     }
 }
 
-/// The site cells of one function, made when it first uses one: a request
+/// The site cells of one function, made when it first writes one: a request
 /// loads every function of a file but runs few of them, so most functions
-/// never get any (and a fork of a snapshot copies only those that ran).
-pub(crate) type Sites = OnceCell<Box<[RefCell<CachedSite>]>>;
+/// never allocate any, and forks read immutable snapshot sites directly from
+/// `base_sites` without copying or borrowing a `RefCell`.
+pub(crate) type Sites = Box<[CachedSite]>;
 
 /// An empty cell per instruction, and one past the last: a site is keyed by
 /// the position after its instruction. What a site resolves to is allocated
-/// when it is first used.
+/// when it is first written.
 #[cold]
-pub(crate) fn empty_sites(instructions: usize) -> Box<[RefCell<CachedSite>]> {
-    (0..=instructions)
-        .map(|_| RefCell::new(CachedSite::Empty))
-        .collect()
+pub(crate) fn empty_sites(instructions: usize) -> Sites {
+    (0..=instructions).map(|_| CachedSite::Empty).collect()
 }
 
 impl UnitCache {
@@ -284,6 +286,20 @@ pub(crate) fn value(constant: &Constant) -> Value {
 /// without making them, which is a snapshot's decision: see
 /// [`UnitCache`]'s `base`.
 impl UnitCache {
+    /// Clears request-local mutable caches on a kept snapshot unit when a
+    /// dirty fork rolls back its `CodeTable` for recycling.
+    pub(crate) fn reset_mutable_cells(&mut self) {
+        let symbols = self.symbols.get_mut();
+        if !symbols.is_empty() {
+            symbols.clear();
+        }
+        self.records.take();
+        let closures = self.closure_signatures.get_mut();
+        if !closures.is_empty() {
+            closures.clear();
+        }
+    }
+
     /// A cache for the same file with nothing filled: the values made from
     /// the file are shared, every cell is empty.
     fn without_cells(&self) -> Self {
@@ -416,17 +432,8 @@ impl crate::snapshot::ForkCopy for UnitCache {
 /// The cells of one function that a request forked from the snapshot may
 /// use: the cells that were filled, without those that hold an object of
 /// the VM they were made in.
-pub(crate) fn frozen_sites(sites: &Sites) -> Sites {
-    let copy = Sites::new();
-    if let Some(cells) = sites.get() {
-        let _ = copy.set(
-            cells
-                .iter()
-                .map(|site| RefCell::new(site.borrow().shared()))
-                .collect(),
-        );
-    }
-    copy
+pub(crate) fn frozen_sites(sites: &[CachedSite]) -> Sites {
+    sites.iter().map(CachedSite::shared).collect()
 }
 
 impl CachedSite {

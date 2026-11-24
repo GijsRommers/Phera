@@ -360,6 +360,61 @@ fn eval_pure_native(pure: PureNative, values: &[Option<Value>]) -> Option<Value>
                 _ => None,
             }
         }
+        PureNative::ArrayKeys => {
+            let [Some(Value::Array(array))] = values else {
+                return None;
+            };
+            let keys = PhpArray::from_values(
+                array.keys().map(|key| match key {
+                    phera_value::ArrayKey::Int(i) => Value::Int(i),
+                    phera_value::ArrayKey::Interned(s) => Value::InternedStr(s),
+                    phera_value::ArrayKey::String(s) => Value::String(s),
+                }),
+                array.len(),
+            );
+            Some(Value::Array(Rc::new(keys)))
+        }
+        PureNative::ArrayValues => {
+            let [Some(Value::Array(array))] = values else {
+                return None;
+            };
+            if array.is_list() && !array.values().any(Value::is_reference) {
+                return Some(Value::Array(array.clone()));
+            }
+            let vals =
+                PhpArray::from_values(array.values().map(|v| v.deref().clone()), array.len());
+            Some(Value::Array(Rc::new(vals)))
+        }
+        PureNative::ArrayMerge => {
+            let [Some(Value::Array(a)), Some(Value::Array(b))] = values else {
+                return None;
+            };
+            let mut result = PhpArray::with_capacity(a.len() + b.len());
+            for array in [a, b] {
+                for (key, value) in array.iter() {
+                    if value.is_reference() {
+                        return None;
+                    }
+                    match key {
+                        phera_value::ArrayKey::Int(_) => {
+                            result.push(value.clone()).ok()?;
+                        }
+                        phera_value::ArrayKey::Interned(_) | phera_value::ArrayKey::String(_) => {
+                            result.insert(key, value.clone());
+                        }
+                    }
+                }
+            }
+            Some(Value::Array(Rc::new(result)))
+        }
+        PureNative::Strtoupper => {
+            let [s] = values else { return None };
+            let bytes = as_str_bytes(s)?;
+            if !bytes.iter().any(u8::is_ascii_lowercase) {
+                return s.clone();
+            }
+            Some(Value::from(bytes.to_ascii_uppercase()))
+        }
     }
 }
 

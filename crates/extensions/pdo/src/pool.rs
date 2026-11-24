@@ -11,7 +11,7 @@
 //! gone, the connection is reset in the background (the driver's `reset`)
 //! and lent to the next `new PDO` with the same settings on this worker.
 //! Workers share the admission limit. The limits are read once:
-//! `PHERA_PDO_POOL_SIZE` (20), `PHERA_PDO_POOL_IDLE_SECONDS` (60),
+//! `PHERA_PDO_POOL_SIZE` (64), `PHERA_PDO_POOL_IDLE_SECONDS` (60),
 //! `PHERA_PDO_POOL_LIFETIME_SECONDS` (1800), `PHERA_PDO_POOL_WAIT_SECONDS`
 //! (30). `PDO::ATTR_PERSISTENT` is reported separately from the pool policy.
 
