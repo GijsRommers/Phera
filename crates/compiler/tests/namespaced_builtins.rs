@@ -152,3 +152,85 @@ fn a_namespaced_is_null_condition_is_guarded() {
         ]
     );
 }
+
+/// Unqualified calls to direct native functions in a namespace are guarded and
+/// lowered to `CallNativeDirect` (or `ArrayKeyExists` / `InLiteralArray`) on
+/// the fast branch, keeping the general call on the fallback branch.
+#[test]
+fn namespaced_direct_native_calls_are_guarded() {
+    let lookup = |name: &str| match name {
+        "strpos" => Some(NativeFunction::Direct {
+            positional_by_value: 3,
+        }),
+        "in_array" => Some(NativeFunction::Direct {
+            positional_by_value: 3,
+        }),
+        "array_key_exists" => Some(NativeFunction::Direct {
+            positional_by_value: 2,
+        }),
+        _ => Some(NativeFunction::General),
+    };
+    let fold = |_: &str, _: &[u8]| None;
+    let natives = NativeFunctions {
+        lookup: &lookup,
+        fold_string_call: &fold,
+    };
+
+    let unit = phera_compiler::compile_bytes_with_natives(
+        b"<?php namespace App; function f($a, $b) { return strpos($a, $b); }",
+        "test.php",
+        &natives,
+    )
+    .expect("valid PHP");
+    let code = &unit
+        .functions
+        .iter()
+        .find(|f| f.name.ends_with('f'))
+        .expect("f")
+        .instructions;
+    assert!(matches!(code[0], Instruction::GuardBuiltin { .. }));
+    assert!(
+        code.iter()
+            .any(|i| matches!(i, Instruction::CallNativeDirect { .. }))
+    );
+    assert!(
+        code.iter()
+            .any(|i| matches!(i, Instruction::InitCall { .. }))
+    );
+
+    let unit = phera_compiler::compile_bytes_with_natives(
+        b"<?php namespace App; function f($x) { return in_array($x, ['a', 'b'], true); }",
+        "test.php",
+        &natives,
+    )
+    .expect("valid PHP");
+    let code = &unit
+        .functions
+        .iter()
+        .find(|f| f.name.ends_with('f'))
+        .expect("f")
+        .instructions;
+    assert!(matches!(code[0], Instruction::GuardBuiltin { .. }));
+    assert!(
+        code.iter()
+            .any(|i| matches!(i, Instruction::InLiteralArray { .. }))
+    );
+
+    let unit = phera_compiler::compile_bytes_with_natives(
+        b"<?php namespace App; function f($k, $a) { return array_key_exists($k, $a); }",
+        "test.php",
+        &natives,
+    )
+    .expect("valid PHP");
+    let code = &unit
+        .functions
+        .iter()
+        .find(|f| f.name.ends_with('f'))
+        .expect("f")
+        .instructions;
+    assert!(matches!(code[0], Instruction::GuardBuiltin { .. }));
+    assert!(
+        code.iter()
+            .any(|i| matches!(i, Instruction::ArrayKeyExists { .. }))
+    );
+}

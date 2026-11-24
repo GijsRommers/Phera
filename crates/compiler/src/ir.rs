@@ -384,8 +384,8 @@ pub enum Instruction {
     Exit(Reg),
     /// Enter or leave PHP error suppression; emits BeginSilence or EndSilence.
     Suppress(bool),
-    /// Construct an empty array; emits NewArray.
-    Array(Reg),
+    /// Construct an empty array with an optional initial list capacity; emits NewArray.
+    Array(Reg, u16),
     /// Insert, append, reference-bind, or unpack an array entry.
     ArrayPush {
         array: Reg,

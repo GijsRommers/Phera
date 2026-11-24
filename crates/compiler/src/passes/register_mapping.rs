@@ -177,7 +177,7 @@ impl Instruction {
             | Instruction::BuiltinFrame {
                 destination: dst, ..
             }
-            | Instruction::Array(dst)
+            | Instruction::Array(dst, _)
             | Instruction::Echo(dst)
             | Instruction::ReturnReference(dst)
             | Instruction::Return(dst)

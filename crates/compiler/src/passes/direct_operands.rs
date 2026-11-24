@@ -7,20 +7,13 @@
 //! Nops for later compaction. For example, Move(r1, r0); Return(r1) becomes
 //! Nop; Return(r0) when r0 is a local and r1 a temporary.
 
-use std::collections::HashSet;
-
 use phera_bytecode::{Function, Instruction};
 
-use crate::passes::{integer_operands::dead_after, optimize::target};
+use crate::passes::{integer_operands::dead_after, optimize::block_boundaries};
 
 /// Remove adjacent local snapshots whose temporary has no later reader.
 pub(crate) fn optimize(function: &mut Function) {
-    let boundaries: HashSet<_> = function
-        .instructions
-        .iter()
-        .filter_map(target)
-        .map(|target| target.index())
-        .collect();
+    let boundaries = block_boundaries(function);
     for index in 1..function.instructions.len() {
         if boundaries.contains(&index) {
             continue;
@@ -67,12 +60,7 @@ pub(crate) fn optimize(function: &mut Function) {
 /// operator reads the variables (`Binary t1, $i < $n`). The VM's operator
 /// warns about an unset variable as the copy did, left operand first.
 pub(crate) fn fold_operand_copies(function: &mut Function) {
-    let boundaries: HashSet<_> = function
-        .instructions
-        .iter()
-        .filter_map(target)
-        .map(|target| target.index())
-        .collect();
+    let boundaries = block_boundaries(function);
     let locals = function.locals.len();
     for index in 1..function.instructions.len() {
         let Instruction::Binary { op, dst, lhs, rhs } = function.instructions[index] else {

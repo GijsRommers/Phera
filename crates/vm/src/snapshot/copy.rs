@@ -195,7 +195,7 @@ impl Vm {
                 failed_native: None,
                 missed_native: None,
                 state,
-                reflection_cache: None,
+                reflection_cache: self.reflection_cache.clone(),
                 property_references,
                 autoload,
                 request_end: self.request_end.clone(),
