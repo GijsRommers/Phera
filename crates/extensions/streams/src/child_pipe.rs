@@ -309,6 +309,7 @@ pub async fn close_child_stream(context: &mut dyn Context, value: &Value) -> Nat
         return Ok(Value::Int(0));
     }
     let resource = crate::resource::stream_argument(value, "pclose", "#1 ($handle)")?;
+    crate::filters::user::close(context, resource).await?;
     let attachment = take_attachment(resource)?;
     crate::request::files(context)
         .stream_contexts
@@ -323,6 +324,6 @@ pub(crate) fn take_attachment(
     resource: &Resource,
 ) -> Result<Option<Box<dyn CloseAttachment>>, NativeError> {
     let attachment = with_stream(resource, |stream| stream.attachment.take())?;
-    resource.data.borrow_mut().take();
+    crate::resource::close_backing(resource);
     Ok(attachment)
 }

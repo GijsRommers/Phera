@@ -165,6 +165,7 @@ impl Vm {
         match policy {
             Some(NativeClone::Copy(copy)) => copy(&original, &cloned)?,
             Some(NativeClone::CopyWithHandle(copy)) => copy(&original, &cloned)?,
+            Some(NativeClone::AsyncCopy(copy)) => copy(self, &original, &cloned).await?,
             None if class.has_native_layout
                 && crate::reference_holders::has_extension_state(&original)? =>
             {
