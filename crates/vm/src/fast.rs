@@ -502,6 +502,17 @@ pub(crate) fn scalar_step<const GUARDED: bool, S: crate::calls::registers::Slots
             }
             ScalarStep::Complete
         }
+        Instruction::JumpIfNull { value, target }
+        | Instruction::JumpIfNotNull { value, target } => {
+            let Some(Some(slot)) = slots.slot(value) else {
+                return ScalarStep::Fallback;
+            };
+            let is_null = slot.deref().is_null();
+            if is_null == matches!(instruction, Instruction::JumpIfNull { .. }) {
+                *ip = target.index();
+            }
+            ScalarStep::Complete
+        }
         // Unsetting a variable that holds an array, object or reference
         // goes to the general handler: it forgets a global bound to it, and
         // a generator released there closes at once.

@@ -113,6 +113,7 @@ impl Parser<'_, '_> {
                 },
                 optional,
                 default_is_null,
+                default_boolean: None,
                 variadic: untyped_variadic || trailing_variadic,
                 by_reference,
                 closure_receiver: None,

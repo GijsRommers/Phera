@@ -145,8 +145,13 @@ pub(crate) fn value_step<const GUARDED: bool>(
         Instruction::JumpIfNotNull { value, target } => {
             jump_on_null(slots, value, target, false, ip)
         }
-        Instruction::NewArray { dst, .. } => {
-            store::<GUARDED, _>(slots, dst, Value::Array(Rc::new(PhpArray::new())))
+        Instruction::NewArray { dst, capacity } => {
+            let array = if capacity > 0 {
+                PhpArray::with_capacity(capacity as usize)
+            } else {
+                PhpArray::new()
+            };
+            store::<GUARDED, _>(slots, dst, Value::Array(Rc::new(array)))
         }
         Instruction::ArraySet { array, key, src } => array_set(slots, array, key, src),
         Instruction::ArrayPush { array, src } => array_push(slots, array, src),

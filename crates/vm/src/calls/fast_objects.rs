@@ -18,11 +18,10 @@ use phera_bytecode::{ClassKind, Instruction, Reg, SymbolId, Visibility};
 use phera_value::Value;
 
 use crate::calls::execution_loop::{Machine, Position, Step};
-use crate::calls::php_windows::{push_closure_call, push_constructed, push_php_call};
+use crate::calls::php_windows::{push_constructed, push_lexical_closure_call, push_php_call};
 use crate::calls::prepared_call::CallKind;
 use crate::classes::MethodBody;
 use crate::classes::class::ClassOrigin;
-use crate::closures::{ClosureOrigin, ClosureState};
 
 impl Machine<'_> {
     /// `New` of a class this file has linked, with literal defaults and no
@@ -68,14 +67,26 @@ impl Machine<'_> {
         let template = template.clone();
         let object = self.classes.allocate_with_properties(class, template);
         if constructor.is_none()
-            && !GUARDED
             && let Some(Instruction::Call { dst, .. }) = self
                 .code
                 .instructions(position.frame.function)
                 .get(position.ip)
         {
             let slots = self.registers.tail_mut(position.frame.base());
-            if let Some(slot) = slots.get_mut(dst.index()) {
+            if let Some(slot) = slots.get_mut(dst.index())
+                && (!GUARDED
+                    || slot.as_ref().is_none_or(|v| {
+                        matches!(
+                            v,
+                            Value::Null
+                                | Value::Bool(_)
+                                | Value::Int(_)
+                                | Value::Float(_)
+                                | Value::InternedStr(_)
+                                | Value::String(_)
+                        )
+                    }))
+            {
                 *slot = Some(Value::Object(object));
                 return Step::Done(position.ip + 1);
             }
@@ -100,14 +111,8 @@ impl Machine<'_> {
             [Some(Value::Object(object))] => object.clone(),
             _ => return Step::Slow,
         };
-        let lexical = object
-            .native
-            .borrow()
-            .as_ref()
-            .and_then(|state| state.downcast_ref::<ClosureState>())
-            .is_some_and(|state| state.origin == ClosureOrigin::Lexical);
         let parts = (&mut *self.stack, &mut *self.registers);
-        if !lexical || !push_closure_call(self.code, parts, &object) {
+        if !push_lexical_closure_call(self.code, parts, &object) {
             return Step::Slow;
         }
         Step::Done(position.ip)

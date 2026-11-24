@@ -43,6 +43,14 @@ impl Vm {
         current: &Value,
         index: Reg,
     ) -> Result<ArrayKey, NativeError> {
+        self.check_write_container(current)?;
+        self.path_index_key(index)
+    }
+
+    /// The check of a level a write indexes, before its offset is converted:
+    /// `false` becomes an array with PHP's deprecation, a scalar or an object
+    /// without `ArrayAccess` cannot be indexed.
+    pub(crate) fn check_write_container(&mut self, current: &Value) -> Result<(), NativeError> {
         match current {
             Value::Array(_) | Value::Null | Value::InternedStr(_) | Value::String(_) => {}
             Value::Bool(false) => self.diagnostic(
@@ -57,7 +65,43 @@ impl Vm {
             }
             _ => return Err(NativeError::error("Cannot use a scalar value as an array")),
         }
-        self.path_index_key(index)
+        Ok(())
+    }
+
+    /// The keys of a write to a path of `[...]` steps, converted level by
+    /// level as PHP does: each level is checked first
+    /// ([`Vm::check_write_container`]), then its offset converted, so a
+    /// `false` level is reported before its key's own diagnostics.
+    pub(crate) fn write_keys_of(
+        &mut self,
+        place: &crate::AccessPath,
+        register: Reg,
+    ) -> Result<crate::inline_stack::InlineStack<crate::path_update::PathKey>, NativeError> {
+        use crate::path_update::PathKey;
+        let mut current = self.read_root(register, Missing::Silent);
+        let mut keys = crate::inline_stack::InlineStack::new();
+        for step in place.steps()? {
+            match step {
+                phera_bytecode::Step::Index(index) => {
+                    let key = self.write_index_key(&current, index)?;
+                    current = match &current {
+                        Value::Array(array) => array
+                            .get(&key)
+                            .map(|value| value.deref().clone())
+                            .unwrap_or_default(),
+                        _ => Value::Null,
+                    };
+                    keys.push(PathKey::Index(Some(key)));
+                }
+                phera_bytecode::Step::Append => {
+                    self.check_write_container(&current)?;
+                    current = Value::Null;
+                    keys.push(PathKey::Index(None));
+                }
+                _ => return Err(internal_error!("index path")),
+            }
+        }
+        Ok(keys)
     }
 
     /// During read-modify-write, a missing parent dimension becomes an array.

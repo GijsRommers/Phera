@@ -46,10 +46,43 @@ impl Fork<'_> {
     /// The fork's version of an array: the same `Rc` when nothing inside
     /// needs copying, otherwise a rebuilt clone.
     pub fn array(&mut self, root: &Rc<PhpArray>) -> Rc<PhpArray> {
-        if let Some(done) = self.arrays.get(&address(root)) {
+        let root_addr = address(root);
+        if self
+            .pure_arrays
+            .is_some_and(|pure| pure.contains(&root_addr))
+        {
+            return root.clone();
+        }
+        if let Some(done) = self.arrays.get(&root_addr) {
             return done.clone();
         }
+        let mut has_nested_array = false;
+        let mut has_identity = false;
+        for value in root.values() {
+            match value {
+                Value::Array(_) => {
+                    has_nested_array = true;
+                    break;
+                }
+                Value::Object(_) | Value::Reference(_) | Value::Resource(_) => {
+                    has_identity = true;
+                }
+                _ => {}
+            }
+        }
+        if !has_nested_array {
+            let copy = if !has_identity {
+                root.clone()
+            } else {
+                let mut copy = PhpArray::clone(root);
+                self.array_contents(&mut copy);
+                Rc::new(copy)
+            };
+            self.arrays.insert(root_addr, copy.clone());
+            return copy;
+        }
         let mut stack = vec![Visit::new(root.clone())];
+        let mut last_copy = None;
         while let Some(visit) = stack.last_mut() {
             if let Some(child) = visit.children.pop() {
                 if !self.arrays.contains_key(&address(&child)) {
@@ -59,12 +92,12 @@ impl Fork<'_> {
             }
             let Some(visit) = stack.pop() else { break };
             let copy = self.copy_array(&visit.array);
-            self.arrays.insert(address(&visit.array), copy);
+            self.arrays.insert(address(&visit.array), copy.clone());
+            if stack.is_empty() {
+                last_copy = Some(copy);
+            }
         }
-        self.arrays
-            .get(&address(root))
-            .cloned()
-            .unwrap_or_else(|| root.clone())
+        last_copy.unwrap_or_else(|| root.clone())
     }
 
     /// Replaces every value of `array` that has identity by its copy, in

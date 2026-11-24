@@ -27,6 +27,7 @@ const UNTYPED: u16 = 1 << 5;
 const STATIC_COLLISION: u16 = 1 << 6;
 const HAS_PRIVATE_SHADOW: u16 = 1 << 7;
 const HAS_CLASS_TYPE: u16 = 1 << 8;
+const SET_VIS_SHIFT: u16 = 9;
 
 const TABLE_HAS_NATIVE_PROPS: u8 = 1 << 0;
 const TABLE_HAS_MAGIC_GET: u8 = 1 << 1;
@@ -34,6 +35,11 @@ const TABLE_HAS_MAGIC_ISSET: u8 = 1 << 2;
 const TABLE_HAS_STATICS: u8 = 1 << 3;
 const TABLE_HASHED: u8 = 1 << 4;
 const TABLE_HAS_MAGIC_SET: u8 = 1 << 5;
+const TABLE_ALLOWS_DYNAMIC_WRITE: u8 = 1 << 6;
+const TABLE_ALLOWS_DYNAMIC_READ: u8 = 1 << 7;
+
+const SHADOW_BIT: u16 = 1 << 15;
+const UNMAPPED_SLOT: u16 = u16::MAX;
 
 /// Compact 16-byte `Copy` descriptor for a declared instance property.
 #[derive(Clone, Copy)]
@@ -69,6 +75,52 @@ impl PackedProp {
     #[inline(always)]
     pub(crate) fn is_plain_writable(self) -> bool {
         self.flags & (HAS_HOOKS | IS_READONLY | HAS_SET_VISIBILITY | STATIC_COLLISION) == 0
+    }
+
+    /// True when direct assignment `$obj->p = $v` can run in the interpreter
+    /// loop (including `readonly` first-time init and asymmetric `set_visibility`).
+    #[inline(always)]
+    pub(crate) fn is_direct_assignable(self) -> bool {
+        self.flags & (HAS_HOOKS | STATIC_COLLISION) == 0
+    }
+
+    #[inline(always)]
+    pub(crate) fn is_readonly(self) -> bool {
+        self.flags & IS_READONLY != 0
+    }
+
+    #[inline(always)]
+    pub(crate) fn has_set_visibility(self) -> bool {
+        self.flags & HAS_SET_VISIBILITY != 0
+    }
+
+    /// Whether `scope` satisfies this property's asymmetric `set_visibility`
+    /// (`public(set)`, `protected(set)`, `private(set)`).
+    #[inline(always)]
+    pub(crate) fn set_visible_to(self, scope: Option<ClassIndex>, classes: &ClassTable) -> bool {
+        if !self.has_set_visibility() {
+            return true;
+        }
+        match (self.flags >> SET_VIS_SHIFT) & VIS_MASK {
+            VIS_PUBLIC => true,
+            VIS_PRIVATE => {
+                self.owner != UNRESOLVED_OWNER
+                    && scope.is_some_and(|scope| scope.number() == self.owner)
+            }
+            VIS_PROTECTED => {
+                if self.owner == UNRESOLVED_OWNER {
+                    return false;
+                }
+                let Some(scope) = scope else {
+                    return false;
+                };
+                if scope.number() == self.owner {
+                    return true;
+                }
+                protected_visible(scope, self.owner, classes)
+            }
+            _ => false,
+        }
     }
 
     #[inline(always)]
@@ -149,6 +201,8 @@ struct ClassTypeRule {
 pub(crate) struct PropertyTable {
     slots: Box<[PackedProp]>,
     shadows: Box<[PackedProp]>,
+    /// Declaration slot index -> entry index in `slots` (or `shadows` with `SHADOW_BIT`).
+    by_slot: Box<[u16]>,
     class_type_rules: Box<[ClassTypeRule]>,
     class_type_keys: Box<[NameKey]>,
     table_flags: u8,
@@ -174,6 +228,19 @@ impl PropertyTable {
         if !class.static_properties.is_empty() {
             table_flags |= TABLE_HAS_STATICS;
         }
+        if class.kind != ClassKind::Trait
+            && table_flags & (TABLE_HAS_NATIVE_PROPS | TABLE_HAS_STATICS) == 0
+        {
+            if class.allows_dynamic_properties
+                && !class.is_readonly
+                && table_flags & TABLE_HAS_MAGIC_SET == 0
+            {
+                table_flags |= TABLE_ALLOWS_DYNAMIC_WRITE;
+            }
+            if table_flags & (TABLE_HAS_MAGIC_GET | TABLE_HAS_MAGIC_ISSET) == 0 {
+                table_flags |= TABLE_ALLOWS_DYNAMIC_READ;
+            }
+        }
         if class.kind == ClassKind::Trait
             || class.defaults.is_empty()
             || class.defaults.len() > u16::MAX as usize
@@ -182,6 +249,7 @@ impl PropertyTable {
             return Self {
                 slots: Box::new([]),
                 shadows: Box::new([]),
+                by_slot: Box::new([]),
                 class_type_rules: Box::new([]),
                 class_type_keys: Box::new([]),
                 table_flags,
@@ -210,8 +278,14 @@ impl PropertyTable {
             if prop.is_readonly {
                 flags |= IS_READONLY;
             }
-            if prop.set_visibility.is_some() {
+            if let Some(set_vis) = prop.set_visibility {
                 flags |= HAS_SET_VISIBILITY;
+                let set_bits = match set_vis {
+                    Visibility::Public => VIS_PUBLIC,
+                    Visibility::Protected => VIS_PROTECTED,
+                    Visibility::Private => VIS_PRIVATE,
+                };
+                flags |= set_bits << SET_VIS_SHIFT;
             }
             let type_mask = match &prop.ty {
                 None => {
@@ -268,14 +342,8 @@ impl PropertyTable {
 
         let class_type_rules = class_type_rules.into_boxed_slice();
         let class_type_keys = class_type_keys.into_boxed_slice();
-        if primary.len() <= 8 {
-            Self {
-                slots: primary.into_boxed_slice(),
-                shadows: shadows.into_boxed_slice(),
-                class_type_rules,
-                class_type_keys,
-                table_flags,
-            }
+        let slots = if primary.len() <= 8 {
+            primary.into_boxed_slice()
         } else {
             let size = (primary.len() * 2).next_power_of_two().max(16);
             let mask = size - 1;
@@ -288,13 +356,34 @@ impl PropertyTable {
                 table[index] = entry;
             }
             table_flags |= TABLE_HASHED;
-            Self {
-                slots: table,
-                shadows: shadows.into_boxed_slice(),
-                class_type_rules,
-                class_type_keys,
-                table_flags,
+            table
+        };
+        let shadows = shadows.into_boxed_slice();
+        let by_slot = if slots.len() < SHADOW_BIT as usize && shadows.len() < SHADOW_BIT as usize {
+            let mut map = vec![UNMAPPED_SLOT; class.defaults.len()].into_boxed_slice();
+            for (idx, entry) in slots.iter().enumerate() {
+                if entry.key != EMPTY_KEY
+                    && let Some(cell) = map.get_mut(entry.slot as usize)
+                {
+                    *cell = idx as u16;
+                }
             }
+            for (idx, entry) in shadows.iter().enumerate() {
+                if let Some(cell) = map.get_mut(entry.slot as usize) {
+                    *cell = (idx as u16) | SHADOW_BIT;
+                }
+            }
+            map
+        } else {
+            Box::new([])
+        };
+        Self {
+            slots,
+            shadows,
+            by_slot,
+            class_type_rules,
+            class_type_keys,
+            table_flags,
         }
     }
 
@@ -351,6 +440,36 @@ impl PropertyTable {
     #[inline(always)]
     pub(crate) fn fills_missing_directly(&self) -> bool {
         self.table_flags & TABLE_HAS_MAGIC_SET == 0
+    }
+
+    /// True when an undeclared dynamic property can be created/written silently
+    /// without invoking `__set`, native property handlers, static notices, or
+    /// dynamic-property deprecation (`stdClass` / `#[AllowDynamicProperties]`).
+    #[inline(always)]
+    pub(crate) fn allows_dynamic_write(&self) -> bool {
+        self.table_flags & TABLE_ALLOWS_DYNAMIC_WRITE != 0
+    }
+
+    /// True when an undeclared dynamic property can be read directly from
+    /// `object.properties` without invoking `__get`/`__isset`/native handlers.
+    #[inline(always)]
+    pub(crate) fn allows_dynamic_read(&self) -> bool {
+        self.table_flags & TABLE_ALLOWS_DYNAMIC_READ != 0
+    }
+
+    /// O(1) lookup of a declared property's [`PackedProp`] by its declaration
+    /// slot index (used for dynamic `$obj->$name` accesses).
+    #[inline(always)]
+    pub(crate) fn by_slot(&self, slot: usize) -> Option<PackedProp> {
+        let encoded = *self.by_slot.get(slot)?;
+        if encoded == UNMAPPED_SLOT {
+            return None;
+        }
+        if encoded & SHADOW_BIT != 0 {
+            self.shadows.get((encoded & !SHADOW_BIT) as usize).copied()
+        } else {
+            self.slots.get(encoded as usize).copied()
+        }
     }
 
     /// Resolve a declared property by interned [`PropKey`] and caller scope.
@@ -462,7 +581,9 @@ fn push_class_type_rule(
         return;
     }
     let start = keys_out.len() as u16;
-    let interned = phera_bytecode::name_keys::keys(names);
+    // Class keys number lowercased names (`ClassTable::by_key`).
+    let lowercase: Vec<String> = names.iter().map(|name| name.to_ascii_lowercase()).collect();
+    let interned = phera_bytecode::name_keys::keys(lowercase.iter().map(String::as_str));
     let len = interned.len() as u16;
     keys_out.extend(interned.iter().copied());
     rules.push(ClassTypeRule {

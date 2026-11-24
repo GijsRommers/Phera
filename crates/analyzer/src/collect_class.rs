@@ -14,6 +14,7 @@ pub fn class_info(
     read_docs: bool,
 ) -> ClassInfo {
     let resolve = |n: &Name| names.resolve(n, UseKind::Class)[0].clone();
+    let class_doc = crate::phpdoc::text(source, class.doc_comment);
     let mut info = ClassInfo {
         name: names.declaration(class.name.as_ref().map_or("@anonymous", |n| &n.name)),
         kind: class.kind,
@@ -25,15 +26,23 @@ pub fn class_info(
         methods: BTreeMap::new(),
         properties: BTreeMap::new(),
         constants: BTreeMap::new(),
+        enum_cases: Default::default(),
         location: location(class.span.start),
         open_properties: false,
-        documented: crate::phpdoc::text(source, class.doc_comment)
+        internal: class_doc.is_some_and(crate::phpdoc::internal),
+        mapped_repository: crate::framework_knowledge::doctrine::mapped_repository(
+            &class.attributes,
+            names,
+        ),
+        documented: class_doc
             .map_or_else(Default::default, |doc| crate::phpdoc::members(doc, names)),
     };
     if read_docs && class.doc_comment.is_some() {
         let doc = crate::phpdoc::read(source, class.doc_comment, names, &Default::default());
         info.documented.templates = doc.templates;
         info.documented.template_names = doc.template_names;
+        info.documented.template_variances = doc.template_variances;
+        info.documented.type_imports = doc.type_imports;
         info.documented.method_types = doc
             .methods
             .into_iter()
@@ -87,6 +96,28 @@ fn add_member(
                 )
             });
             add_method(info, method, names, doc, member.span.start, location);
+            if read_docs {
+                for parameter in method
+                    .parameters
+                    .iter()
+                    .filter(|parameter| parameter.is_promoted())
+                {
+                    let parameter_docs = crate::phpdoc::read(
+                        source,
+                        parameter.doc_comment,
+                        names,
+                        &info.documented.templates,
+                    );
+                    if let Some(property) = info.properties.get_mut(&parameter.name) {
+                        property.documented_type = parameter_docs
+                            .variables
+                            .get(&None)
+                            .or_else(|| parameter_docs.variables.get(&Some(parameter.name.clone())))
+                            .or_else(|| documentation.as_ref()?.params.get(&parameter.name))
+                            .map(|annotation| annotation.ty.clone());
+                    }
+                }
+            }
             if let Some(documentation) = documentation
                 && let Some(signature) =
                     info.methods.get_mut(&method.name.name.to_ascii_lowercase())
@@ -119,12 +150,15 @@ fn add_member(
                                 .or_else(|| doc.variables.get(&None))
                                 .map(|annotation| annotation.ty.clone())
                         }),
-                        null_default: p
-                            .default
-                            .as_ref()
-                            .map_or(ty.is_none() && !p.has_hook_list, |value| {
-                                matches!(value.kind, ExpressionKind::Literal(Literal::Null))
-                            }),
+                        default: match p.default.as_ref().map(|value| &value.kind) {
+                            Some(ExpressionKind::Literal(Literal::Null)) => {
+                                PropertyDefault::ExplicitNull
+                            }
+                            None if ty.is_none() && !p.has_hook_list => {
+                                PropertyDefault::ImplicitNull
+                            }
+                            _ => PropertyDefault::Other,
+                        },
                         modifiers: *modifiers,
                         location: location(p.span.start),
                     },
@@ -138,10 +172,12 @@ fn add_member(
             ..
         } => add_constants(info, *modifiers, ty.as_ref(), items, names, location),
         ClassMemberKind::EnumCase { name, .. } => {
+            info.enum_cases.insert(name.name.clone());
             info.constants.insert(
                 name.name.clone(),
                 ConstantInfo {
                     ty: ValueType::Class(info.name.clone()),
+                    literal: None,
                     modifiers: Modifiers::default(),
                     location: location(name.span.start),
                 },
@@ -185,13 +221,17 @@ fn add_method(
     info.methods
         .insert(method.name.name.to_ascii_lowercase(), signature);
     for p in &method.parameters {
-        if p.modifiers.visibility.is_some() {
+        if p.is_promoted() {
             info.properties.insert(
                 p.name.clone(),
                 PropertyInfo {
                     ty: ValueType::declared(p.ty.as_ref(), names),
                     documented_type: None,
-                    null_default: false,
+                    default: if info.modifiers.is_readonly || p.modifiers.is_readonly {
+                        PropertyDefault::ReadonlyPromotion
+                    } else {
+                        PropertyDefault::Other
+                    },
                     modifiers: p.modifiers,
                     location: location(p.span.start),
                 },
@@ -213,6 +253,7 @@ fn add_constants(
             c.name.name.clone(),
             ConstantInfo {
                 ty: ValueType::declared(ty, names),
+                literal: crate::constant_types::literal(&c.value),
                 modifiers,
                 location: location(c.span.start),
             },

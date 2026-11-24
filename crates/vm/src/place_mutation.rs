@@ -59,7 +59,7 @@ impl Vm {
             .steps()?
             .all(|step| matches!(step, Step::Index(_) | Step::Append))
         {
-            self.keys(place)?
+            self.write_keys_of(place, register)?
         } else {
             let root_value = self.read_root(register, Missing::Silent);
             let keys = self.property_keys(place, root_value.clone())?;
@@ -168,7 +168,14 @@ impl Vm {
         let register = self
             .base_register(place, Creation::Create, Missing::Silent)?
             .ok_or_else(|| internal_error!("reference missing"))?;
-        let keys = self.property_keys(place, self.raw_local(register).deref().clone())?;
+        let keys = if place
+            .steps()?
+            .all(|step| matches!(step, Step::Index(_) | Step::Append))
+        {
+            self.write_keys_of(place, register)?
+        } else {
+            self.property_keys(place, self.raw_local(register).deref().clone())?
+        };
         self.reference_resolved(place, register, keys)
     }
 

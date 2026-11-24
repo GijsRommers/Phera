@@ -7,11 +7,18 @@ license.workspace = true
 
 [dependencies]
 bytes = { workspace = true }
+futures-util = { workspace = true }
 http-body-util = { workspace = true }
 hyper = { workspace = true }
 hyper-util = { workspace = true }
 socket2 = { workspace = true }
 tokio = { workspace = true, features = ["io-util"] }
+tokio-tungstenite = { workspace = true }
+
+[dev-dependencies]
+hyper = { workspace = true, features = ["client"] }
+tokio = { workspace = true, features = ["macros", "rt"] }
+tokio-tungstenite = { workspace = true, features = ["connect"] }
 
 [lints]
 workspace = true

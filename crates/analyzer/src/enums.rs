@@ -14,7 +14,7 @@ pub fn add_members(info: &mut ClassInfo, class: &ClassDeclaration, names: &Names
         PropertyInfo {
             ty: ValueType::String,
             documented_type: None,
-            null_default: false,
+            default: crate::index::PropertyDefault::Other,
             modifiers: Modifiers::default(),
             location: info.location.clone(),
         },
@@ -31,7 +31,7 @@ pub fn add_members(info: &mut ClassInfo, class: &ClassDeclaration, names: &Names
             PropertyInfo {
                 ty: ty.clone(),
                 documented_type: None,
-                null_default: false,
+                default: crate::index::PropertyDefault::Other,
                 modifiers: Modifiers::default(),
                 location: info.location.clone(),
             },
@@ -44,6 +44,7 @@ pub fn add_members(info: &mut ClassInfo, class: &ClassDeclaration, names: &Names
                 ty: ty.clone(),
                 optional: false,
                 default_is_null: false,
+                default_boolean: None,
                 variadic: false,
                 by_reference: false,
                 closure_receiver: None,

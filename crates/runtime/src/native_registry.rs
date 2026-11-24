@@ -92,4 +92,5 @@ fn register_common(registry: &mut Registry) {
     registry.load(&phera_ext_simplexml::SimpleXml);
     registry.load(&phera_ext_session::Session);
     adapters::register(registry);
+    crate::websocket::register(registry);
 }

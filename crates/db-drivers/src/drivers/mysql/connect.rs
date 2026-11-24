@@ -74,14 +74,21 @@ impl Mysql {
             .await
             .map_err(error)?;
         configure(&mut connection, settings).await?;
+        let charset = dsn.fields.get("charset").cloned();
+        let database = dsn.get("dbname", "").to_owned();
+        let (reset_sql_with_db, reset_sql_keep_db) =
+            super::build_reset_sql(&database, charset.as_deref(), settings);
         Ok(Self {
             connection: Some(connection),
             active: None,
             version: version.unwrap_or_default(),
             last_insert_id: 0,
             pending_exec_rows: false,
-            charset: dsn.fields.get("charset").cloned(),
-            database: dsn.get("dbname", "").to_owned(),
+            db_changed: false,
+            reset_sql_with_db,
+            reset_sql_keep_db,
+            charset,
+            database,
             options: settings.clone(),
             reusable: true,
             host: dsn.get("host", "localhost").to_owned(),

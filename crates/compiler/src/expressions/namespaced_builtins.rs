@@ -97,6 +97,103 @@ impl Compiler<'_> {
         Ok(Some(destination))
     }
 
+    /// Both forms of an unqualified positional call to a direct native function
+    /// in a namespace: `GuardBuiltin`, then the global builtin or direct native
+    /// call (which `direct_calls` lowers to `CallNativeDirect` / `PureNative`),
+    /// then the general fallback call.
+    pub(super) fn compile_namespaced_direct_native(
+        &mut self,
+        resolved: &str,
+        fallback: &str,
+        arguments: &Arguments,
+        line: usize,
+    ) -> Result<Option<Reg>, CompileError> {
+        let Arguments::List(args) = arguments else {
+            return Ok(None);
+        };
+        if args
+            .iter()
+            .any(|argument| argument.spread || argument.name.is_some())
+        {
+            return Ok(None);
+        }
+        let lower = fallback.to_ascii_lowercase();
+        if lower == "assert" {
+            return Ok(None);
+        }
+        let Some(enabled) = self.native_functions else {
+            return Ok(None);
+        };
+        let Some(crate::NativeFunction::Direct {
+            positional_by_value,
+        }) = (enabled.lookup)(&lower)
+        else {
+            return Ok(None);
+        };
+        if args.len() > positional_by_value {
+            return Ok(None);
+        }
+        let mut budget = 32usize;
+        if !args
+            .iter()
+            .all(|argument| declares_nothing_bounded(&argument.value, &mut budget))
+        {
+            return Ok(None);
+        }
+        let destination = self.allocate_register()?;
+        let guard = self.emit(
+            Instruction::GuardBuiltin {
+                name: resolved.to_owned(),
+                fallback: Some(fallback.to_owned()),
+                call: Target(0),
+            },
+            line,
+        );
+        let fast_mark = self.mark_temporaries();
+        let fast_result =
+            if let Some(result) = self.compile_builtin_call(fallback, arguments, line)? {
+                result
+            } else {
+                self.emit(
+                    Instruction::StartCall {
+                        name: fallback.to_owned(),
+                        fallback: None,
+                    },
+                    line,
+                );
+                self.compile_arguments(arguments, line)?
+            };
+        self.emit(
+            Instruction::Move {
+                destination,
+                source: fast_result,
+            },
+            line,
+        );
+        self.release_temporaries(fast_mark);
+        let done = self.emit(Instruction::Jump(Target(0)), line);
+        self.patch(guard, self.position());
+        let slow_mark = self.mark_temporaries();
+        self.emit(
+            Instruction::StartCall {
+                name: resolved.to_owned(),
+                fallback: Some(fallback.to_owned()),
+            },
+            line,
+        );
+        let result = self.compile_arguments(arguments, line)?;
+        self.emit(
+            Instruction::Move {
+                destination,
+                source: result,
+            },
+            line,
+        );
+        self.release_temporaries(slow_mark);
+        self.patch(done, self.position());
+        Ok(Some(destination))
+    }
+
     /// The built-in a call of the global `name` with these arguments runs as
     /// one instruction, and its one argument.
     pub(super) fn guarded_operation<'a>(
@@ -129,8 +226,17 @@ impl Compiler<'_> {
 /// properties, elements and static properties of those. Walked with a stack
 /// of its own, so a deep expression needs no deep Rust stack.
 fn declares_nothing(expression: &Expression) -> bool {
+    let mut budget = usize::MAX;
+    declares_nothing_bounded(expression, &mut budget)
+}
+
+fn declares_nothing_bounded(expression: &Expression, budget: &mut usize) -> bool {
     let mut pending = vec![expression];
     while let Some(expression) = pending.pop() {
+        if *budget == 0 {
+            return false;
+        }
+        *budget -= 1;
         match &expression.kind {
             ExpressionKind::Literal(_)
             | ExpressionKind::Name(_)
@@ -159,6 +265,24 @@ fn declares_nothing(expression: &Expression) -> bool {
                 class,
                 name: MemberName::Identifier(_),
             } => pending.push(class),
+            ExpressionKind::Array(items) => {
+                for item in items {
+                    if item.by_reference || item.spread {
+                        return false;
+                    }
+                    if let Some(key) = &item.key {
+                        pending.push(key);
+                    }
+                    pending.push(&item.value);
+                }
+            }
+            ExpressionKind::Unary { operand, .. } | ExpressionKind::Cast { operand, .. } => {
+                pending.push(operand);
+            }
+            ExpressionKind::Binary { left, right, .. } => {
+                pending.push(left);
+                pending.push(right);
+            }
             _ => return false,
         }
     }

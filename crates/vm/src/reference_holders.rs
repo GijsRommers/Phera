@@ -1,11 +1,8 @@
 //! Slot-owned leases keep the reference index exact without retaining PHP values or objects.
 
-use std::{
-    cell::RefCell,
-    collections::{BTreeMap, HashMap},
-    rc::Rc,
-    rc::Weak,
-};
+use std::{cell::RefCell, collections::BTreeMap, rc::Rc, rc::Weak};
+
+use foldhash::{HashMap, HashMapExt};
 
 use phera_extension_api::NativeError;
 use phera_value::{ArrayKey, Object, Value};

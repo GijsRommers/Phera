@@ -85,9 +85,11 @@ impl Dependencies {
 
     pub fn resolve_classes(&mut self, index: &mut Index, mut pending: Vec<String>) {
         let Some(_) = &self.autoload else {
+            crate::phpdoc::type_aliases::resolve(index, pending);
             return;
         };
         let mut adaptations = Vec::new();
+        let mut alias_classes = Vec::new();
         while let Some(name) = pending.pop() {
             let key = name.to_ascii_lowercase();
             if self.resolved_classes.contains(&key) {
@@ -113,13 +115,24 @@ impl Dependencies {
                         .chain(&class.interfaces)
                         .chain(&class.traits)
                         .chain(&class.documented.mixins)
+                        .chain(
+                            class
+                                .documented
+                                .type_imports
+                                .iter()
+                                .map(|import| &import.source),
+                        )
                         .cloned(),
                 );
+                if !class.documented.type_imports.is_empty() {
+                    alias_classes.push(key.clone());
+                }
                 if !class.adaptations.is_empty() {
                     adaptations.push(key);
                 }
             }
         }
+        crate::phpdoc::type_aliases::resolve(index, alias_classes);
         traits::link_classes(index, &adaptations);
     }
 }

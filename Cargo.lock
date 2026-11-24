@@ -851,7 +851,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d045de693cb712d0b22c6a64be5b953f67b3ce00ab5ad3dd5d8b441886ab8e1a"
 dependencies = [
  "quote",
- "syn 2.0.119",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -2914,6 +2914,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 name = "phera-analyzer"
 version = "0.1.0"
 dependencies = [
+ "pcre2",
  "phera-ast",
  "phera-bytecode",
  "phera-lexer",
@@ -2944,6 +2945,7 @@ version = "0.1.0"
 dependencies = [
  "brotli",
  "flate2",
+ "futures-util",
  "http-body-util",
  "httpdate",
  "hyper",
@@ -2966,6 +2968,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-rustls",
+ "tokio-tungstenite",
  "toml",
  "url",
 ]
@@ -3302,6 +3305,7 @@ dependencies = [
 name = "phera-ext-pdo"
 version = "0.1.0"
 dependencies = [
+ "foldhash",
  "mysql_async",
  "phera-db-drivers",
  "phera-extension-api",
@@ -3467,6 +3471,7 @@ dependencies = [
 name = "phera-ext-standard"
 version = "0.1.0"
 dependencies = [
+ "foldhash",
  "hickory-resolver",
  "indexmap",
  "memchr",
@@ -3697,11 +3702,13 @@ name = "phera-server"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "futures-util",
  "http-body-util",
  "hyper",
  "hyper-util",
  "socket2",
  "tokio",
+ "tokio-tungstenite",
 ]
 
 [[package]]
@@ -3731,6 +3738,7 @@ name = "phera-vm"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "foldhash",
  "indexmap",
  "phera-bytecode",
  "phera-compiler",
@@ -5213,6 +5221,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio-tungstenite"
+version = "0.30.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "17a073bfed563fa236697a068031408a93cd9522e08abf9933ead3e73411bd71"
+dependencies = [
+ "futures-util",
+ "log",
+ "tokio",
+ "tungstenite",
+]
+
+[[package]]
 name = "tokio-util"
 version = "0.7.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5334,6 +5354,22 @@ name = "try-lock"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
+
+[[package]]
+name = "tungstenite"
+version = "0.30.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e48ac77174b19c110a50ab2128b24215ac9cb40e0e12e093fb602d175c569d22"
+dependencies = [
+ "bytes",
+ "data-encoding",
+ "http",
+ "httparse",
+ "log",
+ "rand 0.10.4",
+ "sha1 0.11.0",
+ "thiserror",
+]
 
 [[package]]
 name = "twox-hash"

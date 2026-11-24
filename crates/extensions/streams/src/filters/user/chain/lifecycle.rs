@@ -6,6 +6,8 @@ use phera_extension_api::{
     Context, LocalFuture, NativeError, NativeResult, Value, value::Resource,
 };
 
+use crate::{handles::finish_native, resource::update_filtered};
+
 use super::super::super::{Flush, bounded};
 use super::{Chains, StageOutput, Streams, lookup};
 
@@ -15,8 +17,29 @@ pub(crate) async fn close_released(
 ) -> Result<(), NativeError> {
     if let Some(chains) = lookup(context, resource.id) {
         *chains.stream.borrow_mut() = Rc::downgrade(resource);
+        chains.released.set(true);
     }
     close(context, resource).await
+}
+
+pub(crate) async fn close_last_native_owner(
+    context: &mut dyn Context,
+    id: i64,
+) -> Result<(), NativeError> {
+    let Some(chains) = lookup(context, id) else {
+        return Ok(());
+    };
+    let Some(backing) = chains.backing.take() else {
+        return Ok(());
+    };
+    let stream = backing.borrow_mut().take();
+    let Some(stream) = stream else {
+        return Ok(());
+    };
+    let resource = Rc::new(Resource::new(id, "stream", Some(stream)));
+    let filtered = close_released(context, &resource).await;
+    let closed = finish_native(context, &resource, "fclose").await;
+    filtered.and(closed.map(drop))
 }
 
 pub(crate) async fn close(
@@ -112,6 +135,14 @@ pub(in crate::filters) async fn remove(
         stage.close(context).await?;
     }
     resource.data.borrow_mut().take();
+    let retained = chains.backing.borrow().is_some();
+    if retained && let Some(stream) = stream {
+        let class_name = chains.php_filter_class();
+        if class_name.is_none() {
+            chains.backing.take();
+        }
+        update_filtered(&stream, class_name);
+    }
     Ok(Value::Bool(true))
 }
 

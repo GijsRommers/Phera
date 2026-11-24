@@ -14,6 +14,9 @@ impl Signature {
             for parameter in &mut self.parameters {
                 if let Some(annotation) = doc.params.get(&parameter.name) {
                     parameter.ty = refine(&parameter.ty, &annotation.ty, index);
+                    if parameter.default_is_null {
+                        parameter.ty = parameter.ty.join(&ValueType::Null);
+                    }
                 }
             }
             if let Some(annotation) = &doc.returns {
@@ -83,21 +86,30 @@ impl Signature {
         let mut resolved = self.returns.substitute(&inferred, None);
         while let ValueType::Conditional(conditional) = &resolved {
             let subject = if let Some(name) = &conditional.variable {
-                actual.get(name.as_str()).copied().or_else(|| {
-                    (!arguments.iter().any(|argument| argument.spread)
-                        && self
+                actual
+                    .get(name.as_str())
+                    .map(|ty| (*ty).clone())
+                    .or_else(|| {
+                        if arguments.iter().any(|argument| argument.spread) {
+                            return None;
+                        }
+                        let parameter = self
                             .parameters
                             .iter()
-                            .any(|parameter| parameter.name == *name && parameter.default_is_null))
-                    .then_some(&ValueType::Null)
-                })
+                            .find(|parameter| parameter.name == *name)?;
+                        if parameter.default_is_null {
+                            Some(ValueType::Null)
+                        } else {
+                            parameter.default_boolean.map(ValueType::BoolLiteral)
+                        }
+                    })
             } else {
-                Some(&conditional.subject)
+                Some(conditional.subject.clone())
             };
             let Some(subject) = subject else {
                 break;
             };
-            let relation = conditional_relation(&conditional.tested, subject, index);
+            let relation = conditional_relation(&conditional.tested, &subject, index);
             let matches = match relation {
                 Compatibility::Accepts => true,
                 Compatibility::Rejects
@@ -152,71 +164,115 @@ fn infer_templates(
     index: &Index,
 ) {
     use ValueType as T;
-    let mut pending = vec![(expected, given)];
+    let mut pending = vec![(expected, given.clone())];
     while let Some((expected, given)) = pending.pop() {
-        match (expected, given) {
+        match (expected, &given) {
             (T::Union(arms), _) => {
                 // In `T|Closure(): T`, a known closure binds the result type
                 // through the callable arm before falling back to bare T.
                 let precise = arms.iter().any(|arm| {
                     matches!(
-                        (arm, given),
+                        (arm, &given),
                         (T::Callable(_), T::Callable(_))
                             | (T::Collection(_), T::Collection(_) | T::Shape(_))
                             | (T::ClassString(_), T::ClassString(_))
-                    ) && arm.accepts(given, index, TypePolicy::Documentation)
+                    ) && arm.accepts(&given, index, TypePolicy::Documentation)
                         != Compatibility::Rejects
                 });
-                pending.extend(
-                    arms.iter()
-                        .filter(|arm| {
-                            (!precise || !matches!(arm, T::Template(_)))
-                                && arm.accepts(given, index, TypePolicy::Documentation)
-                                    != Compatibility::Rejects
-                        })
-                        .map(|arm| (arm, given)),
-                );
+                for arm in arms.iter() {
+                    let candidate = if matches!(arm, T::Template(_)) {
+                        if precise {
+                            continue;
+                        }
+                        // In `T|null`, null matches its own arm and does not
+                        // become part of the inferred T.
+                        if arms.contains(&T::Null) {
+                            given.without_null()
+                        } else {
+                            given.clone()
+                        }
+                    } else {
+                        given.clone()
+                    };
+                    if candidate != T::Never
+                        && arm.accepts(&candidate, index, TypePolicy::Documentation)
+                            != Compatibility::Rejects
+                    {
+                        pending.push((arm, candidate));
+                    }
+                }
             }
             (T::Template(template), _)
                 if variables.contains(&template.name)
                     && template
                         .bound
-                        .accepts(given, index, TypePolicy::Documentation)
+                        .accepts(&given, index, TypePolicy::Documentation)
                         == Compatibility::Accepts =>
             {
                 bindings
                     .entry(template.name.clone())
-                    .and_modify(|old| *old = old.join(given))
+                    .and_modify(|old| *old = old.join(&given))
                     .or_insert_with(|| given.clone());
             }
-            (T::ClassString(expected), T::ClassString(given)) => pending.push((expected, given)),
+            (T::ClassString(expected), T::ClassString(given)) => {
+                pending.push((expected, (**given).clone()))
+            }
             (T::Callable(expected), T::Callable(given)) => {
-                pending.push((&expected.returns, &given.returns));
+                pending.push((&expected.returns, given.returns.clone()));
                 pending.extend(
                     expected
                         .parameters
                         .iter()
                         .zip(&given.parameters)
-                        .map(|(expected, given)| (&expected.ty, &given.ty)),
+                        .map(|(expected, given)| (&expected.ty, given.ty.clone())),
                 );
             }
-            (T::Collection(expected), T::Collection(given)) => {
-                pending.extend([(&expected.key, &given.key), (&expected.value, &given.value)])
-            }
+            (T::Collection(expected), T::Collection(given)) => pending.extend([
+                (&expected.key, given.key.clone()),
+                (&expected.value, given.value.clone()),
+            ]),
             (T::Collection(expected), T::Shape(given)) => pending.extend(
                 given
                     .fields
                     .iter()
-                    .map(|field| (&expected.value, &field.value)),
+                    .map(|field| (&expected.value, field.value.clone())),
             ),
             (T::Generic(expected), T::Generic(given))
                 if expected.base.eq_ignore_ascii_case(&given.base) =>
             {
-                pending.extend(expected.arguments.iter().zip(&given.arguments));
+                pending.extend(
+                    expected
+                        .arguments
+                        .iter()
+                        .zip(given.arguments.iter().cloned()),
+                );
+            }
+            (T::Generic(expected), given) if given.class_name().is_some() => {
+                if let Some(projected) = project_generic(index, &expected.base, given) {
+                    pending.extend(expected.arguments.iter().zip(projected));
+                }
             }
             _ => {}
         }
     }
+}
+
+pub(crate) fn project_generic(
+    index: &Index,
+    owner: &str,
+    receiver: &ValueType,
+) -> Option<Vec<ValueType>> {
+    let class = index.class(owner)?;
+    let bindings = class_bindings(index, owner, receiver);
+    if bindings.is_empty() {
+        return None;
+    }
+    class
+        .documented
+        .template_names
+        .iter()
+        .map(|name| bindings.get(name).cloned())
+        .collect()
 }
 
 fn class_bindings(index: &Index, owner: &str, receiver: &ValueType) -> BTreeMap<String, ValueType> {
@@ -277,7 +333,7 @@ impl PropertyInfo {
             || self.ty.clone(),
             |annotation| refine(&self.ty, annotation, index),
         );
-        if self.null_default && !self.ty.excludes_null() {
+        if self.default == crate::index::PropertyDefault::ExplicitNull && !self.ty.excludes_null() {
             ty.join(&ValueType::Null)
         } else {
             ty
@@ -298,8 +354,12 @@ pub fn declaration_refinement(native: &ValueType, documented: ValueType) -> Valu
     let documented = if native.without_null() == ValueType::Iterable
         && let ValueType::Collection(collection) = &documented
         && collection.kind == CollectionKind::Array
-        && collection.key == ValueType::Int.join(&ValueType::String)
-    {
+        && matches!(
+            &collection.key,
+            ValueType::Union(keys) | ValueType::BenevolentUnion(keys)
+                if matches!(keys.as_ref(),
+                    [ValueType::Int, ValueType::String] | [ValueType::String, ValueType::Int])
+        ) {
         // `@param Row[] $rows` on `iterable $rows` describes the value
         // yielded by either an array or a Traversable.
         let mut iterable = (**collection).clone();
@@ -339,6 +399,12 @@ fn conditional_relation(tested: &ValueType, subject: &ValueType, index: &Index) 
             return Compatibility::Rejects;
         }
         return Compatibility::Uncertain;
+    }
+    if let ValueType::Generic(generic) = tested
+        && let Some(arguments) = project_generic(index, &generic.base, subject)
+        && arguments == generic.arguments
+    {
+        return Compatibility::Accepts;
     }
     tested.accepts(subject, index, TypePolicy::Documentation)
 }

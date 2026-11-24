@@ -7,11 +7,21 @@ use phera_ast::{Name, NameKind, UseKind};
 use phera_source::Span;
 
 mod annotations;
+pub(crate) mod assertions;
 mod token;
+pub(crate) mod type_aliases;
 mod type_parser;
 
 pub use annotations::{Annotation, Documentation, read};
 pub use type_parser::Templates;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Variance {
+    #[default]
+    Invariant,
+    Covariant,
+    Contravariant,
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct Members {
@@ -21,9 +31,13 @@ pub struct Members {
     pub mixins: Vec<String>,
     pub templates: Templates,
     pub template_names: Vec<String>,
+    pub(crate) template_variances: std::collections::BTreeMap<String, Variance>,
+    pub(crate) type_imports: Vec<type_aliases::TypeImport>,
     pub method_types: std::collections::BTreeMap<String, std::sync::Arc<crate::index::Signature>>,
     pub property_types: std::collections::BTreeMap<String, crate::types::ValueType>,
     pub generic_bases: Vec<crate::types::ValueType>,
+    pub final_class: bool,
+    pub consistent_constructor: bool,
 }
 
 pub fn text(source: &str, span: Option<Span>) -> Option<&str> {
@@ -42,8 +56,27 @@ fn tags(doc: &str) -> impl Iterator<Item = (&str, &str)> {
     })
 }
 
+pub fn internal(doc: &str) -> bool {
+    doc.lines().any(|line| {
+        line.trim_start()
+            .trim_start_matches('*')
+            .split_whitespace()
+            .next()
+            == Some("@internal")
+    })
+}
+
 pub fn members(doc: &str, names: &Names) -> Members {
     let mut members = Members::default();
+    for tag in doc.split_whitespace() {
+        match tag {
+            "@final" => members.final_class = true,
+            "@consistent-constructor"
+            | "@phpstan-consistent-constructor"
+            | "@psalm-consistent-constructor" => members.consistent_constructor = true,
+            _ => {}
+        }
+    }
     for (tag, rest) in tags(doc) {
         match tag {
             "@method" => {

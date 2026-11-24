@@ -13,7 +13,9 @@ use phera_extension_api::{
     Visibility, args,
 };
 
-use crate::{UNCLONEABLE, allocate, bind_value, engine, exception, load, receiver, values};
+use crate::{
+    UNCLONEABLE, allocate, bind_value, engine, exception, inspect, load, receiver, values,
+};
 
 pub(crate) const NAME_PROPERTY: PropertyEntry =
     PropertyEntry::typed("name", PropertyType::String, Visibility::Public);
@@ -69,62 +71,79 @@ const IDENTITY_METHODS: &[MethodEntry] = const {
         )
         .with_ready(construct_loaded),
         MethodEntry::public("getName", &[], |_, o, _| data(o, |r| r.name_value.clone()))
-            .with_direct(|object, _| {
-                let state = object.native.try_borrow().ok()?;
-                let reflection = state.as_ref()?.downcast_ref::<ReflectedClass>()?;
-                Some(reflection.info.name_value.clone())
-            }),
+            .with_direct(|o, a| direct(o, a, |r| r.name_value.clone())),
         MethodEntry::public("getShortName", &[], |_, o, _| {
             data(o, |r| Value::from(split(&r.name).1))
-        }),
+        })
+        .with_direct(|o, a| direct(o, a, |r| Value::from(split(&r.name).1))),
         MethodEntry::public("getNamespaceName", &[], |_, o, _| {
             data(o, |r| Value::from(split(&r.name).0))
-        }),
+        })
+        .with_direct(|o, a| direct(o, a, |r| Value::from(split(&r.name).0))),
         MethodEntry::public("inNamespace", &[], |_, o, _| {
             data(o, |r| Value::Bool(!split(&r.name).0.is_empty()))
-        }),
+        })
+        .with_direct(|o, a| direct(o, a, |r| Value::Bool(!split(&r.name).0.is_empty()))),
         MethodEntry::public("isInternal", &[], |_, o, _| {
             data(o, |r| Value::Bool(r.source.is_none()))
-        }),
+        })
+        .with_direct(|o, a| direct(o, a, |r| Value::Bool(r.source.is_none()))),
         MethodEntry::public("isUserDefined", &[], |_, o, _| {
             data(o, |r| Value::Bool(r.source.is_some()))
-        }),
+        })
+        .with_direct(|o, a| direct(o, a, |r| Value::Bool(r.source.is_some()))),
         MethodEntry::public("isAnonymous", &[], |_, o, _| {
             data(o, |r| Value::Bool(r.anonymous))
-        }),
+        })
+        .with_direct(|o, a| direct(o, a, |r| Value::Bool(r.anonymous))),
         MethodEntry::public("isInstantiable", &[], |_, o, _| {
             data(o, |r| Value::Bool(r.instantiable))
-        }),
+        })
+        .with_direct(|o, a| direct(o, a, |r| Value::Bool(r.instantiable))),
         MethodEntry::public("isCloneable", &[], |_, o, _| {
             data(o, |r| Value::Bool(r.cloneable))
-        }),
+        })
+        .with_direct(|o, a| direct(o, a, |r| Value::Bool(r.cloneable))),
         MethodEntry::public("isIterable", &[], |_, o, _| {
             data(o, |r| Value::Bool(r.iterable))
-        }),
+        })
+        .with_direct(|o, a| direct(o, a, |r| Value::Bool(r.iterable))),
         MethodEntry::public("isIterateable", &[], |_, o, _| {
             data(o, |r| Value::Bool(r.iterable))
-        }),
+        })
+        .with_direct(|o, a| direct(o, a, |r| Value::Bool(r.iterable))),
         MethodEntry::public("isAbstract", &[], |_, o, _| {
             data(o, |r| Value::Bool(r.is_abstract))
-        }),
+        })
+        .with_direct(|o, a| direct(o, a, |r| Value::Bool(r.is_abstract))),
         MethodEntry::public("isFinal", &[], |_, o, _| {
             data(o, |r| Value::Bool(r.modifiers & 32 != 0))
-        }),
+        })
+        .with_direct(|o, a| direct(o, a, |r| Value::Bool(r.modifiers & 32 != 0))),
         MethodEntry::public("isReadOnly", &[], |_, o, _| {
             data(o, |r| Value::Bool(r.modifiers & 65536 != 0))
-        }),
+        })
+        .with_direct(|o, a| direct(o, a, |r| Value::Bool(r.modifiers & 65536 != 0))),
         MethodEntry::public("isInterface", &[], |_, o, _| {
             data(o, |r| Value::Bool(r.kind == ReflectedClassKind::Interface))
+        })
+        .with_direct(|o, a| {
+            direct(o, a, |r| {
+                Value::Bool(r.kind == ReflectedClassKind::Interface)
+            })
         }),
         MethodEntry::public("isTrait", &[], |_, o, _| {
             data(o, |r| Value::Bool(r.kind == ReflectedClassKind::Trait))
-        }),
+        })
+        .with_direct(|o, a| direct(o, a, |r| Value::Bool(r.kind == ReflectedClassKind::Trait))),
         MethodEntry::public("isEnum", &[], |_, o, _| {
             data(o, |r| Value::Bool(r.kind == ReflectedClassKind::Enum))
-        }),
+        })
+        .with_direct(|o, a| direct(o, a, |r| Value::Bool(r.kind == ReflectedClassKind::Enum))),
         MethodEntry::public("getModifiers", &[], |_, o, _| {
             data(o, |r| Value::Int(r.modifiers))
-        }),
+        })
+        .with_direct(|o, a| direct(o, a, |r| Value::Int(r.modifiers))),
         MethodEntry::public("getFileName", &[], |_, o, _| {
             data(o, |r| {
                 r.source
@@ -234,8 +253,9 @@ const IDENTITY_METHODS: &[MethodEntry] = const {
                 )
             },
         ),
-        MethodEntry::public_async("newInstanceWithoutConstructor", &[], |c, o, _| {
-            instantiate(c, o, None, None)
+        MethodEntry::public("newInstanceWithoutConstructor", &[], |c, o, _| {
+            let class = reflected_class(o)?;
+            engine(c)?.reflect_new_instance_without_constructor(&class.info)
         }),
         MethodEntry::public_async("getAttributes", crate::attribute::FILTER, |c, o, a| {
             Box::pin(async move {
@@ -402,28 +422,44 @@ pub(crate) fn split(name: &str) -> (&str, &str) {
     })
 }
 
+fn direct(
+    object: &Object,
+    arguments: &[Option<Value>],
+    read: impl FnOnce(&ClassInfo) -> Value,
+) -> Option<Value> {
+    if !arguments.is_empty() {
+        return None;
+    }
+    let native = object.native.try_borrow().ok()?;
+    let reflection = native.as_ref()?.downcast_ref::<ReflectedClass>()?;
+    Some(read(&reflection.info))
+}
+
 fn data(this: Option<&Rc<Object>>, result: impl FnOnce(&ClassInfo) -> Value) -> NativeResult {
-    Ok(result(&reflected_class(this)?.info))
+    inspect(this, |class: &ReflectedClass| result(&class.info))
 }
 
 fn names(this: Option<&Rc<Object>>, list: impl FnOnce(&ClassInfo) -> &[String]) -> NativeResult {
-    let class = reflected_class(this)?;
-    values(
-        list(&class.info)
-            .iter()
-            .map(|name| Value::from(name.as_str())),
-    )
+    inspect(this, |class: &ReflectedClass| {
+        values(
+            list(&class.info)
+                .iter()
+                .map(|name| Value::from(name.as_str())),
+        )
+    })?
 }
 
 fn aliases(_: &mut dyn Context, this: Option<&Rc<Object>>, _: &[Value]) -> NativeResult {
-    let mut aliases = PhpArray::new();
-    for (alias, original) in &reflected_class(this)?.info.trait_aliases {
-        aliases.insert(
-            ArrayKey::str(alias.as_str()),
-            Value::from(original.as_str()),
-        );
-    }
-    Ok(Value::from(aliases))
+    inspect(this, |class: &ReflectedClass| {
+        let mut aliases = PhpArray::new();
+        for (alias, original) in &class.info.trait_aliases {
+            aliases.insert(
+                ArrayKey::str(alias.as_str()),
+                Value::from(original.as_str()),
+            );
+        }
+        Value::from(aliases)
+    })
 }
 
 fn relations(

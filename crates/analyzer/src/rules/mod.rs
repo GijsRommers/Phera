@@ -8,6 +8,7 @@ mod known_named_argument;
 mod magic_constant;
 mod missing_method;
 mod missing_return;
+pub(crate) mod missing_type;
 mod named_argument;
 mod no_parent;
 mod not_supported;

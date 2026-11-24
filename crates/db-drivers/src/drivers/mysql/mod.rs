@@ -19,7 +19,7 @@ mod auth_tests;
 use super::{Execution, Prepared, RowBuffer, Rows};
 use crate::connect_options::MysqlOptions;
 use crate::errors::DbError;
-use crate::parameters::{BoundValue, literal, quote};
+use crate::parameters::{BoundValue, push_literal, push_quote, quote};
 use crate::placeholders::{Sql, Syntax};
 use values::parameter;
 
@@ -29,6 +29,13 @@ pub struct Mysql {
     pub version: String,
     last_insert_id: u64,
     pending_exec_rows: bool,
+    /// Set whenever the request ran `select_db` or SQL containing `USE`, so
+    /// clean queries skip the redundant `USE` statement after `COM_RESET_CONNECTION`.
+    db_changed: bool,
+    /// Pre-built multi-statement post-reset SQL including `USE` + `SET NAMES` + options.
+    reset_sql_with_db: String,
+    /// Pre-built multi-statement post-reset SQL when the current database did not change.
+    reset_sql_keep_db: String,
     charset: Option<String>,
     database: String,
     options: MysqlOptions,
@@ -56,23 +63,26 @@ impl Mysql {
                 .await
                 .map_err(error)?;
         }
-        // COM_RESET_CONNECTION does not restore the database selected with USE.
-        if !self.database.is_empty() {
-            let database = self.database.replace('`', "``");
-            connection
-                .query_drop(format!("USE `{database}`"))
-                .await
-                .map_err(error)?;
+        // Run post-reset session restoration (`USE`, `SET NAMES`, `sql_mode`,
+        // `autocommit=0`) in a single multi-statement round-trip instead of
+        // 2-4 sequential network hops, skipping `USE` when unchanged.
+        let post_reset = if self.db_changed {
+            &self.reset_sql_with_db
+        } else {
+            &self.reset_sql_keep_db
+        };
+        if !post_reset.is_empty() {
+            connection.query_drop(post_reset).await.map_err(error)?;
         }
-        if let Some(charset) = &self.charset {
-            connection
-                .query_drop(format!("SET NAMES {charset}"))
-                .await
-                .map_err(error)?;
+        if let Some(init) = &self.options.init {
+            if !self.options.multiple {
+                require_single_statement(connection, init).await?;
+            }
+            connection.query_drop(init).await.map_err(error)?;
         }
-        configure(connection, &self.options).await?;
         self.last_insert_id = 0;
         self.pending_exec_rows = false;
+        self.db_changed = false;
         Ok(())
     }
 
@@ -143,16 +153,14 @@ impl Mysql {
                 } else {
                     self.backslash_escapes().await?
                 };
-                let query = sql.render(|i| match &values[i] {
+                let query = sql.render_into(|i, output| match &values[i] {
                     BoundValue::String(bytes) => {
-                        let quoted = quote(bytes, mode);
                         if options.national_strings {
-                            format!("N{quoted}")
-                        } else {
-                            quoted
+                            output.push('N');
                         }
+                        push_quote(output, bytes, mode);
                     }
-                    value => literal(value, true),
+                    value => push_literal(output, value, true),
                 });
                 self.text(&query, options.mysql_stream.as_ref()).await
             }
@@ -170,6 +178,9 @@ impl Mysql {
 
     async fn text(&mut self, sql: &str, owner: Option<&Arc<()>>) -> Result<Rows, DbError> {
         self.check_pending().await?;
+        if !self.db_changed && contains_use_keyword(sql.as_bytes()) {
+            self.db_changed = true;
+        }
         if !self.options.multiple {
             require_single_statement(self.connection()?, sql).await?;
         }
@@ -276,7 +287,8 @@ impl Mysql {
 
 async fn buffered<P: Protocol>(mut result: QueryResult<'_, '_, P>) -> Result<(Rows, u64), DbError> {
     let columns = result.columns_ref().to_vec();
-    let mut values = RowBuffer::with_capacity(columns.len(), 0);
+    let initial_rows = if columns.is_empty() { 0 } else { 16 };
+    let mut values = RowBuffer::with_capacity(columns.len(), initial_rows);
     while let Some(row) = result.next().await.map_err(error)? {
         values::push_pdo_row(&mut values, row, &columns);
     }
@@ -284,6 +296,58 @@ async fn buffered<P: Protocol>(mut result: QueryResult<'_, '_, P>) -> Result<(Ro
     let insert_id = result.last_insert_id().unwrap_or(0);
     result.drop_result().await.map_err(error)?;
     Ok((values::finish(columns, values, affected), insert_id))
+}
+
+pub(super) fn build_reset_sql(
+    database: &str,
+    charset: Option<&str>,
+    settings: &MysqlOptions,
+) -> (String, String) {
+    let mut keep_db = String::new();
+    let push_stmt = |buf: &mut String, stmt: &str| {
+        if !buf.is_empty() {
+            buf.push_str("; ");
+        }
+        buf.push_str(stmt);
+    };
+    if let Some(charset) = charset {
+        push_stmt(&mut keep_db, &format!("SET NAMES {charset}"));
+    }
+    if settings.ignore_space {
+        push_stmt(
+            &mut keep_db,
+            "SET sql_mode = CONCAT_WS(',', NULLIF(@@sql_mode, ''), 'IGNORE_SPACE')",
+        );
+    }
+    if !settings.autocommit {
+        push_stmt(&mut keep_db, "SET autocommit=0");
+    }
+    let with_db = if database.is_empty() {
+        keep_db.clone()
+    } else {
+        let escaped = database.replace('`', "``");
+        let mut buf = format!("USE `{escaped}`");
+        if !keep_db.is_empty() {
+            buf.push_str("; ");
+            buf.push_str(&keep_db);
+        }
+        buf
+    };
+    (with_db, keep_db)
+}
+
+/// Conservative check for whether SQL text might contain a top-level `USE`
+/// statement that changes the connection's selected database.
+pub(super) fn contains_use_keyword(sql: &[u8]) -> bool {
+    sql.windows(3).enumerate().any(|(i, window)| {
+        window.eq_ignore_ascii_case(b"use")
+            && (i == 0 || !is_ident_byte(sql[i - 1]))
+            && sql.get(i + 3).is_none_or(|&b| !is_ident_byte(b))
+    })
+}
+
+fn is_ident_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'$'
 }
 
 async fn configure(connection: &mut Conn, settings: &MysqlOptions) -> Result<(), DbError> {
@@ -308,9 +372,13 @@ async fn configure(connection: &mut Conn, settings: &MysqlOptions) -> Result<(),
     Ok(())
 }
 
-/// The client library always advertises multi-statements. A fresh server parse
-/// through the prepared protocol allows at most one statement before a text query.
+/// The client library always advertises multi-statements. Only SQL containing a
+/// statement separator needs a server-side single-statement parse check before
+/// running as a text query.
 async fn require_single_statement(connection: &mut Conn, sql: &str) -> Result<(), DbError> {
+    if !sql.as_bytes().contains(&b';') {
+        return Ok(());
+    }
     let statement = connection.prep(sql).await.map_err(error)?;
     connection.close(statement).await.map_err(error)
 }

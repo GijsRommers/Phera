@@ -8,26 +8,36 @@
 
 use crate::error::Error;
 use crate::flags::{EncodeFlags, InvalidUtf8};
-use std::fmt::Write;
+
+const HEX_LOWER: &[u8; 16] = b"0123456789abcdef";
 
 /// Appends `bytes` to `out` as a quoted JSON string. On an error `out` may
 /// hold part of the string; the caller truncates it.
 pub(crate) fn encode_string(
-    out: &mut String,
+    out: &mut Vec<u8>,
     bytes: &[u8],
     flags: EncodeFlags,
 ) -> Result<(), Error> {
-    out.push('"');
+    out.reserve(bytes.len().saturating_add(2));
+    out.push(b'"');
     let mut remaining = bytes;
     while !remaining.is_empty() {
         let plain = remaining
             .iter()
-            .take_while(|&&byte| plain_ascii(byte))
+            .take_while(|&&byte| plain_ascii(byte, flags))
             .count();
         let (run, rest) = remaining.split_at(plain);
-        out.push_str(std::str::from_utf8(run).map_err(|_| Error::Utf8)?);
+        // Every byte in `run` is proven ASCII (`0x20..=0x7f`), so it is valid
+        // UTF-8 and needs no second validation pass.
+        out.extend_from_slice(run);
         if rest.is_empty() {
             break;
+        }
+        let first = rest[0];
+        if first < 0x80 {
+            escape_char(first as char, flags, out);
+            remaining = &rest[1..];
+            continue;
         }
         let (sequence, rest) = rest.split_at(sequence_length(rest));
         if let Ok(text) = std::str::from_utf8(sequence) {
@@ -43,14 +53,24 @@ pub(crate) fn encode_string(
         }
         remaining = rest;
     }
-    out.push('"');
+    out.push(b'"');
     Ok(())
 }
 
-/// ASCII bytes that never need escaping under any encode flag.
-fn plain_ascii(byte: u8) -> bool {
-    (b' '..=0x7f).contains(&byte)
-        && !matches!(byte, b'"' | b'\\' | b'/' | b'<' | b'>' | b'&' | b'\'')
+/// ASCII bytes that need no escaping under `flags`.
+#[inline]
+fn plain_ascii(byte: u8, flags: EncodeFlags) -> bool {
+    if !(b' '..=0x7f).contains(&byte) {
+        return false;
+    }
+    match byte {
+        b'"' | b'\\' => false,
+        b'/' => flags.unescaped_slashes,
+        b'<' | b'>' => !flags.hex_tag,
+        b'&' => !flags.hex_amp,
+        b'\'' => !flags.hex_apos,
+        _ => true,
+    }
 }
 
 /// Length of the UTF-8 sequence that starts `bytes`, valid or not. As in
@@ -73,34 +93,48 @@ fn sequence_length(bytes: &[u8]) -> usize {
         .map_or(width.min(bytes.len()), |index| index + 1)
 }
 
+#[inline]
+fn push_unicode_escape(out: &mut Vec<u8>, unit: u16) {
+    out.extend_from_slice(&[
+        b'\\',
+        b'u',
+        HEX_LOWER[((unit >> 12) & 0xf) as usize],
+        HEX_LOWER[((unit >> 8) & 0xf) as usize],
+        HEX_LOWER[((unit >> 4) & 0xf) as usize],
+        HEX_LOWER[(unit & 0xf) as usize],
+    ]);
+}
+
 /// Appends one character, escaped as the flags ask. Escapes use lower-case
 /// hex, except the `JSON_HEX_*` ones, which PHP writes in upper case.
-fn escape_char(character: char, flags: EncodeFlags, out: &mut String) {
+fn escape_char(character: char, flags: EncodeFlags, out: &mut Vec<u8>) {
     match character {
-        '"' if flags.hex_quot => out.push_str("\\u0022"),
-        '"' => out.push_str("\\\""),
-        '\\' => out.push_str("\\\\"),
-        '/' if !flags.unescaped_slashes => out.push_str("\\/"),
-        '\u{8}' => out.push_str("\\b"),
-        '\u{c}' => out.push_str("\\f"),
-        '\n' => out.push_str("\\n"),
-        '\r' => out.push_str("\\r"),
-        '\t' => out.push_str("\\t"),
-        '<' if flags.hex_tag => out.push_str("\\u003C"),
-        '>' if flags.hex_tag => out.push_str("\\u003E"),
-        '&' if flags.hex_amp => out.push_str("\\u0026"),
-        '\'' if flags.hex_apos => out.push_str("\\u0027"),
-        character if character < ' ' => {
-            let _ = write!(out, "\\u{:04x}", character as u32);
-        }
+        '"' if flags.hex_quot => out.extend_from_slice(b"\\u0022"),
+        '"' => out.extend_from_slice(b"\\\""),
+        '\\' => out.extend_from_slice(b"\\\\"),
+        '/' if !flags.unescaped_slashes => out.extend_from_slice(b"\\/"),
+        '\u{8}' => out.extend_from_slice(b"\\b"),
+        '\u{c}' => out.extend_from_slice(b"\\f"),
+        '\n' => out.extend_from_slice(b"\\n"),
+        '\r' => out.extend_from_slice(b"\\r"),
+        '\t' => out.extend_from_slice(b"\\t"),
+        '<' if flags.hex_tag => out.extend_from_slice(b"\\u003C"),
+        '>' if flags.hex_tag => out.extend_from_slice(b"\\u003E"),
+        '&' if flags.hex_amp => out.extend_from_slice(b"\\u0026"),
+        '\'' if flags.hex_apos => out.extend_from_slice(b"\\u0027"),
+        character if character < ' ' => push_unicode_escape(out, character as u16),
         '\u{2028}' | '\u{2029}' if flags.unescaped_unicode && !flags.unescaped_line_terminators => {
-            let _ = write!(out, "\\u{:04x}", character as u32);
+            push_unicode_escape(out, character as u16);
         }
-        character if character.is_ascii() || flags.unescaped_unicode => out.push(character),
+        character if character.is_ascii() => out.push(character as u8),
+        character if flags.unescaped_unicode => {
+            let mut buf = [0u8; 4];
+            out.extend_from_slice(character.encode_utf8(&mut buf).as_bytes());
+        }
         character => {
-            let mut units = [0; 2];
+            let mut units = [0u16; 2];
             for unit in character.encode_utf16(&mut units) {
-                let _ = write!(out, "\\u{unit:04x}");
+                push_unicode_escape(out, *unit);
             }
         }
     }

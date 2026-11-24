@@ -6,6 +6,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+foldhash.workspace = true
 phera-db-drivers.workspace = true
 phera-sqlite.workspace = true
 phera-io-pool.workspace = true

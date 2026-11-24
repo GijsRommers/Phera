@@ -220,6 +220,7 @@ impl CodeCache {
                         phera_compiler::NativeFunction::General
                     }
                     phera_extension_api::NativeFn::Async(_)
+                    | phera_extension_api::NativeFn::Sync(_)
                         if entry
                             .params
                             .last()
