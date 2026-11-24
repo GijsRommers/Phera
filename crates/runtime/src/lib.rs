@@ -468,7 +468,28 @@ impl Runtime {
         }
         let mut carried = None;
         let mut warmup_before = None;
-        let mut vm = match (plan, &compiled) {
+        struct ManagedVm(Vm);
+
+        impl std::ops::Deref for ManagedVm {
+            type Target = Vm;
+            fn deref(&self) -> &Self::Target {
+                &self.0
+            }
+        }
+
+        impl std::ops::DerefMut for ManagedVm {
+            fn deref_mut(&mut self) -> &mut Self::Target {
+                &mut self.0
+            }
+        }
+
+        impl Drop for ManagedVm {
+            fn drop(&mut self) {
+                self.0.recycle();
+            }
+        }
+
+        let mut vm = ManagedVm(match (plan, &compiled) {
             (snapshots::Plan::Fork(snapshot, changes), Ok(_)) => match snapshot.fork() {
                 Ok(mut vm) => {
                     carried = Some(changes.carry(&vm));
@@ -490,7 +511,7 @@ impl Runtime {
                 }
             },
             _ => self.new_classic_vm(worker),
-        };
+        });
         let forked = vm.is_fork();
         vm.set_local_loader(code);
         let uploads = http::define_superglobals(

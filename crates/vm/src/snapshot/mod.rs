@@ -35,6 +35,7 @@ use phera_value::Fork;
 use crate::Vm;
 
 pub use boot::{BootOutcome, Snapshot};
+pub(crate) use boot::{CodeRecycle, RecycledTables};
 pub(crate) use copy::SnapshotRefusal;
 
 /// What `Phera\snapshot()` does in this VM.

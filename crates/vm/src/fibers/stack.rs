@@ -138,6 +138,7 @@ impl Vm {
         // `Phera\snapshot()` does, belong to the request too.
         swap(&mut self.class_states, &mut other.class_states);
         swap(&mut self.snapshot, &mut other.snapshot);
+        swap(&mut self.code_recycle, &mut other.code_recycle);
         swap(&mut self.include_state, &mut other.include_state);
         swap(&mut self.generator_releases, &mut other.generator_releases);
         swap(
