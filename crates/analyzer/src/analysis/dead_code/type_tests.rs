@@ -33,6 +33,7 @@ impl Analyzer<'_> {
             test(given, tested, self.index)
         })?;
         let provenance = self.narrowed_at(value, scope);
+        let given = super::super::member_checks::receiver_name(given);
         self.constant_result(
             "instanceof",
             span,

@@ -18,6 +18,7 @@ pub struct ParameterInfo {
     pub ty: ValueType,
     pub optional: bool,
     pub default_is_null: bool,
+    pub default_boolean: Option<bool>,
     pub variadic: bool,
     pub by_reference: bool,
     pub closure_receiver: Option<String>,
@@ -31,6 +32,7 @@ pub struct Signature {
     pub location: Location,
     pub modifiers: Modifiers,
     pub abstract_body: bool,
+    pub documented_final: bool,
     pub accepts_extra: bool,
     pub pure: bool,
     pub closure_object: bool,
@@ -60,6 +62,12 @@ impl Signature {
                             phera_ast::ExpressionKind::Literal(phera_ast::Literal::Null)
                         )
                     }),
+                    default_boolean: p.default.as_ref().and_then(|value| match value.kind {
+                        phera_ast::ExpressionKind::Literal(phera_ast::Literal::Bool(value)) => {
+                            Some(value)
+                        }
+                        _ => None,
+                    }),
                     variadic: p.variadic,
                     by_reference: p.by_reference,
                     closure_receiver: None,
@@ -70,6 +78,7 @@ impl Signature {
             location,
             modifiers: Modifiers::default(),
             abstract_body: false,
+            documented_final: false,
             accepts_extra: false,
             pure: false,
             closure_object: true,
@@ -81,6 +90,7 @@ impl Signature {
     }
     pub fn apply_phpdoc(&mut self, doc: Option<&str>, names: &Names) {
         if let Some(doc) = doc {
+            self.documented_final = doc.split_whitespace().any(|tag| tag == "@final");
             self.pure = doc
                 .split_ascii_whitespace()
                 .any(|tag| matches!(tag, "@pure" | "@phpstan-pure" | "@psalm-pure"));
@@ -95,11 +105,19 @@ impl Signature {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PropertyDefault {
+    Other,
+    ExplicitNull,
+    ImplicitNull,
+    ReadonlyPromotion,
+}
+
 #[derive(Clone, Debug)]
 pub struct PropertyInfo {
     pub ty: ValueType,
     pub documented_type: Option<ValueType>,
-    pub null_default: bool,
+    pub default: PropertyDefault,
     pub modifiers: Modifiers,
     pub location: Location,
 }
@@ -107,6 +125,7 @@ pub struct PropertyInfo {
 #[derive(Clone, Debug)]
 pub struct ConstantInfo {
     pub ty: ValueType,
+    pub literal: Option<ValueType>,
     pub modifiers: Modifiers,
     pub location: Location,
 }
@@ -115,6 +134,7 @@ impl ConstantInfo {
     pub fn untyped(location: Location) -> Self {
         Self {
             ty: ValueType::Mixed,
+            literal: None,
             modifiers: Modifiers::default(),
             location,
         }
@@ -147,8 +167,11 @@ pub struct ClassInfo {
     pub methods: BTreeMap<String, Signature>,
     pub properties: BTreeMap<String, PropertyInfo>,
     pub constants: BTreeMap<String, ConstantInfo>,
+    pub enum_cases: BTreeSet<String>,
     pub location: Location,
     pub open_properties: bool,
+    pub internal: bool,
+    pub mapped_repository: Option<String>,
     pub documented: crate::phpdoc::Members,
 }
 
@@ -156,6 +179,7 @@ pub struct ClassInfo {
 pub struct Index {
     pub builtin_functions: BTreeSet<String>,
     pub read_type_docs: bool,
+    pub(crate) report_maybe_generic_types: bool,
     pub builtin_classes: BTreeSet<String>,
     pub trait_users: crate::trait_users::TraitUsers,
     pub classes: BTreeMap<String, ClassInfo>,

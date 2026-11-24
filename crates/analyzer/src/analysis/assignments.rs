@@ -13,6 +13,42 @@ impl Analyzer<'_> {
         match &expression.kind {
             ExpressionKind::Assign { target, value } => {
                 let constant = crate::constants::value(value, scope);
+                if let ExpressionKind::Variable(Variable::Named(name)) = &target.kind
+                    && matches!(
+                        value.kind,
+                        ExpressionKind::Binary {
+                            operator: BinaryOperator::And | BinaryOperator::Or,
+                            ..
+                        }
+                    )
+                {
+                    let branches = self.condition(value, std::mem::take(scope), false);
+                    let Some(after) = super::condition::Condition::merge(
+                        branches.yes.clone(),
+                        branches.no.clone(),
+                    ) else {
+                        return ValueType::Never;
+                    };
+                    *scope = after;
+                    let ty = if self.level >= 4 {
+                        branches
+                            .truth()
+                            .map_or(ValueType::Bool, ValueType::BoolLiteral)
+                    } else {
+                        ValueType::Bool
+                    };
+                    scope.define(name, ty.clone());
+                    scope.remember_definitions(
+                        crate::scope::GuardKey::Variable(name.clone()),
+                        branches.yes.as_ref(),
+                        branches.no.as_ref(),
+                    );
+                    self.remember_branch_null_tests(name, &branches, scope);
+                    if let Some(value) = constant {
+                        scope.values.insert(name.clone(), value);
+                    }
+                    return ty;
+                }
                 let ty = self.expression(value, scope, false);
                 if ty == ValueType::Never {
                     return ty;
@@ -20,12 +56,19 @@ impl Analyzer<'_> {
                 if self.write(target, ty.clone(), scope) == Evaluation::Never {
                     return ValueType::Never;
                 }
-                if let ExpressionKind::Variable(Variable::Named(name)) = &target.kind
-                    && let Some(value) = constant
-                {
-                    scope.values.insert(name.clone(), value);
+                if let ExpressionKind::Variable(Variable::Named(name)) = &target.kind {
+                    if self.options.strict
+                        && let ExpressionKind::Variable(Variable::Named(source)) = &value.kind
+                    {
+                        scope.copy_array_guard(source, name);
+                    }
+                    self.remember_optional_result(name, value, scope);
+                    self.remember_null_test_flag(name, value, scope);
+                    if let Some(value) = constant {
+                        scope.values.insert(name.clone(), value);
+                    }
                 }
-                ty
+                self.assignment_result(target, scope, ty)
             }
             ExpressionKind::AssignReference { target, value } => {
                 self.reference_assignment(target, value, scope)
@@ -46,6 +89,7 @@ impl Analyzer<'_> {
                 if ty == ValueType::Never {
                     return ty;
                 }
+                self.mixed_binary(*operator, &previous, &ty, expression.span, true);
                 let ty = if self.level >= 3 {
                     super::operators::binary_type(*operator, &previous, &ty)
                 } else {
@@ -54,12 +98,18 @@ impl Analyzer<'_> {
                 if self.write(target, ty.clone(), scope) == Evaluation::Never {
                     return ValueType::Never;
                 }
-                ty
+                self.assignment_result(target, scope, ty)
             }
-            ExpressionKind::IncDec { target, .. } => {
-                if self.expression(target, scope, quiet) == ValueType::Never {
+            ExpressionKind::IncDec {
+                target,
+                increment,
+                prefix,
+            } => {
+                let ty = self.expression(target, scope, quiet);
+                if ty == ValueType::Never {
                     return ValueType::Never;
                 }
+                self.mixed_increment(&ty, *increment, *prefix, expression.span);
                 if self.write(target, ValueType::Mixed, scope) == Evaluation::Never {
                     return ValueType::Never;
                 }

@@ -1,0 +1,3 @@
+<?php
+
+const LEGACY_REGEX = PCRE_VERSION_MAJOR < 10;

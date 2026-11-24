@@ -39,29 +39,18 @@ impl Analyzer<'_> {
                 step,
                 body,
             } => {
-                let (last, earlier) = condition
-                    .split_last()
-                    .map_or((None, &[][..]), |(last, earlier)| (Some(last), earlier));
-                for expression in init.iter().chain(earlier) {
-                    if self.expression(expression, scope, false) == ValueType::Never {
-                        return Flow::Terminal;
+                let new_locals = self.loop_initializer_locals(init, scope);
+                let flow = self.for_iteration(init, condition, step, body, scope);
+                if flow == Flow::Next {
+                    for name in new_locals {
+                        if let Some(variable) = scope.variables.get_mut(name) {
+                            variable.definition = Definition::Possible;
+                        }
+                        scope.facts.forget_variable(name);
+                        scope.values.remove(name);
                     }
                 }
-                let Some(last) = last else {
-                    self.widen_loop(body, step, scope);
-                    return self.for_loop(body, step, scope, None, true);
-                };
-                let definitely_enters = self.level >= 4
-                    && crate::constants::value(last, scope).is_some_and(|value| value.truth());
-                self.widen_loop(body, condition.iter().chain(step), scope);
-                let branches = self.condition(last, std::mem::take(scope), false);
-                if let Some(entered) = branches.yes {
-                    *scope = entered;
-                    let bypass = if definitely_enters { None } else { branches.no };
-                    self.for_loop(body, step, scope, bypass, always_true(last))
-                } else {
-                    Self::finish_paths(branches.no.into_iter().collect(), scope)
-                }
+                flow
             }
             StatementKind::Foreach {
                 subject,
@@ -69,8 +58,44 @@ impl Analyzer<'_> {
                 value,
                 body,
                 by_reference,
-            } => self.foreach_loop(subject, key.as_ref(), value, *by_reference, body, scope),
+            } => {
+                self.foreach_overwrite(key.as_ref(), value, scope, statement.span);
+                self.foreach_loop(subject, key.as_ref(), value, *by_reference, body, scope)
+            }
             _ => Flow::Next,
+        }
+    }
+
+    fn for_iteration(
+        &mut self,
+        init: &[Expression],
+        condition: &[Expression],
+        step: &[Expression],
+        body: &[Statement],
+        scope: &mut Scope,
+    ) -> Flow {
+        let (last, earlier) = condition
+            .split_last()
+            .map_or((None, &[][..]), |(last, earlier)| (Some(last), earlier));
+        for expression in init.iter().chain(earlier) {
+            if self.expression(expression, scope, false) == ValueType::Never {
+                return Flow::Terminal;
+            }
+        }
+        let Some(last) = last else {
+            self.widen_loop(body, step, scope);
+            return self.for_loop(body, step, scope, None, true);
+        };
+        let definitely_enters = self.level >= 4
+            && crate::constants::value(last, scope).is_some_and(|value| value.truth());
+        self.widen_loop(body, condition.iter().chain(step), scope);
+        let branches = self.condition(last, std::mem::take(scope), false);
+        if let Some(entered) = branches.yes {
+            *scope = entered;
+            let bypass = if definitely_enters { None } else { branches.no };
+            self.for_loop(body, step, scope, bypass, always_true(last))
+        } else {
+            Self::finish_paths(branches.no.into_iter().collect(), scope)
         }
     }
 
@@ -87,6 +112,13 @@ impl Analyzer<'_> {
         if subject_type == ValueType::Never {
             return Flow::Terminal;
         }
+        self.check_foreach_iterable(&subject_type, subject.span);
+        if self.strict_mixed(&subject_type)
+            && matches!(subject.kind, ExpressionKind::Index { .. })
+            && let Some(place) = crate::scope::Place::of(subject)
+        {
+            scope.facts.record(place, subject_type.clone(), None);
+        }
         if self.level >= 4
             && matches!(&subject_type, ValueType::Shape(shape) if shape.fields.is_empty()
                 && shape.remainder.is_none()
@@ -99,10 +131,24 @@ impl Analyzer<'_> {
             );
             return Flow::Next;
         }
+        if self.level >= 2 && by_reference {
+            // Writes through the element alias can change the array's shape.
+            if let ExpressionKind::Variable(Variable::Named(name)) = &subject.kind {
+                if matches!(&subject_type, ValueType::Array | ValueType::Shape(_)) {
+                    scope.define(name, ValueType::Array);
+                } else {
+                    scope.define(name, ValueType::Mixed);
+                }
+            } else {
+                scope.forget_member_write(subject);
+            }
+        }
         let before = scope.clone();
         self.widen_loop(body, [], scope);
         let nonempty = matches!(&subject.kind, ExpressionKind::Array(items)
-            if items.iter().any(|item| !item.spread));
+            if items.iter().any(|item| !item.spread))
+            || (self.level >= 7 || self.options.strict)
+                && super::arrays::nonempty_array(&subject_type);
         let (key_type, value_type) = if self.level >= 2 && !by_reference {
             super::arrays::iteration_types(&subject_type)
         } else {
@@ -126,7 +172,17 @@ impl Analyzer<'_> {
         if flow == Flow::Next {
             paths.push(scope.clone());
         }
-        if !nonempty {
+        if !nonempty || self.options.strict && !paths.is_empty() {
+            if self.options.strict
+                && !nonempty
+                && !paths.is_empty()
+                && let Some(entered) = super::strict_rules::foreach_definitions(&before, &paths)
+            {
+                paths.push(before.clone());
+                let flow = Self::finish_paths(paths, scope);
+                super::strict_rules::remember_foreach_definitions(scope, &before, &entered);
+                return flow;
+            }
             paths.push(before);
         }
         Self::finish_paths(paths, scope)
@@ -167,6 +223,10 @@ impl Analyzer<'_> {
         bypass: Option<Scope>,
         position: ConditionPosition,
     ) -> Flow {
+        let first_entry = (self.level >= 10
+            && position == ConditionPosition::BeforeBody
+            && !self.checking_loop_mixed_values)
+            .then(|| scope.clone());
         let (flow, frame) = self.control_body(body, scope);
         let mut advancing = frame.continues;
         if flow == Flow::Next {
@@ -176,7 +236,13 @@ impl Analyzer<'_> {
         let has_break = !paths.is_empty();
         if !advancing.is_empty() {
             let next = Scope::join(&advancing);
+            let repeat = first_entry.and_then(|entry| self.loop_mixed_entry(entry, &next));
             let branches = self.condition(condition, next, false);
+            if let Some(entry) = repeat
+                && branches.yes.is_some()
+            {
+                self.check_loop_mixed_body(condition, body, entry);
+            }
             if position == ConditionPosition::AfterBody
                 && (branches.truth() != Some(true) || !has_break && !self.context.generator)
             {
@@ -192,10 +258,12 @@ impl Analyzer<'_> {
             {
                 self.constant_condition("while", "While loop condition", condition, &branches);
             }
-            paths.extend(branches.no);
-            if !always_true(condition) {
-                // A later iteration can revisit the condition after changing
-                // a variable that made it true on the first pass.
+            if let Some(exited) = branches.no {
+                paths.push(exited);
+            } else if !always_true(condition) {
+                // A later iteration can revisit a condition that is true
+                // on the first pass. Use this fallback only if there is no
+                // false exit to carry the condition's effects.
                 paths.extend(branches.yes);
             }
         }

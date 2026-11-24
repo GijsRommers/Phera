@@ -94,11 +94,52 @@ those constructs.
 | `phera file.php` | Runs a script |
 | `phera serve public` | Serves a directory over HTTP: one process, one worker thread per core, many requests per thread |
 | `phera new shop` | Starts a project: a small JSON application, or Symfony's or Laravel's official one |
-| `phera check src` | Type-checks PHP with PHPStan's levels and identifiers; reads a PHPStan baseline |
+| `phera check src` | Type-checks PHP and PHPDoc at levels 0–10 (`--level max`) and reads PHPStan baselines |
 | `phera lint src` | Finds unused code and suspicious constructs; `--fix` applies the safe fixes |
 | `phera install` | Installs dependencies from `composer.lock` or resolves `composer.json` |
 | `phera upgrade` | Updates Phera. Use `--check` to see the available version or `--version X` to install a specific release |
 | `phera --dump file.php` | Prints the compiled bytecode |
+
+The checker recognizes Doctrine ORM mapping attributes as property reads
+and writes, including generated identifiers and associations. It also
+uses entity class strings to infer Doctrine repository, find, and reference
+results. It recognizes Doctrine lifecycle callbacks and Symfony service injection,
+command, route, listener, and scheduled-task attributes.
+The Doctrine PHPStan include supplies scalar query return types.
+Query projections that need mapped field data remain unresolved.
+The Symfony PHPStan include also leaves interface-declared denormalizer
+results open and narrows InputBag and HeaderBag results with non-null defaults.
+
+The checker reads `phpstan.neon`, `phpstan.neon.dist`, or `phpstan.dist.neon`
+in that order. It uses analysis paths, exclusions, levels, included baselines,
+and `ignoreErrors`. It honors `checkMissingTypehints`, `checkPhpDocMissingReturn`,
+`reportAlwaysTrueInLastCondition`, and `reportUnmatchedIgnoredErrors`.
+Unmatched PHPStan inline ignores are reported by default.
+With `treatPhpDocTypesAsCertain: false`, constant-condition checks require
+native type evidence. Settings in `phera.toml` under `[check]` take
+precedence, followed by command-line options. Unsupported includes and PHP
+configuration files produce a notice.
+
+Generic arguments are checked using declaration-site covariance,
+contravariance, and invariance, including through documented inheritance.
+PHPDoc types can use `@phpstan-import-type` and `@psalm-import-type`
+to import aliases declared in another class, including from Composer dependencies.
+Conditional returns retain resolved template types when a declaration and
+the argument establish the result. PHPStan's experimental
+`unresolvedTemplateArguments` feature can widen these results to mixed.
+
+The PHPStan strict-rules include enables `foreach.keyOverwrite` and
+`foreach.valueOverwrite`. Use `strict = true` or `strict = false` under
+`[check]` to override it. Pending strict rules cover boolean conditions,
+loose comparisons, operands and casts, constructor calls, disallowed
+constructs, for-loop overwrites, strict function calls, switch condition
+types, and dynamic member and variable access. The PHPUnit and PHPStan
+deprecation-rule packages also produce a notice until their rules are
+implemented. The bleeding-edge include enables the redundant `?? null` rule
+for required array fields and initialized properties, unused private method
+parameters, unread local assignments and foreach keys, and calls to
+`@internal` classes from other root namespaces. The checker reports an
+informational notice for remaining bleeding-edge features.
 
 `phera <command> --help` lists the options. The built-in package manager reads
 Composer manifests and locks. The formatter, test runner and step debugger

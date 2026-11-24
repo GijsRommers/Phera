@@ -2,32 +2,38 @@
 //! Refine php-src signatures from evaluated arguments without executing PHP.
 
 use super::*;
+use crate::builtins::analysis_facts::JSON_THROW_ON_ERROR;
 use crate::types::{Collection, CollectionKind, Field, Shape, ShapeKey, ShapeKind};
 use std::sync::Arc;
 
 pub fn takes_facts(label: &str) -> bool {
-    matches!(
-        label,
-        "array_values()"
-            | "array_keys()"
-            | "array_map()"
-            | "array_filter()"
-            | "array_pop()"
-            | "array_shift()"
-            | "array_column()"
-            | "array_search()"
-            | "array_slice()"
-            | "array_reverse()"
-            | "array_unique()"
-            | "array_diff()"
-            | "array_merge()"
-            | "count()"
-            | "sizeof()"
-            | "strlen()"
-            | "get_class()"
-            | "preg_match()"
-            | "preg_match_all()"
-    )
+    label
+        .strip_suffix("()")
+        .and_then(super::string_replacements::subject_position)
+        .is_some()
+        || matches!(
+            label,
+            "array_values()"
+                | "array_keys()"
+                | "array_map()"
+                | "array_filter()"
+                | "array_pop()"
+                | "array_shift()"
+                | "array_column()"
+                | "array_search()"
+                | "array_slice()"
+                | "array_reverse()"
+                | "array_unique()"
+                | "array_diff()"
+                | "array_merge()"
+                | "count()"
+                | "sizeof()"
+                | "strlen()"
+                | "get_class()"
+                | "preg_match()"
+                | "preg_match_all()"
+                | "preg_split()"
+        )
 }
 
 impl Analyzer<'_> {
@@ -42,6 +48,9 @@ impl Analyzer<'_> {
         let Arguments::List(arguments) = arguments else {
             return None;
         };
+        if name == "array_merge" {
+            return super::array_merge::result(arguments, types);
+        }
         if arguments
             .iter()
             .any(|argument| argument.spread || argument.name.is_some())
@@ -52,6 +61,39 @@ impl Analyzer<'_> {
         let array_parts = || first.map_or((T::Mixed, T::Mixed), super::arrays::iteration_types);
         Some(match name {
             "array_values" => list(array_parts().1),
+            "preg_split" if self.level >= 7 => {
+                let flags = match types.get(3) {
+                    None => 0,
+                    Some(T::IntLiteral(flags)) => *flags,
+                    _ => return None,
+                };
+                let text = if flags & 1 != 0 {
+                    T::StringRefinement(crate::types::StringKind::NonEmpty)
+                } else {
+                    T::String
+                };
+                let item = if flags & 4 != 0 {
+                    T::Shape(Arc::new(Shape {
+                        kind: ShapeKind::List,
+                        remainder: None,
+                        fields: vec![
+                            Field {
+                                key: ShapeKey::Integer(0),
+                                value: text,
+                                optional: false,
+                            },
+                            Field {
+                                key: ShapeKey::Integer(1),
+                                value: T::IntRange(0, i64::MAX),
+                                optional: false,
+                            },
+                        ],
+                    }))
+                } else {
+                    text
+                };
+                list(item).join(&T::BoolLiteral(false))
+            }
             "array_keys" => list(array_parts().0),
             "array_map" => {
                 let (callback, arrays) = types.split_first()?;
@@ -77,7 +119,7 @@ impl Analyzer<'_> {
                 let first = first?;
                 let (key, value) = array_parts();
                 let flag = if name == "array_slice" { 3 } else { 1 };
-                if is_list(first)
+                let result = if is_list(first)
                     && types
                         .get(flag)
                         .is_none_or(|flag| *flag == T::BoolLiteral(false))
@@ -85,21 +127,14 @@ impl Analyzer<'_> {
                     list(value)
                 } else {
                     collection(key, value)
-                }
-            }
-            "array_merge" => {
-                let (key, value) = types
-                    .iter()
-                    .map(super::arrays::iteration_types)
-                    .fold((T::Never, T::Never), |(keys, values), (key, value)| {
-                        (keys.join(&key), values.join(&value))
-                    });
-                if types.iter().all(is_list) {
-                    list(value)
+                };
+                if name == "array_reverse" && super::arrays::nonempty_array(first) {
+                    super::arrays::when_truthy(result)
                 } else {
-                    collection(key, value)
+                    result
                 }
             }
+            "array_sum" if self.level >= 7 => super::array_sum::result(first?)?,
             "array_column" => {
                 let (_, row) = array_parts();
                 let column = types.get(1)?;
@@ -137,13 +172,30 @@ impl Analyzer<'_> {
                 Some(ty) if ty.class_name().is_some() => T::ClassString(Arc::new(ty.clone())),
                 _ => T::ClassString(Arc::new(T::Object)),
             },
+            "base64_decode"
+                if self.level >= 7
+                    && types
+                        .get(1)
+                        .is_none_or(|flag| *flag == T::BoolLiteral(false)) =>
+            {
+                T::String
+            }
+            "json_encode"
+                if self.level >= 7
+                    && matches!(
+                        types.get(1),
+                        Some(T::IntLiteral(flags)) if flags & JSON_THROW_ON_ERROR != 0
+                    ) =>
+            {
+                T::String
+            }
             "preg_match" | "preg_match_all" => {
                 let multiple = name == "preg_match_all";
                 if let Some(argument) = arguments.get(2)
                     && let ExpressionKind::Variable(Variable::Named(name)) = &argument.value.kind
                 {
                     let flags = types.get(3).cloned().unwrap_or(T::IntLiteral(0));
-                    scope.define(name, match_result(&flags, multiple));
+                    scope.define(name, match_result(&flags, multiple, first));
                 }
                 if multiple {
                     T::IntRange(0, i64::MAX)
@@ -152,12 +204,13 @@ impl Analyzer<'_> {
                 }
                 .join(&T::BoolLiteral(false))
             }
+            _ if self.level >= 7 => super::string_replacements::result(name, types)?,
             _ => return None,
         })
     }
 }
 
-fn match_result(flags: &ValueType, multiple: bool) -> ValueType {
+fn match_result(flags: &ValueType, multiple: bool, pattern: Option<&ValueType>) -> ValueType {
     use ValueType as T;
     let T::IntLiteral(flags) = flags else {
         return T::Array;
@@ -192,7 +245,29 @@ fn match_result(flags: &ValueType, multiple: bool) -> ValueType {
         if flags & 2 == 0 {
             collection(keys, list(value))
         } else {
-            list(collection(keys, value))
+            let captures = if flags & 512 != 0
+                && flags & 256 == 0
+                && let Some(T::StringLiteral(pattern)) = pattern
+            {
+                super::regex_captures::required_captures(pattern)
+            } else {
+                None
+            };
+            list(captures.map_or_else(
+                || collection(keys.clone(), value.clone()),
+                |fields| {
+                    T::Shape(Arc::new(Shape {
+                        fields,
+                        remainder: Some(Collection {
+                            kind: CollectionKind::Array,
+                            key: keys.clone(),
+                            value: value.clone(),
+                            non_empty: false,
+                        }),
+                        kind: ShapeKind::Array,
+                    }))
+                },
+            ))
         }
     } else {
         collection(keys, value)
