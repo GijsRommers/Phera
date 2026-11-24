@@ -5,14 +5,14 @@ use std::io;
 use std::net::{SocketAddr, TcpListener as StdListener};
 use std::sync::Arc;
 
-use hyper_util::server::graceful::GracefulShutdown;
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::TcpListener;
-use tokio::sync::{Semaphore, watch};
+use tokio::sync::{Semaphore, mpsc, watch};
 
 use crate::config::{ConnectionLimits, ServerConfig};
-use crate::connection::handle_connection;
+use crate::connection::{ConnectionParams, WebSocketWorkerContext, handle_connection};
 use crate::handler::HandlerFactory;
+use crate::websocket::WebSocketHub;
 
 const BACKLOG: i32 = 1024;
 const ACCEPT_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(50);
@@ -65,6 +65,7 @@ pub(super) fn run(
     index: usize,
     listener: StdListener,
     factory: Arc<dyn HandlerFactory>,
+    ws_hub: Arc<WebSocketHub>,
     config: ServerConfig,
     mut shutdown: watch::Receiver<bool>,
 ) {
@@ -106,26 +107,47 @@ pub(super) fn run(
             .expect("listening socket has an address");
         let limits = ConnectionLimits::from(&config);
         let free_slots = Arc::new(Semaphore::new(config.max_connections_per_worker.max(1)));
-        let graceful = GracefulShutdown::new();
+        let ws_slots = Arc::new(Semaphore::new(
+            config.websocket.max_connections_per_worker.max(1),
+        ));
+        let (http_done_tx, mut http_done_rx) = mpsc::channel::<()>(1);
+        let (ws_done_tx, mut ws_done_rx) = mpsc::channel::<()>(1);
+        let ws_config = config.websocket.clone();
         loop {
             // A slot first, then a connection: beyond the limit, clients
             // wait in the operating system's queue instead of being
             // accepted and costing memory here.
             let slot = tokio::select! {
-                _ = shutdown.changed() => break,
+                _ = wait_for_shutdown(&mut shutdown) => break,
                 slot = free_slots.clone().acquire_owned() => slot,
             };
             let Ok(slot) = slot else { break };
             tokio::select! {
-                _ = shutdown.changed() => break,
+                _ = wait_for_shutdown(&mut shutdown) => break,
                 accepted = listener.accept() => match accepted {
                     Ok((stream, peer)) => {
                         let handler = handler.clone();
-                        let watcher = graceful.watcher();
+                        let shutdown = shutdown.clone();
+                        let http_done = http_done_tx.clone();
+                        let ws_ctx = WebSocketWorkerContext {
+                            hub: ws_hub.clone(),
+                            config: ws_config.clone(),
+                            slots: ws_slots.clone(),
+                            done: ws_done_tx.clone(),
+                        };
                         tokio::task::spawn_local(async move {
-                            handle_connection(stream, peer, local_addr, handler, watcher, limits)
-                                .await;
-                            drop(slot);
+                            let _http_done = http_done;
+                            handle_connection(ConnectionParams {
+                                stream,
+                                peer,
+                                local_addr,
+                                handler,
+                                shutdown,
+                                limits,
+                                tcp_slot: slot,
+                                ws: ws_ctx,
+                            })
+                            .await;
                         });
                     }
                     // A client that hung up before we accepted it is normal.
@@ -140,8 +162,19 @@ pub(super) fn run(
             }
         }
         drop(listener);
-        // Finish in-flight requests and close idle keep-alive connections;
-        // give up if something (a stuck upload) refuses to leave in time.
-        let _ = tokio::time::timeout(config.shutdown_timeout, graceful.shutdown()).await;
+        drop(http_done_tx);
+        drop(ws_done_tx);
+        // Drain HTTP connections up to `shutdown_timeout` while WebSockets send
+        // `1001` and run `onClose` within `websocket.shutdown_grace`.
+        let http_drain = tokio::time::timeout(config.shutdown_timeout, http_done_rx.recv());
+        let ws_drain = tokio::time::timeout(config.websocket.shutdown_grace, ws_done_rx.recv());
+        let _ = tokio::join!(http_drain, ws_drain);
     }));
+}
+
+async fn wait_for_shutdown(shutdown: &mut watch::Receiver<bool>) {
+    if *shutdown.borrow() {
+        return;
+    }
+    let _ = shutdown.changed().await;
 }

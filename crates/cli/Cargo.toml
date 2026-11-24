@@ -37,9 +37,11 @@ url.workspace = true
 mimalloc.workspace = true
 
 [dev-dependencies]
+futures-util.workspace = true
 phera-extension-api.workspace = true
 phera-phpt.workspace = true
 rcgen.workspace = true
+tokio-tungstenite = { workspace = true, features = ["connect"] }
 
 # Selected PHP tests run during cargo test; unsupported features carry XFAIL reasons.
 [[test]]
