@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::fmt::{self, Write};
 use std::hash::{DefaultHasher, Hash, Hasher};
 
-use cssparser::{CowRcStr, ParseError, Parser as CssParser, ToCss};
+use cssparser::{ParseError, Parser as CssParser, ToCss};
 use precomputed_hash::PrecomputedHash;
 use selectors::parser::{NonTSPseudoClass, PseudoElement, SelectorParseErrorKind};
 use selectors::{Parser, SelectorImpl};
@@ -137,10 +137,7 @@ impl<'i> Parser<'i> for Namespaces {
         )
     }
 
-    fn parse_non_ts_pseudo_class(
-        &self,
-        name: CowRcStr<'i>,
-    ) -> Result<Pseudo, ParseError<Self::Error>> {
+    fn parse_non_ts_pseudo_class(&self, name: &str) -> Result<Pseudo, ParseError<Self::Error>> {
         let name = name.to_ascii_lowercase();
         if matches!(
             name.as_str(),
@@ -168,7 +165,7 @@ impl<'i> Parser<'i> for Namespaces {
 
     fn parse_non_ts_functional_pseudo_class(
         &self,
-        name: CowRcStr<'i>,
+        name: &str,
         input: &mut CssParser<'i>,
         _: bool,
     ) -> Result<Pseudo, ParseError<Self::Error>> {
