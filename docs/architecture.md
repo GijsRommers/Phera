@@ -219,6 +219,7 @@ The list below is the order of work. Built so far (2026-11-23): steps 1,
 2, 3, 4 and 8, and of step 5 the platform's `PORT`, the health path and the
 graceful end on `SIGTERM`. The server speaks HTTP/1.1 with keep-alive and
 cleartext HTTP/2 (`h2c`) on one listener, running one worker per core.
+WebSockets run over both (section 5.6).
 
 1. **Limits and timeouts** (5.1). A proxy does not protect a worker from a
    script that never ends or a body that is too large.
@@ -748,6 +749,15 @@ PHP run (`Vm::run_websocket_event`) on the worker's `LocalSet`:
   without recursion and close with `1011`. Origin checks resolve `X-Forwarded-Proto`
   and `X-Forwarded-Host` via `--trusted-proxies` unless overridden with
   `--ws-allowed-origins`.
+- *HTTP/2 (RFC 8441).* The server announces `SETTINGS_ENABLE_CONNECT_PROTOCOL`.
+  A stream that opens with `:method CONNECT` and `:protocol websocket` is shown
+  to PHP as the HTTP/1.1 upgrade request (`GET`, `Upgrade: websocket`,
+  `Connection: Upgrade`; only `SERVER_PROTOCOL` says `HTTP/2.0`), answered `200`
+  on `accept()`, and then runs the same framing loop over hyper's upgraded
+  stream. Each stream has its own flow-control window (1 MiB), the connection
+  has eight, so a stream whose handler falls behind does not stall the others.
+  A WebSocket close ends its stream; a dropped connection gives `onClose` with
+  `1006` on every stream it carried.
 
 ## 6. Scope
 

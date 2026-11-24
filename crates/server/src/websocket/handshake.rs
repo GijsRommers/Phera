@@ -1,4 +1,9 @@
 //! HTTP/1.1 WebSocket upgrade header and `Origin` validation (RFC 6455).
+//!
+//! A browser asks `GET /chat` with `Upgrade: websocket`, `Sec-WebSocket-Key`
+//! and `Sec-WebSocket-Version: 13`; PHP runs first and calls
+//! `Phera\WebSocket\accept(Chat::class)`, and the server answers `101`.
+//! The HTTP/2 form of the same request lives in `extended_connect`.
 
 use hyper::header::{CONNECTION, HeaderMap, HeaderName, UPGRADE};
 use hyper::{Method, Version};
@@ -16,6 +21,9 @@ pub(crate) enum UpgradeRejection {
     BadRequest(&'static str),
     Forbidden,
     UpgradeRequired,
+    /// HTTP/2 has no `426 Upgrade Required` dance (RFC 9113 drops `Upgrade`),
+    /// so a wrong version is a plain 400 naming the version we speak.
+    UnsupportedVersion,
 }
 
 impl UpgradeRejection {
@@ -26,6 +34,8 @@ impl UpgradeRejection {
             Self::UpgradeRequired => Response::text(426, "Upgrade Required\n")
                 .with_header("upgrade", "websocket")
                 .with_header("connection", "close"),
+            Self::UnsupportedVersion => Response::text(400, "unsupported Sec-WebSocket-Version\n")
+                .with_header(SEC_WEBSOCKET_VERSION, "13"),
         }
     }
 }
@@ -56,10 +66,7 @@ pub(crate) fn validate_handshake(headers: &HeaderMap) -> Result<String, UpgradeR
         ));
     }
 
-    let version_ok = headers
-        .get(HeaderName::from_static(SEC_WEBSOCKET_VERSION))
-        .is_some_and(|value| value.as_bytes().trim_ascii() == b"13");
-    if !version_ok {
+    if !has_supported_version(headers) {
         return Err(UpgradeRejection::UpgradeRequired);
     }
 
@@ -122,15 +129,7 @@ pub(crate) fn build_101_response(
     client_subprotocols: Option<&[u8]>,
 ) -> Response {
     response.status = 101;
-    response.headers.retain(|(name, _)| {
-        !name.eq_ignore_ascii_case("upgrade")
-            && !name.eq_ignore_ascii_case("connection")
-            && !name.eq_ignore_ascii_case("sec-websocket-accept")
-            && !name.eq_ignore_ascii_case(SEC_WEBSOCKET_PROTOCOL)
-            && !name.eq_ignore_ascii_case("content-length")
-            && !name.eq_ignore_ascii_case("transfer-encoding")
-    });
-    response.body = crate::response::Body::default();
+    keep_application_headers(&mut response);
     response
         .headers
         .push(("upgrade".to_string(), b"websocket".to_vec()));
@@ -141,6 +140,30 @@ pub(crate) fn build_101_response(
         "sec-websocket-accept".to_string(),
         accept_key.as_bytes().to_vec(),
     ));
+    push_negotiated_subprotocol(&mut response, subprotocol, client_subprotocols);
+    response
+}
+
+/// Drop the body and every header the server alone decides for an accepted
+/// WebSocket, keeping what PHP set before `accept()` (`Set-Cookie`, ...).
+pub(super) fn keep_application_headers(response: &mut Response) {
+    response.headers.retain(|(name, _)| {
+        !name.eq_ignore_ascii_case("upgrade")
+            && !name.eq_ignore_ascii_case("connection")
+            && !name.eq_ignore_ascii_case("sec-websocket-accept")
+            && !name.eq_ignore_ascii_case(SEC_WEBSOCKET_PROTOCOL)
+            && !name.eq_ignore_ascii_case("content-length")
+            && !name.eq_ignore_ascii_case("transfer-encoding")
+    });
+    response.body = crate::response::Body::default();
+}
+
+/// Answer with the subprotocol PHP chose, but only when the client offered it.
+pub(super) fn push_negotiated_subprotocol(
+    response: &mut Response,
+    subprotocol: Option<&str>,
+    client_subprotocols: Option<&[u8]>,
+) {
     if let Some(proto) = subprotocol
         && !proto.is_empty()
         && client_subprotocols
@@ -151,7 +174,14 @@ pub(crate) fn build_101_response(
             proto.as_bytes().to_vec(),
         ));
     }
-    response
+}
+
+/// RFC 6455 section 4.1: only version 13 exists. HTTP/1.1 and HTTP/2
+/// clients both send it.
+pub(super) fn has_supported_version(headers: &HeaderMap) -> bool {
+    headers
+        .get(HeaderName::from_static(SEC_WEBSOCKET_VERSION))
+        .is_some_and(|value| value.as_bytes().trim_ascii() == b"13")
 }
 
 fn contains_token_ignore_ascii_case(header_value: &[u8], expected: &[u8]) -> bool {

@@ -1,5 +1,10 @@
-//! Upgraded WebSocket connection loop shared by HTTP/1.1 upgrade and
-//! future HTTP/2 extended CONNECT paths.
+//! Upgraded WebSocket connection loop shared by the HTTP/1.1 upgrade and the
+//! HTTP/2 extended CONNECT stream.
+//!
+//! The loop only needs bytes in and out (`AsyncRead + AsyncWrite`): an
+//! upgraded TCP socket, or one HTTP/2 stream whose DATA frames hyper turns
+//! into the same byte stream. Back pressure comes from the transport: a full
+//! socket buffer, or an exhausted HTTP/2 stream window.
 
 use std::rc::Rc;
 use std::sync::atomic::Ordering;
@@ -8,11 +13,12 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{Notify, OwnedSemaphorePermit, mpsc, oneshot, watch};
 use tokio::time::Instant;
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Utf8Bytes;
+use tokio_tungstenite::tungstenite::error::ProtocolError;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::tungstenite::protocol::{
     CloseFrame, Message as WsMessage, Role, WebSocketConfig as TungsteniteConfig,
@@ -30,7 +36,10 @@ pub(crate) struct UpgradedContext {
     pub(crate) hub: Arc<WebSocketHub>,
     pub(crate) config: WebSocketConfig,
     pub(crate) shutdown: watch::Receiver<bool>,
-    pub(crate) tcp_slot: ConnectionSlot,
+    /// An HTTP/1.1 upgrade takes the socket over, and with it the connection's
+    /// slot. HTTP/2 WebSocket streams share their connection, which keeps the
+    /// slot itself (`None`).
+    pub(crate) tcp_slot: Option<ConnectionSlot>,
     pub(crate) ws_slot: OwnedSemaphorePermit,
 }
 
@@ -111,6 +120,11 @@ where
         config: &ctx.config,
     };
     let close_reason = drive_io(&mut ws_stream, &mut channels).await;
+    // End the transport before `onClose` runs in PHP: on HTTP/1.1 this
+    // sends FIN, on HTTP/2 it ends the stream (END_STREAM) while the
+    // connection and its other streams carry on (RFC 8441 section 5).
+    let _ = tokio::time::timeout(ctx.config.write_timeout, ws_stream.get_mut().shutdown()).await;
+    drop(ws_stream);
 
     if let Some((code, reason)) = close_reason {
         let _ = close_tx.send((code, reason));
@@ -271,6 +285,12 @@ async fn drive_io<S: AsyncRead + AsyncWrite + Unpin>(
                         .await;
                         return Some((1007, "invalid UTF-8".to_string()));
                     }
+                    // The peer went away without a close frame (a dropped TCP
+                    // socket, a reset HTTP/2 stream): RFC 6455 section 7.1.5
+                    // calls that 1006, and there is nobody left to send 1002 to.
+                    Some(Err(tokio_tungstenite::tungstenite::Error::Protocol(
+                        ProtocolError::ResetWithoutClosingHandshake,
+                    ))) => return Some((1006, String::new())),
                     Some(Err(tokio_tungstenite::tungstenite::Error::Protocol(_))) => {
                         send_close(
                             ws_stream,

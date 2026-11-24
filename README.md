@@ -200,7 +200,8 @@ when it finishes.
 
 Run `phera serve public` to serve a document root over HTTP/1.1 and cleartext
 HTTP/2 (`h2c` with prior knowledge) on one listener. PHP sees
-`$_SERVER['SERVER_PROTOCOL']` as `HTTP/2.0` on HTTP/2 requests. PHP diagnostics,
+`$_SERVER['SERVER_PROTOCOL']` as `HTTP/2.0` on HTTP/2 requests. WebSockets work
+over both (see [WebSockets](#websockets)). PHP diagnostics,
 including fatal backtraces, go to the server log by default. Use `phera serve
 --dev public` to display diagnostics in responses and check PHP files on each
 request during local development.
@@ -339,7 +340,12 @@ and a breakpoint to verify a Phera session.
 
 ### WebSockets
 
-`phera serve` handles RFC 6455 WebSocket connections on the same HTTP listener.
+`phera serve` handles RFC 6455 WebSocket connections on the same HTTP listener,
+over HTTP/1.1 (`Upgrade: websocket`) and over cleartext HTTP/2 (RFC 8441
+extended CONNECT, one stream per WebSocket next to ordinary requests on the
+same connection). The PHP side is the same for both: the upgrade request
+arrives as `GET` with `Upgrade: websocket`, and only
+`$_SERVER['SERVER_PROTOCOL']` (`HTTP/2.0`) tells them apart.
 Upgrade requests run PHP first so scripts can verify auth, set cookies, and
 call `Phera\WebSocket\accept(MyHandler::class, context: [...], rooms: [...], subprotocol: ...)`.
 Idle sockets stay in Rust while each `onOpen`, `onMessage`, and `onClose`
