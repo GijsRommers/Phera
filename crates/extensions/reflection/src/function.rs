@@ -10,7 +10,7 @@ use phera_extension_api::{
 
 use crate::class::{NAME_PROPERTY, reflect_class, split};
 pub(crate) mod display;
-use crate::{UNCLONEABLE, allocate, bind, engine, exception, load, receiver, values};
+use crate::{UNCLONEABLE, allocate, bind, engine, exception, inspect, load, receiver, values};
 
 pub(crate) const ARGS: Param = Param::new("args", ParamType::Mixed).variadic();
 pub(crate) const ARRAY: Param = Param::new("args", ParamType::Array);
@@ -261,7 +261,13 @@ pub(crate) fn keep_closure(object: &Object, target: &FunctionTarget) {
             }
         }
         _ => {
-            object.remove(&ArrayKey::str(crate::RETAINED));
+            if object
+                .native
+                .try_borrow()
+                .is_ok_and(|native| native.is_some())
+            {
+                object.remove(&ArrayKey::str(crate::RETAINED));
+            }
         }
     }
 }
@@ -276,7 +282,7 @@ pub(crate) fn data(
     this: Option<&Rc<Object>>,
     result: impl FnOnce(&FunctionInfo) -> Value,
 ) -> NativeResult {
-    Ok(result(&*reflected(this)?))
+    inspect(this, |function: &Rc<FunctionInfo>| result(function))
 }
 
 fn name_parts(function: &FunctionInfo) -> (&str, &str) {
@@ -364,7 +370,7 @@ pub(crate) fn method(
 /// A getter run by the interpreter loop itself (a direct method): it reads
 /// the reflected function from the object's state, and gives `None`, for
 /// the ordinary call to raise PHP's error, when arguments were passed.
-fn direct(
+pub(crate) fn direct(
     object: &Object,
     arguments: &[Option<Value>],
     read: impl FnOnce(&FunctionInfo) -> Value,

@@ -27,6 +27,8 @@ mod parameter;
 mod property;
 mod property_slots;
 mod reference;
+#[cfg(test)]
+mod tests;
 mod types;
 
 pub struct Reflection;
