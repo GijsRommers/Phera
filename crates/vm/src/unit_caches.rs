@@ -286,6 +286,20 @@ pub(crate) fn value(constant: &Constant) -> Value {
 /// without making them, which is a snapshot's decision: see
 /// [`UnitCache`]'s `base`.
 impl UnitCache {
+    /// Clears request-local mutable caches on a kept snapshot unit when a
+    /// dirty fork rolls back its `CodeTable` for recycling.
+    pub(crate) fn reset_mutable_cells(&mut self) {
+        let symbols = self.symbols.get_mut();
+        if !symbols.is_empty() {
+            symbols.clear();
+        }
+        self.records.take();
+        let closures = self.closure_signatures.get_mut();
+        if !closures.is_empty() {
+            closures.clear();
+        }
+    }
+
     /// A cache for the same file with nothing filled: the values made from
     /// the file are shared, every cell is empty.
     fn without_cells(&self) -> Self {

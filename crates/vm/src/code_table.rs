@@ -193,8 +193,8 @@ impl CodeTable {
         self.functions.len()
     }
 
-    pub(crate) fn trait_names_len(&self) -> usize {
-        self.trait_method_names.len()
+    pub(crate) fn trait_method_names(&self) -> std::rc::Rc<Vec<(u32, std::rc::Rc<str>)>> {
+        self.trait_method_names.clone()
     }
 
     /// Discards any request-local site overrides before returning this table
@@ -203,6 +203,42 @@ impl CodeTable {
         if self.has_local_sites.get() {
             self.sites.borrow_mut().clear();
             self.has_local_sites.set(false);
+        }
+    }
+
+    /// Rolls back request-local units, function facts, leases, and dirty caches
+    /// to the originating snapshot's boundary so the table can be recycled.
+    pub(crate) fn rollback_to_snapshot(
+        &mut self,
+        units_len: usize,
+        functions_len: usize,
+        trait_names: &std::rc::Rc<Vec<(u32, std::rc::Rc<str>)>>,
+        clear_unit_caches: bool,
+    ) {
+        if self.units.len() > units_len {
+            for loaded in self.units.drain(units_len..) {
+                if let Some(metadata) = &loaded.unit.metadata {
+                    let id = metadata.id as usize;
+                    if let Some(slot) = self.slots.get_mut(id) {
+                        *slot = 0;
+                    }
+                }
+            }
+            if let Some(own) = self.leases.last_mut() {
+                *own = crate::worker_code::Leases::new(&self.worker);
+            }
+        }
+        if self.functions.len() > functions_len {
+            self.functions.truncate(functions_len);
+        }
+        if self.trait_method_names.len() != trait_names.len() {
+            self.trait_method_names = trait_names.clone();
+        }
+        self.clear_local_sites();
+        if clear_unit_caches {
+            for loaded in &mut self.units {
+                loaded.cache.reset_mutable_cells();
+            }
         }
     }
 

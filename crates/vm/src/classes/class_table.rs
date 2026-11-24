@@ -553,11 +553,29 @@ impl ClassTable {
         self.declared.len()
     }
 
+    pub(crate) fn local_len(&self) -> usize {
+        self.local.len()
+    }
+
     pub(crate) fn aliases_len(&self) -> usize {
         self.aliases.len()
     }
 
-    pub(crate) fn take_local_for_recycle(&mut self) -> Vec<Option<Rc<Class>>> {
+    pub(crate) fn rollback_local_for_recycle(
+        &mut self,
+        snapshot_declared_len: usize,
+        snapshot_local_len: usize,
+    ) -> Vec<Option<Rc<Class>>> {
+        if self.declared.len() > snapshot_declared_len {
+            for &pos in &self.declared[snapshot_declared_len..] {
+                if let Some(slot) = self.local.get_mut(pos as usize) {
+                    *slot = None;
+                }
+            }
+        }
+        if self.local.len() > snapshot_local_len {
+            self.local.truncate(snapshot_local_len);
+        }
         std::mem::take(&mut self.local)
     }
 

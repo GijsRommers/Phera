@@ -29,9 +29,10 @@ use crate::code_table::CodeTable;
 use crate::function_table::FunctionTable;
 
 /// Maximum number of warm `CodeTable`/`ClassTable::local` pairs kept per
-/// snapshot so steady-state and burst requests skip cloning ~3,700
-/// `FunctionFacts` + atomic `Arc`s while bounding idle memory.
-const MAX_RECYCLED_TABLES: usize = 8;
+/// snapshot so steady-state and burst requests (up to the 32-VM worker cap)
+/// skip cloning thousands of `FunctionFacts` + atomic `Arc`s while bounding
+/// idle memory.
+const MAX_RECYCLED_TABLES: usize = 32;
 
 /// Immutable-world tables reused across clean forks of the same snapshot.
 pub(crate) struct RecycledTables {
@@ -39,15 +40,16 @@ pub(crate) struct RecycledTables {
     pub(crate) local_classes: Vec<Option<Rc<Class>>>,
 }
 
-/// Carried by a forked `Vm` so its `Drop` can return unmodified tables back
-/// to the originating snapshot's recycle pool. Uses a `Weak` handle so a
+/// Carried by a forked `Vm` so its teardown can roll back and return tables
+/// back to the originating snapshot's recycle pool. Uses a `Weak` handle so a
 /// replaced snapshot frees immediately with zero cycles.
 pub(crate) struct CodeRecycle {
     pool: Weak<RefCell<Vec<RecycledTables>>>,
     units_len: usize,
     functions_len: usize,
-    trait_names_len: usize,
+    trait_names: Rc<Vec<(u32, Rc<str>)>>,
     declared_classes: usize,
+    local_classes_len: usize,
     aliases_len: usize,
     user_functions: usize,
 }
@@ -68,19 +70,26 @@ impl CodeRecycle {
         if pool.len() >= MAX_RECYCLED_TABLES {
             return;
         }
-        if code.units_len() != self.units_len
-            || code.functions_len() != self.functions_len
-            || code.trait_names_len() != self.trait_names_len
-            || classes.declared_len() != self.declared_classes
-            || classes.aliases_len() != self.aliases_len
-            || function_table.user_len() != self.user_functions
+        if code.units_len() < self.units_len
+            || code.functions_len() < self.functions_len
+            || classes.declared_len() < self.declared_classes
+            || classes.local_len() < self.local_classes_len
         {
             return;
         }
-        code.clear_local_sites();
+        let dirty_symbols_or_classes = classes.declared_len() != self.declared_classes
+            || classes.aliases_len() != self.aliases_len
+            || function_table.user_len() != self.user_functions;
+        code.rollback_to_snapshot(
+            self.units_len,
+            self.functions_len,
+            &self.trait_names,
+            dirty_symbols_or_classes,
+        );
         let placeholder = code.detached();
         let recycled_code = std::mem::replace(code, placeholder);
-        let local_classes = classes.take_local_for_recycle();
+        let local_classes =
+            classes.rollback_local_for_recycle(self.declared_classes, self.local_classes_len);
         pool.push(RecycledTables {
             code: recycled_code,
             local_classes,
@@ -192,8 +201,9 @@ impl Snapshot {
             pool: Rc::downgrade(&self.recycled),
             units_len: self.frozen.code.units_len(),
             functions_len: self.frozen.code.functions_len(),
-            trait_names_len: self.frozen.code.trait_names_len(),
+            trait_names: self.frozen.code.trait_method_names(),
             declared_classes: self.frozen.classes.declared_len(),
+            local_classes_len: self.frozen.classes.local_len(),
             aliases_len: self.frozen.classes.aliases_len(),
             user_functions: self.frozen.function_table.user_len(),
         };
@@ -264,14 +274,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dirty_fork_does_not_return_tables_to_snapshot_pool() {
+    async fn dirty_fork_rolls_back_and_isolates_recycled_tables() {
         let source = r#"<?php
             class Base {}
             Phera\snapshot();
-            if (true) {
+            if (!empty($GLOBALS['DECLARE_EXTRA'])) {
                 class RequestOnly {}
             }
-            echo class_exists(RequestOnly::class) ? 'yes' : 'no';
+            echo class_exists('RequestOnly', false) ? 'yes' : 'no';
         "#;
         let unit = Arc::new(phera_compiler::compile(source, "recycle-dirty.php").unwrap());
         let mut boot = Vm::new(Arc::new(Registry::new()));
@@ -280,10 +290,17 @@ mod tests {
         };
 
         let mut dirty = snapshot.fork().unwrap();
+        dirty.set_global("DECLARE_EXTRA", Value::Bool(true));
         assert_eq!(dirty.resume().await, 0);
         assert_eq!(dirty.output, b"yes");
         dirty.recycle();
         drop(dirty);
+        assert_eq!(snapshot.recycled.borrow().len(), 1);
+
+        // Next fork reuses the rolled-back tables and must not see `RequestOnly`.
+        let mut clean = snapshot.fork().unwrap();
         assert_eq!(snapshot.recycled.borrow().len(), 0);
+        assert_eq!(clean.resume().await, 0);
+        assert_eq!(clean.output, b"no");
     }
 }

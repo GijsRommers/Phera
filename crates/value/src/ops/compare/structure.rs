@@ -5,7 +5,7 @@
 //! [1, 'x' => 2] === ['x' => 2, 1]; // false
 //! ```
 
-use std::collections::HashSet;
+use foldhash::{HashSet, HashSetExt};
 use std::ops::Deref;
 use std::rc::Rc;
 
