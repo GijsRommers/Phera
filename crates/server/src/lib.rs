@@ -24,6 +24,8 @@ pub mod handler;
 mod receive_timeout;
 pub mod request;
 pub mod response;
+mod response_stream;
+mod response_task;
 mod server;
 mod shutdown;
 pub mod websocket;
@@ -33,6 +35,7 @@ pub use config::ServerConfig;
 pub use handler::{Handler, HandlerFactory};
 pub use request::{HttpVersion, Request};
 pub use response::{Body, FileSlice, Response};
+pub use response_stream::{ResponseWriter, StreamBody, StreamWriter};
 pub use server::{Server, ServerHandle};
 pub use websocket::{
     WebSocketConfig, WebSocketEvent, WebSocketEventKind, WebSocketHub, WebSocketOutcome,

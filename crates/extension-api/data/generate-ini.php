@@ -60,7 +60,7 @@ $integers = ['error_reporting', 'filter.default_flags', 'mbstring.substitute_cha
 
 $storageOnly = ($argv[1] ?? null) === '--storage-only';
 $applied = explode(' ', 'arg_separator.output assert.active assert.exception assert.warning '
-    . 'date.timezone default_charset display_errors error_reporting fiber.stack_size ignore_user_abort '
+    . 'date.timezone default_charset display_errors error_reporting fiber.stack_size ignore_user_abort implicit_flush '
     . 'include_path internal_encoding output_encoding mbstring.detect_order '
     . 'mail.add_x_header mail.cr_lf_mode mail.force_extra_parameters mail.log mail.mixed_lf_and_crlf sendmail_path '
     . 'mbstring.http_output mbstring.internal_encoding mbstring.language mbstring.substitute_character '

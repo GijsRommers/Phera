@@ -30,7 +30,7 @@ pub(super) fn register(registry: &mut Registry) {
 async fn resident() -> i64 {
     tokio::task::spawn_blocking(|| {
         let pid = get_current_pid().ok()?;
-        let mut system = System::new();
+        let mut system = System::new().ok()?;
         system.refresh_processes_specifics(
             ProcessesToUpdate::Some(&[pid]),
             true,

@@ -163,7 +163,9 @@ async fn raw(
     let mut buffer = [0; 8192];
     while let Ok(count @ 1..) = wait_with_execution_limit(context, stdout.read(&mut buffer)).await?
     {
-        context.write(&buffer[..count]);
+        if let Some(flush) = context.write_chunk(&buffer[..count]) {
+            flush.await?;
+        }
     }
     Ok(Value::Null)
 }
@@ -179,8 +181,10 @@ async fn text(
     while let Ok(1..) =
         wait_with_execution_limit(context, stdout.read_until(b'\n', &mut line)).await?
     {
-        if mode == Mode::System {
-            context.write(&line);
+        if mode == Mode::System
+            && let Some(flush) = context.write_chunk(&line)
+        {
+            flush.await?;
         }
         let length = line
             .iter()

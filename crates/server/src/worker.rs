@@ -7,8 +7,10 @@
 //! to the worker with the fewest active connections (round-robin on ties),
 //! where [`run_dispatched`] registers it on that worker's own reactor.
 
+use std::cell::RefCell;
 use std::io;
 use std::net::{SocketAddr, TcpListener as StdListener, TcpStream as StdStream};
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -20,6 +22,8 @@ use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore, mpsc, oneshot, watch}
 use crate::config::{ConnectionLimits, ServerConfig};
 use crate::connection::{ConnectionParams, WebSocketWorkerContext, handle_connection};
 use crate::handler::HandlerFactory;
+use crate::response_stream::ResponseSlot;
+use crate::response_task::{ConnectionWork, DetachedRequests};
 use crate::websocket::WebSocketHub;
 
 const BACKLOG: i32 = 1024;
@@ -151,7 +155,9 @@ pub(super) fn run_direct(
             .local_addr()
             .expect("listening socket has an address");
         let limits = ConnectionLimits::from(&config);
-        let free_slots = Arc::new(Semaphore::new(config.max_connections_per_worker.max(1)));
+        let connection_limit = config.max_connections_per_worker.max(1);
+        let free_slots = Arc::new(Semaphore::new(connection_limit));
+        let detached = Rc::new(DetachedRequests::new(connection_limit));
         let ws_slots = Arc::new(Semaphore::new(
             config.websocket.max_connections_per_worker.max(1),
         ));
@@ -174,6 +180,11 @@ pub(super) fn run_direct(
                         let handler = handler.clone();
                         let shutdown = shutdown.clone();
                         let http_done = http_done_tx.clone();
+                        let work = Rc::new(ConnectionWork {
+                            tcp_slot: RefCell::new(Some(ConnectionSlot::Direct(slot))),
+                            detached: detached.clone(),
+                            response: ResponseSlot::new(),
+                        });
                         let ws_ctx = WebSocketWorkerContext {
                             hub: ws_hub.clone(),
                             config: ws_config.clone(),
@@ -189,7 +200,7 @@ pub(super) fn run_direct(
                                 handler,
                                 shutdown,
                                 limits,
-                                tcp_slot: ConnectionSlot::Direct(slot),
+                                work,
                                 ws: ws_ctx,
                             })
                             .await;
@@ -212,11 +223,15 @@ pub(super) fn run_direct(
         drop(listener);
         drop(http_done_tx);
         drop(ws_done_tx);
-        // Drain HTTP connections up to `shutdown_timeout` while WebSockets send
-        // `1001` and run `onClose` within `websocket.shutdown_grace`.
-        let http_drain = tokio::time::timeout(config.shutdown_timeout, http_done_rx.recv());
+        // Drain HTTP connections and detached requests up to `shutdown_timeout`
+        // while WebSockets send `1001` and run `onClose` within `websocket.shutdown_grace`.
+        let http_drain = tokio::time::timeout(config.shutdown_timeout, async {
+            let _ = http_done_rx.recv().await;
+            detached.drain().await;
+        });
         let ws_drain = tokio::time::timeout(config.websocket.shutdown_grace, ws_done_rx.recv());
         let _ = tokio::join!(http_drain, ws_drain);
+        detached.stop();
     }));
 }
 
@@ -258,6 +273,8 @@ pub(super) fn run_dispatched(
         let _ = ready_tx.send(());
 
         let limits = ConnectionLimits::from(&config);
+        let connection_limit = config.max_connections_per_worker.max(1);
+        let detached = Rc::new(DetachedRequests::new(connection_limit));
         let ws_slots = Arc::new(Semaphore::new(
             config.websocket.max_connections_per_worker.max(1),
         ));
@@ -280,6 +297,11 @@ pub(super) fn run_dispatched(
             let handler = handler.clone();
             let shutdown = shutdown.clone();
             let http_done = http_done_tx.clone();
+            let work = Rc::new(ConnectionWork {
+                tcp_slot: RefCell::new(Some(slot)),
+                detached: detached.clone(),
+                response: ResponseSlot::new(),
+            });
             let ws_ctx = WebSocketWorkerContext {
                 hub: ws_hub.clone(),
                 config: ws_config.clone(),
@@ -295,7 +317,7 @@ pub(super) fn run_dispatched(
                     handler,
                     shutdown,
                     limits,
-                    tcp_slot: slot,
+                    work,
                     ws: ws_ctx,
                 })
                 .await;
@@ -304,11 +326,15 @@ pub(super) fn run_dispatched(
 
         drop(http_done_tx);
         drop(ws_done_tx);
-        // Drain HTTP connections up to `shutdown_timeout` while WebSockets send
-        // `1001` and run `onClose` within `websocket.shutdown_grace`.
-        let http_drain = tokio::time::timeout(config.shutdown_timeout, http_done_rx.recv());
+        // Drain HTTP connections and detached requests up to `shutdown_timeout`
+        // while WebSockets send `1001` and run `onClose` within `websocket.shutdown_grace`.
+        let http_drain = tokio::time::timeout(config.shutdown_timeout, async {
+            let _ = http_done_rx.recv().await;
+            detached.drain().await;
+        });
         let ws_drain = tokio::time::timeout(config.websocket.shutdown_grace, ws_done_rx.recv());
         let _ = tokio::join!(http_drain, ws_drain);
+        detached.stop();
     }));
 }
 

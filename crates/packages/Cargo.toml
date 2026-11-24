@@ -15,9 +15,9 @@ reqwest = { version = "0.12", default-features = false, features = [
     "blocking", "rustls-tls-no-provider", "json",
 ] }
 rayon = "1"
-sha1 = "0.10"
-sha2 = "0.10"
-md-5 = "0.10"
+sha1 = "0.11"
+sha2 = "0.11"
+md-5 = "0.11"
 zip = { version = "9.8.1", default-features = false, features = ["deflate-flate2"] }
 tar = "0.4"
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
@@ -26,6 +26,7 @@ tempfile = "3"
 walkdir = "2"
 glob = "0.3"
 regex = "1"
+base16ct.workspace = true
 base64.workspace = true
 pubgrub = "0.4"
 

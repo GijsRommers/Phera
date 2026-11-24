@@ -1,5 +1,5 @@
-//! The body of a response on the wire: bytes from memory, or part of a
-//! file read a chunk at a time.
+//! The body of a response on the wire: buffered PHP output, streamed output
+//! from `flush()`, or part of a file read a chunk at a time.
 //!
 //! A 2 GB video is sent as 64 KiB pieces: the next piece is read from disk
 //! only when the connection is ready to take it, so memory use does not
@@ -22,6 +22,7 @@ const CHUNK_BYTES: u64 = 64 * 1024;
 pub(crate) enum WireBody {
     Memory(Full<Bytes>),
     File(FileBody),
+    Stream(crate::StreamBody),
 }
 
 impl From<Body> for WireBody {
@@ -32,6 +33,7 @@ impl From<Body> for WireBody {
                 file: File::from_std(slice.file),
                 remaining: slice.length,
             }),
+            Body::Stream(body) => WireBody::Stream(body),
         }
     }
 }
@@ -83,9 +85,8 @@ impl HttpBody for WireBody {
             WireBody::Memory(bytes) => Pin::new(bytes)
                 .poll_frame(context)
                 .map_err(|never| match never {}),
-            WireBody::File(file) => file
-                .poll_chunk(context)
-                .map(|chunk| chunk.map(|bytes| bytes.map(Frame::data))),
+            WireBody::File(file) => file.poll_chunk(context).map(data_frame),
+            WireBody::Stream(body) => body.poll_chunk(context).map(data_frame),
         }
     }
 
@@ -93,14 +94,20 @@ impl HttpBody for WireBody {
         match self {
             WireBody::Memory(bytes) => bytes.is_end_stream(),
             WireBody::File(file) => file.remaining == 0,
+            WireBody::Stream(_) => false,
         }
     }
 
-    /// The exact length, from which hyper writes `Content-Length`.
+    /// Hyper writes `Content-Length` for bodies whose length is known.
     fn size_hint(&self) -> SizeHint {
         match self {
             WireBody::Memory(bytes) => bytes.size_hint(),
             WireBody::File(file) => SizeHint::with_exact(file.remaining),
+            WireBody::Stream(_) => SizeHint::default(),
         }
     }
+}
+
+fn data_frame(chunk: Option<io::Result<Bytes>>) -> Option<io::Result<Frame<Bytes>>> {
+    chunk.map(|bytes| bytes.map(Frame::data))
 }

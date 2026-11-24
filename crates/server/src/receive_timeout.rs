@@ -18,25 +18,44 @@ use tokio::time::Instant;
 const H2_PREFACE: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
 
 /// Hyper owns the header timer. Remember its start for the body reader.
-#[derive(Clone, Default)]
-pub(crate) struct HeadTimer(Arc<Mutex<Option<Instant>>>);
+#[derive(Clone)]
+pub(crate) struct HeadTimer(Arc<Mutex<HeadStart>>);
+
+struct HeadStart {
+    accepted: Instant,
+    current: Option<Instant>,
+}
+
+impl Default for HeadTimer {
+    fn default() -> Self {
+        Self::new(Instant::now())
+    }
+}
 
 impl HeadTimer {
+    pub(crate) fn new(accepted: Instant) -> Self {
+        Self(Arc::new(Mutex::new(HeadStart {
+            accepted,
+            current: None,
+        })))
+    }
+
     pub(crate) fn started(&self) -> Instant {
         self.0
             .lock()
             .ok()
-            .and_then(|start| *start)
+            .and_then(|start| start.current)
             .unwrap_or_else(Instant::now)
     }
 }
 
 impl Timer for HeadTimer {
     fn now(&self) -> StdInstant {
-        let now = Instant::now();
-        if let Ok(mut start) = self.0.lock() {
-            *start = Some(now);
-        }
+        let Ok(mut start) = self.0.lock() else {
+            return StdInstant::now();
+        };
+        let now = start.current.map_or(start.accepted, |_| Instant::now());
+        start.current = Some(now);
         now.into_std()
     }
 

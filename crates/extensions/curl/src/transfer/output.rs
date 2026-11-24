@@ -50,7 +50,9 @@ async fn write(
 ) -> Result<Result<(), TransferError>, NativeError> {
     let count = match sink {
         Output::Print => {
-            context.write(bytes);
+            if let Some(flush) = context.write_chunk(bytes) {
+                flush.await?;
+            }
             return Ok(Ok(()));
         }
         Output::Return => {

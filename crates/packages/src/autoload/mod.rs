@@ -123,10 +123,9 @@ pub(crate) fn generate(
         }
         for autoload in autoloads {
             for path in strings(&autoload["files"]) {
-                let identifier = format!(
-                    "{:x}",
-                    Md5::digest(format!("{}:{path}", package.name).as_bytes())
-                );
+                let identifier = base16ct::lower::encode_string(&Md5::digest(
+                    format!("{}:{path}", package.name).as_bytes(),
+                ));
                 let path = legacy_path(package, base, path);
                 maps.files
                     .push((identifier, crate::paths::inside(base, &path)?));

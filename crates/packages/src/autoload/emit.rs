@@ -167,10 +167,9 @@ fn loader_suffix(project: &Project, vendor: &Path) -> Result<String> {
     {
         return Ok(hash);
     }
-    Ok(format!(
-        "{:x}",
-        Md5::digest(fs::read(project.directory.join("composer.lock"))?)
-    ))
+    Ok(base16ct::lower::encode_string(&Md5::digest(fs::read(
+        project.directory.join("composer.lock"),
+    )?)))
 }
 
 fn write_include_paths(

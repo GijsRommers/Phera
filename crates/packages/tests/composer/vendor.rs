@@ -3,7 +3,7 @@
 use anyhow::{Context, Result, bail};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs::{self, File};
+use std::fs;
 use std::path::{Path, PathBuf};
 
 #[derive(PartialEq, Eq)]
@@ -23,10 +23,9 @@ fn tree(root: &Path) -> Result<BTreeMap<PathBuf, Entry>> {
         } else if entry.file_type().is_symlink() {
             Entry::Link(fs::read_link(path)?)
         } else if entry.file_type().is_file() {
-            let mut sha256 = Sha256::new();
-            std::io::copy(&mut File::open(path)?, &mut sha256)?;
+            let digest = Sha256::digest(fs::read(path)?);
             Entry::File {
-                sha256: format!("{:x}", sha256.finalize()),
+                sha256: base16ct::lower::encode_string(&digest),
                 executable: mode(&entry.metadata()?),
             }
         } else {

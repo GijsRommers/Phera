@@ -34,6 +34,9 @@ pub(super) async fn receive(request: Request<Incoming>) -> Response<Body> {
             .body(full("redirect upload"))
             .unwrap()
     } else {
-        Response::new(full(format!("{count}:{:x}", digest.finalize())))
+        Response::new(full(format!(
+            "{count}:{}",
+            base16ct::lower::encode_string(&digest.finalize())
+        )))
     }
 }
