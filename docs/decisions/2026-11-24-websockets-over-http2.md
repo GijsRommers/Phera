@@ -52,7 +52,11 @@ on, because HTTP/2 itself has no switch.
 - **Refusals.** An extended CONNECT for another protocol is answered `501`
   before PHP runs; `Sec-WebSocket-Version` other than 13 is answered `400`
   with `Sec-WebSocket-Version: 13` (HTTP/2 has no `426` with `Upgrade`). A
-  CONNECT without `:protocol` is handled as before.
+  CONNECT without `:protocol` is handled as before. When PHP answers without
+  calling `accept()` (a page served at the same path), a non-2xx status goes to
+  the client unchanged, but a 2xx becomes `400`: on HTTP/2 a 2xx answer to an
+  extended CONNECT is the acceptance itself, so the client would read the
+  page as WebSocket frames.
 - **TLS.** `phera serve` has no TLS, and browsers use RFC 8441 only over TLS
   with ALPN `h2`. Over cleartext this serves a proxy that speaks `h2c` to its
   upstream; when TLS arrives (architecture step 10) the same path applies.

@@ -297,6 +297,15 @@ async fn handle_ws_upgrade(
     )
     .await;
     let Some(upgrade) = response.upgrade.take() else {
+        // PHP answered without `accept()`. On HTTP/1.1 any status but 101
+        // refuses the upgrade, but on HTTP/2 a 2xx answer to an extended
+        // CONNECT *is* the acceptance (RFC 8441 section 5): the client would
+        // take the page's body for WebSocket frames, or hyper would reset the
+        // stream. A route that serves a page at the same path therefore
+        // refuses with 400 instead.
+        if http2 && (200..300).contains(&response.status) {
+            return Response::text(400, "this path did not accept a WebSocket\n");
+        }
         return response;
     };
     let tcp_slot = match transport {

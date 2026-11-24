@@ -355,6 +355,11 @@ async fn server_announces_extended_connect_and_refuses_what_it_does_not_speak() 
     );
     // The handler's own refusal reaches the client unchanged.
     assert_eq!(h2.open("/deny", "websocket", &[]).await.err(), Some(401));
+    // A page that answers 200 without accepting must not open the stream:
+    // on HTTP/2 a 2xx would mean the WebSocket is open.
+    assert_eq!(h2.open("/page", "websocket", &[]).await.err(), Some(400));
+    // The connection is still usable for ordinary requests afterwards.
+    assert_eq!(h2.get("/page").await, (200, "hello\n".to_string()));
     assert!(server.logged("echo:open").is_empty());
     server.stop().await;
 }
