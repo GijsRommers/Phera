@@ -17,22 +17,61 @@ applications actually use, with Symfony and Laravel setting the bar for what has
 to work.
 
 > [!WARNING]
-> Phera is in early development. It runs real applications, but it is slower
-> than PHP today and not ready for production. The numbers below say how far
-> it is.
+> Phera is in early development and not ready for production. It already runs
+> real Symfony and Laravel applications and outperforms PHP 8.5 FPM on Symfony
+> + Doctrine database workloads under load, while plain CLI scripts and Laravel
+> Eloquent routes are still slower than PHP today. The numbers below say where
+> it stands.
 
 ## 📍 Where it stands
 
-Measured in November 2026 against PHP 8.5, the same script or request on both.
+Measured in November 2026 against PHP 8.5.13, with byte-for-byte identical responses on both.
 
 | What | State |
 | --- | --- |
 | Laravel 13 JSON API with Eloquent | Runs. `artisan migrate` and 20 API requests (validation, create, read, update, delete, pagination, relations, a transaction) give PHP's answers on SQLite, MySQL and PostgreSQL |
-| Symfony 7.4 with Doctrine | Runs. `doctrine:schema:create` and 22 API requests (routes with parameters, validation, relations, aggregate queries) give PHP's answers on SQLite |
+| Symfony 7.4 with Doctrine | Runs. `doctrine:schema:create` and 22 API requests (routes with parameters, validation, relations, aggregate queries) give PHP's answers on SQLite, MySQL and PostgreSQL |
 | WordPress | `mysqli` and the engine fixes it needed are in. The end-to-end comparison with PHP has not been repeated since |
 | PHP's own test suite (php-src) | 9,136 of the 13,388 core tests pass. Of 4,542 tests for the later extensions (dom, the XML family, openssl, session, curl, intl and others) 1,737 pass |
-| Speed of plain scripts | Between about the same CPU time as PHP's interpreter (arrays, arithmetic) and 5.5 times as much (method calls) |
-| Speed of a framework request | About 2.1 times PHP's instruction count for one Laravel API request in production mode: 34.5 million instructions against 16.6 million for PHP with opcache, on a plain route. Phera boots the framework once per worker and answers each request from a copy of the booted application ([below](#-boot-once-fork-every-request)). A route that reads the database costs 138 million against 27 million, 5.0 times, and a Symfony and Doctrine route with 49 statements 301 million against 30 million, 10 times. Under load, measured before this way of running existed, PHP-FPM behind nginx served 8,288 requests per second on a plain route and Phera 228; that test has not been repeated yet |
+| Speed of plain CLI scripts | Between ~1× PHP's interpreter (arrays, arithmetic) and ~6.4–7.5× (generators, reflection, method calls); actively being optimized |
+| Speed of a framework request | With warm-up snapshots ([below](#-boot-once-fork-every-request)), beats PHP 8.5.13 FPM + nginx on Symfony 7.4 + Doctrine across PostgreSQL (**+94%**), MySQL 8.4 (**+41%**), and SQLite WAL (**+23%**); within **4.3%** of FPM on `/api/ping`; still behind FPM on Laravel 13 Eloquent (details below) |
+
+## 📊 Performance
+
+Measured on Linux x86_64 inside a **2-core / 2 GiB RAM** cgroup comparing `phera serve` (**2 workers**, route warm-up snapshots, built-in async DB pool) against **PHP 8.5.13 FPM** (**40 static children**, OPcache ON, JIT OFF) behind **nginx**. Every measured response returned HTTP 200 and matched PHP 8.5.13 FPM byte-for-byte (SHA-256 verified), with zero SQLite lock/busy errors.
+
+### HTTP Throughput (2 cores / 2 GiB)
+
+| Database | Framework & Route | Concurrency | Phera | PHP 8.5 FPM + nginx | Δ vs FPM | New DB connections (Phera / FPM) |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| **PostgreSQL 17.11** | Symfony `/api/products` | 16 | **1,377 RPS** | 716 RPS | **+92.3%** | pooled / per-request |
+| **PostgreSQL 17.11** | Symfony `/api/products` | 64 | **1,330 RPS** | 687 RPS | **+93.6%** | pooled / per-request |
+| **PostgreSQL 17.11** | Symfony `/api/products-io` (20 ms wait) | 64 | **1,198 RPS** | 750 RPS | **+59.9%** | pooled / per-request |
+| **PostgreSQL 17.11** | Symfony `/api/products-io` (20 ms wait) | 128 | **970 RPS** | 756 RPS | **+28.3%** | pooled / per-request |
+| **PostgreSQL 17.11** | Symfony `/api/ping` | 16 | 1,880 RPS | **1,965 RPS** | −4.3% | — |
+| **PostgreSQL 17.11** | Laravel `/api/posts?page=2` | 64 | 329 RPS | **542 RPS** | −39.4% | pooled / per-request |
+| **MySQL 8.4.11** | Symfony `/api/products` | 16 | **1,412 RPS** | 1,012 RPS | **+39.6%** | **1** / 10,137 |
+| **MySQL 8.4.11** | Symfony `/api/products` | 64 | **1,312 RPS** | 934 RPS | **+40.5%** | **2** / 9,406 |
+| **MySQL 8.4.11** | Symfony `/api/products-io` (20 ms wait) | 64 | **940 RPS** | 875 RPS | **+7.5%** | **2** / 8,815 |
+| **MySQL 8.4.11** | Laravel `/api/posts?page=2` | 64 | 359 RPS | **614 RPS** | −41.6% | **2** / 6,205 |
+| **SQLite WAL** | Symfony `/api/products` | 16 | **1,359 RPS** | 1,106 RPS | **+22.9%** | local WAL |
+| **SQLite WAL** | Symfony `/api/products` | 64 | **1,263 RPS** | 1,108 RPS | **+14.0%** | local WAL |
+| **SQLite WAL** | Laravel `/api/posts?page=2` | 64 | 381 RPS | **718 RPS** | −46.9% | local WAL |
+
+### Sequential Request Cost (User Instructions per Request, Warmed L2)
+
+Paired 2-round `perf stat` means (millions of user instructions per request, lower is better):
+
+| Route | Database | Phera | PHP 8.5 FPM | Ratio |
+| --- | --- | ---: | ---: | ---: |
+| Symfony `/api/products` | MySQL 8.4.11 | **5.84M** | 5.89M | **0.99×** |
+| Symfony `/api/products` | PostgreSQL 17.11 | 6.03M | 6.02M | **1.00×** |
+| Symfony `/api/products` | SQLite WAL | 6.05M | 6.05M | **1.00×** |
+| Symfony `/api/ping` | — | 4.64M | 3.21M | 1.45× |
+| Laravel `/api/hello` | — | 12.41M | 5.96M | 2.08× |
+| Laravel `/api/posts?page=2` | PostgreSQL 17.11 | 27.77M | 13.70M | 2.03× |
+| Laravel `/api/posts?page=2` | MySQL 8.4.11 | 27.87M | 13.68M | 2.04× |
+| Laravel `/api/posts?page=2` | SQLite WAL | 28.53M | 14.31M | 1.99× |
 
 Phera validates union and intersection declarations during compilation and
 checks inherited property types when linking classes. Ordinary typed
@@ -55,11 +94,52 @@ those constructs.
 | `phera file.php` | Runs a script |
 | `phera serve public` | Serves a directory over HTTP: one process, one worker thread per core, many requests per thread |
 | `phera new shop` | Starts a project: a small JSON application, or Symfony's or Laravel's official one |
-| `phera check src` | Type-checks PHP with PHPStan's levels and identifiers; reads a PHPStan baseline |
+| `phera check src` | Type-checks PHP and PHPDoc at levels 0–10 (`--level max`) and reads PHPStan baselines |
 | `phera lint src` | Finds unused code and suspicious constructs; `--fix` applies the safe fixes |
 | `phera install` | Installs dependencies from `composer.lock` or resolves `composer.json` |
 | `phera upgrade` | Updates Phera. Use `--check` to see the available version or `--version X` to install a specific release |
 | `phera --dump file.php` | Prints the compiled bytecode |
+
+The checker recognizes Doctrine ORM mapping attributes as property reads
+and writes, including generated identifiers and associations. It also
+uses entity class strings to infer Doctrine repository, find, and reference
+results. It recognizes Doctrine lifecycle callbacks and Symfony service injection,
+command, route, listener, and scheduled-task attributes.
+The Doctrine PHPStan include supplies scalar query return types.
+Query projections that need mapped field data remain unresolved.
+The Symfony PHPStan include also leaves interface-declared denormalizer
+results open and narrows InputBag and HeaderBag results with non-null defaults.
+
+The checker reads `phpstan.neon`, `phpstan.neon.dist`, or `phpstan.dist.neon`
+in that order. It uses analysis paths, exclusions, levels, included baselines,
+and `ignoreErrors`. It honors `checkMissingTypehints`, `checkPhpDocMissingReturn`,
+`reportAlwaysTrueInLastCondition`, and `reportUnmatchedIgnoredErrors`.
+Unmatched PHPStan inline ignores are reported by default.
+With `treatPhpDocTypesAsCertain: false`, constant-condition checks require
+native type evidence. Settings in `phera.toml` under `[check]` take
+precedence, followed by command-line options. Unsupported includes and PHP
+configuration files produce a notice.
+
+Generic arguments are checked using declaration-site covariance,
+contravariance, and invariance, including through documented inheritance.
+PHPDoc types can use `@phpstan-import-type` and `@psalm-import-type`
+to import aliases declared in another class, including from Composer dependencies.
+Conditional returns retain resolved template types when a declaration and
+the argument establish the result. PHPStan's experimental
+`unresolvedTemplateArguments` feature can widen these results to mixed.
+
+The PHPStan strict-rules include enables `foreach.keyOverwrite` and
+`foreach.valueOverwrite`. Use `strict = true` or `strict = false` under
+`[check]` to override it. Pending strict rules cover boolean conditions,
+loose comparisons, operands and casts, constructor calls, disallowed
+constructs, for-loop overwrites, strict function calls, switch condition
+types, and dynamic member and variable access. The PHPUnit and PHPStan
+deprecation-rule packages also produce a notice until their rules are
+implemented. The bleeding-edge include enables the redundant `?? null` rule
+for required array fields and initialized properties, unused private method
+parameters, unread local assignments and foreach keys, and calls to
+`@internal` classes from other root namespaces. The checker reports an
+informational notice for remaining bleeding-edge features.
 
 `phera <command> --help` lists the options. The built-in package manager reads
 Composer manifests and locks. The formatter, test runner and step debugger
@@ -118,10 +198,12 @@ when it finishes.
 
 ### Serving a site
 
-Run `phera serve public` to serve a document root. PHP diagnostics, including
-fatal backtraces, go to the server log by default. Use `phera serve --dev public`
-to display diagnostics in responses and check PHP files on each request during
-local development.
+Run `phera serve public` to serve a document root over HTTP/1.1 and cleartext
+HTTP/2 (`h2c` with prior knowledge) on one listener. PHP sees
+`$_SERVER['SERVER_PROTOCOL']` as `HTTP/2.0` on HTTP/2 requests. PHP diagnostics,
+including fatal backtraces, go to the server log by default. Use `phera serve
+--dev public` to display diagnostics in responses and check PHP files on each
+request during local development.
 
 The web SAPI queues stderr diagnostics and `error_log()` messages. When the
 queue fills or a record exceeds 64 KiB, it drops the record so the request can
@@ -131,6 +213,12 @@ finish. Explicit file destinations keep their file write behavior.
 headers and the body. It defaults to 60 seconds and gains one second for every
 16 KiB of body data received. If the budget runs out, the server returns HTTP 408
 and closes the connection.
+
+Each worker bounds the number of concurrently forked request VMs to 32 by
+default (`PHERA_MAX_CONCURRENT_REQUESTS_PER_WORKER`; set `0` to disable the
+cap). Extra HTTP requests stay parked as lightweight async tasks until an
+active VM finishes and drops, keeping memory bounded under traffic spikes while
+saturating database connection pools.
 
 `phera serve` caches compiled PHP files and rechecks their paths and timestamps
 every two seconds by default. Set `-d opcache.revalidate_freq=0` to check on
@@ -224,6 +312,30 @@ and a breakpoint to verify a Phera session.
 9. Expand **Variables** and use **Watch** to evaluate an expression.
 10. Step or continue from the **Run and Debug** toolbar.
 
+### WebSockets
+
+`phera serve` handles RFC 6455 WebSocket connections on the same HTTP listener.
+Upgrade requests run PHP first so scripts can verify auth, set cookies, and
+call `Phera\WebSocket\accept(MyHandler::class, context: [...], rooms: [...], subprotocol: ...)`.
+Idle sockets stay in Rust while each `onOpen`, `onMessage`, and `onClose`
+event runs strictly in arrival order inside an isolated PHP fork:
+
+- Handlers implement `Phera\WebSocket\Handler`. Snapshotted apps (including
+  Laravel and Symfony) resolve handlers through `Phera\WebSocket\resolveUsing(...)`
+  (or `new $handlerClass()`); un-snapshotted scripts guard `accept()` with
+  `if (!Phera\WebSocket\isEvent())`.
+- HTTP requests and WebSocket handlers can push to any connection or room via
+  `Phera\WebSocket\send()`, `Phera\WebSocket\broadcast()`,
+  `Phera\WebSocket\roomCount()`, and `Phera\WebSocket\connections()`.
+- Connection context bags (`$conn->context()`, `$conn->setContext()`) accept
+  `null`, scalars, and nested arrays up to `-d phera.ws_max_context_bytes`
+  (default 16384 bytes).
+- Tune limits via `[server.websocket]` in `phera.toml` (`max_connections`,
+  `max_message_size`, `idle_timeout`, `ping_interval`, `send_queue`,
+  `send_queue_bytes`, `allowed_origins`) or `--ws-max-connections`,
+  `--ws-max-message-size`, `--ws-idle-timeout`, `--ws-ping-interval`,
+  `--ws-send-queue`, and `--ws-allowed-origins`.
+
 ## 🧩 Extensions
 
 Built in, each checked call by call against real PHP: core, standard, ctype,
@@ -234,6 +346,9 @@ connection reuse, and the easy and multi interfaces), date, dom (`DOMDocument`,
 PDO (SQLite, MySQL, PostgreSQL, with TLS), random, redis, reflection, serialize,
 session, sodium, SPL, sqlite3, streams, tokenizer, zlib, bcmath, gmp, Unix process
 functions, and POSIX queries.
+
+Phera registers native metadata on first lookup and shares it across workers.
+Each worker prepares native class definitions and constant values on first use.
 
 Register an application stream wrapper with
 `stream_wrapper_register('virtual', VirtualFile::class)`. The registration
@@ -248,7 +363,8 @@ created after the snapshot.
 Use `php://filter` or `stream_filter_append()` to transform a stream.
 Register PHP filters with `stream_filter_register()` and combine them with
 built-in filters on native streams or application wrappers. Phera limits
-chains to 16 stages and intermediate buckets to 8 MiB.
+chains to 16 stages and intermediate buckets to 8 MiB. PHP filters flush
+and run their close callbacks when the last reference to the stream goes away.
 
 Stream sockets use the worker's event loop for TCP, UDP and Unix connections.
 PHP programs can open a client or listener, wait for readiness with
@@ -362,9 +478,11 @@ Not started: zip.
 ### Database connection pool
 
 MySQL and PostgreSQL sockets stay on the worker that opens them.
-`PHERA_PDO_POOL_SIZE` (20 by default) limits pooled sockets to each database
-across the process. An idle worker can close one of its sockets when
-another worker is waiting for a turn. `PHERA_PDO_POOL_IDLE_SECONDS` (60),
+`PHERA_PDO_POOL_SIZE` (64 by default) limits pooled sockets to each database
+across the process. Balanced workers reuse their own returned sockets directly
+to avoid connection churn, while an over-subscribed or idle worker (after a
+25 ms grace period) releases a socket when another worker is waiting for a turn.
+`PHERA_PDO_POOL_IDLE_SECONDS` (60),
 `PHERA_PDO_POOL_LIFETIME_SECONDS` (1800) and
 `PHERA_PDO_POOL_WAIT_SECONDS` (30) control the pool's timeouts.
 `PHERA_PDO_IO_THREADS` is accepted for compatibility and has no effect.
@@ -540,7 +658,8 @@ warmup = ["/api/posts", "/"]
 or `phera serve --warmup /api/posts --warmup / public` (the option wins over
 the file; both become the environment variable `PHERA_WARMUP`, which you can
 also set yourself). On the test applications a Laravel Eloquent route went
-from WARMUP_README.
+from 37.6 to 27.8 million instructions per request, and a Symfony Doctrine
+route from 24.6 to 6.0 million.
 
 The contract:
 

@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 phera-source.workspace = true
 chrono.workspace = true
+foldhash.workspace = true
 phera-value.workspace = true
 phera-extension-api.workspace = true
 tokio = { workspace = true, features = ["io-util"] }

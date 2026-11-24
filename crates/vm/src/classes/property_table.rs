@@ -7,7 +7,7 @@
 
 use std::rc::Rc;
 
-use phera_bytecode::{ClassKind, PropKey, TypeMask, Visibility};
+use phera_bytecode::{ClassKind, NameKey, PropKey, TypeMask, Visibility};
 
 use super::class::{Class, LinkedConstant};
 use super::property_facts::PropertyFacts;
@@ -27,12 +27,19 @@ const UNTYPED: u16 = 1 << 5;
 const STATIC_COLLISION: u16 = 1 << 6;
 const HAS_PRIVATE_SHADOW: u16 = 1 << 7;
 const HAS_CLASS_TYPE: u16 = 1 << 8;
+const SET_VIS_SHIFT: u16 = 9;
 
 const TABLE_HAS_NATIVE_PROPS: u8 = 1 << 0;
 const TABLE_HAS_MAGIC_GET: u8 = 1 << 1;
 const TABLE_HAS_MAGIC_ISSET: u8 = 1 << 2;
 const TABLE_HAS_STATICS: u8 = 1 << 3;
 const TABLE_HASHED: u8 = 1 << 4;
+const TABLE_HAS_MAGIC_SET: u8 = 1 << 5;
+const TABLE_ALLOWS_DYNAMIC_WRITE: u8 = 1 << 6;
+const TABLE_ALLOWS_DYNAMIC_READ: u8 = 1 << 7;
+
+const SHADOW_BIT: u16 = 1 << 15;
+const UNMAPPED_SLOT: u16 = u16::MAX;
 
 /// Compact 16-byte `Copy` descriptor for a declared instance property.
 #[derive(Clone, Copy)]
@@ -68,6 +75,52 @@ impl PackedProp {
     #[inline(always)]
     pub(crate) fn is_plain_writable(self) -> bool {
         self.flags & (HAS_HOOKS | IS_READONLY | HAS_SET_VISIBILITY | STATIC_COLLISION) == 0
+    }
+
+    /// True when direct assignment `$obj->p = $v` can run in the interpreter
+    /// loop (including `readonly` first-time init and asymmetric `set_visibility`).
+    #[inline(always)]
+    pub(crate) fn is_direct_assignable(self) -> bool {
+        self.flags & (HAS_HOOKS | STATIC_COLLISION) == 0
+    }
+
+    #[inline(always)]
+    pub(crate) fn is_readonly(self) -> bool {
+        self.flags & IS_READONLY != 0
+    }
+
+    #[inline(always)]
+    pub(crate) fn has_set_visibility(self) -> bool {
+        self.flags & HAS_SET_VISIBILITY != 0
+    }
+
+    /// Whether `scope` satisfies this property's asymmetric `set_visibility`
+    /// (`public(set)`, `protected(set)`, `private(set)`).
+    #[inline(always)]
+    pub(crate) fn set_visible_to(self, scope: Option<ClassIndex>, classes: &ClassTable) -> bool {
+        if !self.has_set_visibility() {
+            return true;
+        }
+        match (self.flags >> SET_VIS_SHIFT) & VIS_MASK {
+            VIS_PUBLIC => true,
+            VIS_PRIVATE => {
+                self.owner != UNRESOLVED_OWNER
+                    && scope.is_some_and(|scope| scope.number() == self.owner)
+            }
+            VIS_PROTECTED => {
+                if self.owner == UNRESOLVED_OWNER {
+                    return false;
+                }
+                let Some(scope) = scope else {
+                    return false;
+                };
+                if scope.number() == self.owner {
+                    return true;
+                }
+                protected_visible(scope, self.owner, classes)
+            }
+            _ => false,
+        }
     }
 
     #[inline(always)]
@@ -133,10 +186,25 @@ fn protected_visible(scope: ClassIndex, owner: u32, classes: &ClassTable) -> boo
         || owner_class.derives_from(scope_class) == Some(true)
 }
 
+/// Compact 8-byte `Copy` rule mapping a class-typed property slot to its
+/// interned expected class [`NameKey`] slice in [`PropertyTable::class_type_keys`].
+#[derive(Clone, Copy)]
+struct ClassTypeRule {
+    slot: u16,
+    /// Bit 0: `1` for intersection (`A&B`), `0` for single/union (`A` / `A|B`).
+    flags: u16,
+    start: u16,
+    len: u16,
+}
+
 /// Flat property lookup table built once per [`Class`] and shared across forks.
 pub(crate) struct PropertyTable {
     slots: Box<[PackedProp]>,
     shadows: Box<[PackedProp]>,
+    /// Declaration slot index -> entry index in `slots` (or `shadows` with `SHADOW_BIT`).
+    by_slot: Box<[u16]>,
+    class_type_rules: Box<[ClassTypeRule]>,
+    class_type_keys: Box<[NameKey]>,
     table_flags: u8,
 }
 
@@ -154,8 +222,24 @@ impl PropertyTable {
         if facts.has(PropertyFacts::MAGIC_ISSET) {
             table_flags |= TABLE_HAS_MAGIC_ISSET;
         }
+        if facts.has(PropertyFacts::MAGIC_SET) {
+            table_flags |= TABLE_HAS_MAGIC_SET;
+        }
         if !class.static_properties.is_empty() {
             table_flags |= TABLE_HAS_STATICS;
+        }
+        if class.kind != ClassKind::Trait
+            && table_flags & (TABLE_HAS_NATIVE_PROPS | TABLE_HAS_STATICS) == 0
+        {
+            if class.allows_dynamic_properties
+                && !class.is_readonly
+                && table_flags & TABLE_HAS_MAGIC_SET == 0
+            {
+                table_flags |= TABLE_ALLOWS_DYNAMIC_WRITE;
+            }
+            if table_flags & (TABLE_HAS_MAGIC_GET | TABLE_HAS_MAGIC_ISSET) == 0 {
+                table_flags |= TABLE_ALLOWS_DYNAMIC_READ;
+            }
         }
         if class.kind == ClassKind::Trait
             || class.defaults.is_empty()
@@ -165,6 +249,9 @@ impl PropertyTable {
             return Self {
                 slots: Box::new([]),
                 shadows: Box::new([]),
+                by_slot: Box::new([]),
+                class_type_rules: Box::new([]),
+                class_type_keys: Box::new([]),
                 table_flags,
             };
         }
@@ -174,6 +261,8 @@ impl PropertyTable {
         );
         let mut primary: Vec<PackedProp> = Vec::with_capacity(class.defaults.len());
         let mut shadows: Vec<PackedProp> = Vec::new();
+        let mut class_type_rules: Vec<ClassTypeRule> = Vec::new();
+        let mut class_type_keys: Vec<NameKey> = Vec::new();
 
         for (slot_index, (prop, key)) in class.defaults.iter().zip(keys.iter().copied()).enumerate()
         {
@@ -189,8 +278,14 @@ impl PropertyTable {
             if prop.is_readonly {
                 flags |= IS_READONLY;
             }
-            if prop.set_visibility.is_some() {
+            if let Some(set_vis) = prop.set_visibility {
                 flags |= HAS_SET_VISIBILITY;
+                let set_bits = match set_vis {
+                    Visibility::Public => VIS_PUBLIC,
+                    Visibility::Protected => VIS_PROTECTED,
+                    Visibility::Private => VIS_PRIVATE,
+                };
+                flags |= set_bits << SET_VIS_SHIFT;
             }
             let type_mask = match &prop.ty {
                 None => {
@@ -200,6 +295,14 @@ impl PropertyTable {
                 Some(ty) => {
                     if !ty.classes.is_empty() {
                         flags |= HAS_CLASS_TYPE;
+                        push_class_type_rule(
+                            class,
+                            prop,
+                            ty,
+                            slot_index as u16,
+                            &mut class_type_rules,
+                            &mut class_type_keys,
+                        );
                     }
                     ty.mask
                 }
@@ -237,12 +340,10 @@ impl PropertyTable {
             }
         }
 
-        if primary.len() <= 8 {
-            Self {
-                slots: primary.into_boxed_slice(),
-                shadows: shadows.into_boxed_slice(),
-                table_flags,
-            }
+        let class_type_rules = class_type_rules.into_boxed_slice();
+        let class_type_keys = class_type_keys.into_boxed_slice();
+        let slots = if primary.len() <= 8 {
+            primary.into_boxed_slice()
         } else {
             let size = (primary.len() * 2).next_power_of_two().max(16);
             let mask = size - 1;
@@ -255,11 +356,67 @@ impl PropertyTable {
                 table[index] = entry;
             }
             table_flags |= TABLE_HASHED;
-            Self {
-                slots: table,
-                shadows: shadows.into_boxed_slice(),
-                table_flags,
+            table
+        };
+        let shadows = shadows.into_boxed_slice();
+        let by_slot = if slots.len() < SHADOW_BIT as usize && shadows.len() < SHADOW_BIT as usize {
+            let mut map = vec![UNMAPPED_SLOT; class.defaults.len()].into_boxed_slice();
+            for (idx, entry) in slots.iter().enumerate() {
+                if entry.key != EMPTY_KEY
+                    && let Some(cell) = map.get_mut(entry.slot as usize)
+                {
+                    *cell = idx as u16;
+                }
             }
+            for (idx, entry) in shadows.iter().enumerate() {
+                if let Some(cell) = map.get_mut(entry.slot as usize) {
+                    *cell = (idx as u16) | SHADOW_BIT;
+                }
+            }
+            map
+        } else {
+            Box::new([])
+        };
+        Self {
+            slots,
+            shadows,
+            by_slot,
+            class_type_rules,
+            class_type_keys,
+            table_flags,
+        }
+    }
+
+    /// Whether `object_class` satisfies the declared class/interface type of `slot`.
+    /// Returns `false` for complex DNF/`static` declarations so the VM handles them.
+    #[inline]
+    pub(crate) fn allows_object_class(
+        &self,
+        slot: usize,
+        object_class: &Class,
+        classes: &ClassTable,
+    ) -> bool {
+        let Some(rule) = self
+            .class_type_rules
+            .iter()
+            .find(|rule| rule.slot as usize == slot)
+        else {
+            return false;
+        };
+        let start = rule.start as usize;
+        let end = start + rule.len as usize;
+        let Some(keys) = self.class_type_keys.get(start..end) else {
+            return false;
+        };
+        let derives = |&key: &NameKey| {
+            classes
+                .by_key(key)
+                .is_some_and(|target| object_class.derives_from(target) == Some(true))
+        };
+        if rule.flags & 1 != 0 {
+            keys.iter().all(derives)
+        } else {
+            keys.iter().any(derives)
         }
     }
 
@@ -274,6 +431,45 @@ impl PropertyTable {
     pub(crate) fn quiet_null_when_missing(&self) -> bool {
         self.table_flags & (TABLE_HAS_MAGIC_GET | TABLE_HAS_MAGIC_ISSET | TABLE_HAS_NATIVE_PROPS)
             == 0
+    }
+
+    /// True when a write may fill a declared property that holds no value.
+    /// With `__set`, a property that was `unset()` sends its next write to
+    /// `__set` instead, so such a write must take the general path, which
+    /// tells an unset property from one that was never initialized.
+    #[inline(always)]
+    pub(crate) fn fills_missing_directly(&self) -> bool {
+        self.table_flags & TABLE_HAS_MAGIC_SET == 0
+    }
+
+    /// True when an undeclared dynamic property can be created/written silently
+    /// without invoking `__set`, native property handlers, static notices, or
+    /// dynamic-property deprecation (`stdClass` / `#[AllowDynamicProperties]`).
+    #[inline(always)]
+    pub(crate) fn allows_dynamic_write(&self) -> bool {
+        self.table_flags & TABLE_ALLOWS_DYNAMIC_WRITE != 0
+    }
+
+    /// True when an undeclared dynamic property can be read directly from
+    /// `object.properties` without invoking `__get`/`__isset`/native handlers.
+    #[inline(always)]
+    pub(crate) fn allows_dynamic_read(&self) -> bool {
+        self.table_flags & TABLE_ALLOWS_DYNAMIC_READ != 0
+    }
+
+    /// O(1) lookup of a declared property's [`PackedProp`] by its declaration
+    /// slot index (used for dynamic `$obj->$name` accesses).
+    #[inline(always)]
+    pub(crate) fn by_slot(&self, slot: usize) -> Option<PackedProp> {
+        let encoded = *self.by_slot.get(slot)?;
+        if encoded == UNMAPPED_SLOT {
+            return None;
+        }
+        if encoded & SHADOW_BIT != 0 {
+            self.shadows.get((encoded & !SHADOW_BIT) as usize).copied()
+        } else {
+            self.slots.get(encoded as usize).copied()
+        }
     }
 
     /// Resolve a declared property by interned [`PropKey`] and caller scope.
@@ -336,6 +532,66 @@ fn resolve_owner(class: &Class, declaring: &str) -> u32 {
         current = candidate.parent.as_deref();
     }
     UNRESOLVED_OWNER
+}
+
+fn resolve_parent_name<'a>(class: &'a Class, declaring: &str) -> Option<&'a str> {
+    let mut current = Some(class);
+    while let Some(candidate) = current {
+        if candidate.name == declaring {
+            return candidate.parent.as_deref().map(|p| p.name.as_str());
+        }
+        current = candidate.parent.as_deref();
+    }
+    None
+}
+
+fn push_class_type_rule(
+    class: &Class,
+    prop: &super::class::PropertyDefault,
+    declared: &phera_bytecode::Type,
+    slot: u16,
+    rules: &mut Vec<ClassTypeRule>,
+    keys_out: &mut Vec<NameKey>,
+) {
+    let display = declared.display.trim_start_matches('?');
+    if display.contains(['(', ')']) {
+        return;
+    }
+    let intersection = declared.intersection;
+    let separator = if intersection { '&' } else { '|' };
+    let mut names: Vec<&str> = Vec::new();
+    for raw in display.split(separator) {
+        let name = raw.trim();
+        let lower_check = name.to_ascii_lowercase();
+        match lower_check.as_str() {
+            "null" | "false" | "true" | "bool" | "int" | "float" | "string" | "array"
+            | "object" | "iterable" | "callable" | "mixed" => continue,
+            "static" => return,
+            "self" => names.push(prop.declaring.as_str()),
+            "parent" => {
+                let Some(parent) = resolve_parent_name(class, &prop.declaring) else {
+                    return;
+                };
+                names.push(parent);
+            }
+            _ => names.push(name.trim_start_matches('\\')),
+        }
+    }
+    if names.is_empty() || keys_out.len() + names.len() > u16::MAX as usize {
+        return;
+    }
+    let start = keys_out.len() as u16;
+    // Class keys number lowercased names (`ClassTable::by_key`).
+    let lowercase: Vec<String> = names.iter().map(|name| name.to_ascii_lowercase()).collect();
+    let interned = phera_bytecode::name_keys::keys(lowercase.iter().map(String::as_str));
+    let len = interned.len() as u16;
+    keys_out.extend(interned.iter().copied());
+    rules.push(ClassTypeRule {
+        slot,
+        flags: u16::from(intersection),
+        start,
+        len,
+    });
 }
 
 /// One entry in a class's flat constant lookup table.
@@ -446,6 +702,154 @@ impl ConstantSlot {
                     return true;
                 }
                 protected_visible(scope, self.owner, classes)
+            }
+        }
+    }
+}
+
+/// Compact 16-byte `Copy` descriptor for a declared static property.
+#[derive(Clone, Copy)]
+pub(crate) struct PackedStaticProp {
+    key: u32,
+    owner: u32,
+    slot: u32,
+    flags: u32,
+}
+
+impl PackedStaticProp {
+    const EMPTY: Self = Self {
+        key: EMPTY_KEY,
+        owner: UNRESOLVED_OWNER,
+        slot: u32::MAX,
+        flags: 0,
+    };
+
+    #[inline(always)]
+    pub(crate) fn slot(self) -> super::class_state::StaticSlot {
+        super::class_state::StaticSlot(self.slot)
+    }
+
+    /// Whether code executing in `scope` may access this static property.
+    #[inline(always)]
+    pub(crate) fn visible_to(self, scope: Option<ClassIndex>, classes: &ClassTable) -> bool {
+        match (self.flags as u16) & VIS_MASK {
+            VIS_PUBLIC => true,
+            VIS_PRIVATE => {
+                self.owner != UNRESOLVED_OWNER
+                    && scope.is_some_and(|scope| scope.number() == self.owner)
+            }
+            VIS_PROTECTED => {
+                if self.owner == UNRESOLVED_OWNER {
+                    return false;
+                }
+                let Some(scope) = scope else {
+                    return false;
+                };
+                if scope.number() == self.owner {
+                    return true;
+                }
+                protected_visible(scope, self.owner, classes)
+            }
+            _ => false,
+        }
+    }
+}
+
+/// Flat data-oriented static property lookup table on [`Class`], indexed by
+/// case-sensitive [`PropKey`]. Replaces per-instruction `CachedSite::Static`
+/// caches with direct O(1) lookup that works on cold and polymorphic `static::`
+/// sites with zero `RefCell` borrows.
+pub(crate) struct StaticPropTable {
+    slots: Box<[PackedStaticProp]>,
+    hashed: bool,
+}
+
+impl StaticPropTable {
+    pub(crate) fn build(class: &Class) -> Self {
+        // Direct trait static access emits a deprecation every time, so keep it on the VM path.
+        if class.kind == ClassKind::Trait || class.static_properties.is_empty() {
+            return Self {
+                slots: Box::new([]),
+                hashed: false,
+            };
+        }
+        let keys = phera_bytecode::name_keys::prop_keys(
+            class
+                .static_properties
+                .iter()
+                .map(|prop| prop.name.as_str()),
+        );
+        // PHP resolves static properties from most-derived declaration back to base (`iter().rev()`).
+        let mut primary: Vec<PackedStaticProp> = Vec::with_capacity(class.static_properties.len());
+        for (prop, key) in class
+            .static_properties
+            .iter()
+            .zip(keys.iter().copied())
+            .rev()
+        {
+            if primary.iter().any(|entry| entry.key == key.0) {
+                continue;
+            }
+            let Some(super::class_state::StaticSlot(slot)) = prop.static_storage else {
+                continue;
+            };
+            let flags = match prop.visibility {
+                Visibility::Public => VIS_PUBLIC,
+                Visibility::Protected => VIS_PROTECTED,
+                Visibility::Private => VIS_PRIVATE,
+            } as u32;
+            primary.push(PackedStaticProp {
+                key: key.0,
+                owner: resolve_owner(class, &prop.declaring),
+                slot,
+                flags,
+            });
+        }
+        if primary.len() <= 8 {
+            Self {
+                slots: primary.into_boxed_slice(),
+                hashed: false,
+            }
+        } else {
+            let size = (primary.len() * 2).next_power_of_two().max(16);
+            let mask = size - 1;
+            let mut table = vec![PackedStaticProp::EMPTY; size].into_boxed_slice();
+            for entry in primary {
+                let mut index = start(entry.key, mask);
+                while table[index].key != EMPTY_KEY {
+                    index = (index + 1) & mask;
+                }
+                table[index] = entry;
+            }
+            Self {
+                slots: table,
+                hashed: true,
+            }
+        }
+    }
+
+    #[inline(always)]
+    pub(crate) fn get(&self, key: PropKey) -> Option<PackedStaticProp> {
+        let slots = &self.slots;
+        if !self.hashed {
+            for &entry in slots {
+                if entry.key == key.0 {
+                    return Some(entry);
+                }
+            }
+            None
+        } else {
+            let mask = slots.len() - 1;
+            let mut index = start(key.0, mask);
+            loop {
+                let entry = slots[index];
+                if entry.key == key.0 {
+                    return Some(entry);
+                }
+                if entry.key == EMPTY_KEY {
+                    return None;
+                }
+                index = (index + 1) & mask;
             }
         }
     }

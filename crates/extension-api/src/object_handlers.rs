@@ -33,12 +33,21 @@ pub enum PropertyPurpose {
     Serialize,
 }
 
+/// Copies native state while allowing the class to call into PHP.
+pub type NativeAsyncClone = for<'a> fn(
+    &'a mut dyn Context,
+    &'a Rc<Object>,
+    &'a Rc<Object>,
+) -> LocalFuture<'a, Result<(), NativeError>>;
+
 /// Native classes may copy their state or explicitly forbid cloning.
 #[derive(Clone, Copy)]
 pub enum NativeClone {
     Copy(fn(&Rc<Object>, &Object) -> Result<(), NativeError>),
     /// Copy state that must keep a weak reference to the destination object.
     CopyWithHandle(fn(&Rc<Object>, &Rc<Object>) -> Result<(), NativeError>),
+    /// Recreate native state through operations that may call into PHP.
+    AsyncCopy(NativeAsyncClone),
     Forbidden,
 }
 

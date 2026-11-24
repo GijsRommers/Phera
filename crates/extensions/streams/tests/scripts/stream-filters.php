@@ -69,3 +69,24 @@ foreach ([1, 3, 8192] as $chunk) {
     echo "zlib.deflate/$chunk: ", bin2hex(gzinflate(stream_get_contents($h))), "\n";
     fclose($h);
 }
+
+function iconvBuckets($filter, $chunks, $flush = false)
+{
+    $h = fopen('php://memory', 'w+');
+    $attachment = stream_filter_append($h, $filter, STREAM_FILTER_WRITE);
+    foreach ($chunks as $chunk) {
+        fwrite($h, $chunk);
+        if ($flush) {
+            fflush($h);
+        }
+    }
+    stream_filter_remove($attachment);
+    rewind($h);
+    echo $filter, ': ', bin2hex(stream_get_contents($h)), "\n";
+    fclose($h);
+}
+
+iconvBuckets('convert.iconv.ISO-2022-JP.UTF-8', ["A\x1b\x24B", 'F|', 'K\\', "\x1b(BZ"]);
+iconvBuckets('convert.iconv.UTF-8.ISO-2022-JP', ['A日', '本', 'Z']);
+iconvBuckets('convert.iconv.UTF-8.ISO-2022-JP', ['A日', '本']);
+iconvBuckets('convert.iconv.UTF-8.ISO-2022-JP', ['A日', '本', 'Z'], true);

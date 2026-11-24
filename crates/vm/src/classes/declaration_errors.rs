@@ -3,7 +3,9 @@
 use super::{Class, LinkedConstant, class::PropertyDefault};
 use phera_bytecode::{ClassDeclaration, ClassId, CompiledUnit, Visibility};
 use phera_extension_api::{NativeError, Unwind};
-use std::{collections::HashMap, rc::Rc};
+use std::rc::Rc;
+
+use foldhash::HashMap;
 
 /// Missing dependencies are runtime Errors; incompatible declarations are PHP fatal errors.
 pub(crate) fn link_failure(unit: &CompiledUnit, index: ClassId, error: NativeError) -> NativeError {

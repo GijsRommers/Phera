@@ -44,6 +44,19 @@ Usage:
                                           private means every private range
     --health PATH                         answer this path with 200 and ok,
                                           without running PHP
+    --ws-max-connections N                maximum open WebSocket connections
+                                          per worker (default 5000)
+    --ws-max-message-size BYTES           maximum WebSocket message size in
+                                          bytes (default 1048576)
+    --ws-idle-timeout SECONDS             close idle WebSocket connections after
+                                          this many seconds (default 90; 0: off)
+    --ws-ping-interval SECONDS            send WebSocket pings every N seconds
+                                          (default 30; 0: off)
+    --ws-send-queue N                     maximum outbound queued WebSocket
+                                          messages per connection (default 64)
+    --ws-allowed-origins LIST             comma-separated WebSocket origins
+                                          allowed (* for any; default same
+                                          origin)
     ENV OPTIONS as below
   phera new [OPTIONS] [DIRECTORY]         start a project; asks for what
                                           is not given
@@ -84,7 +97,7 @@ pub(crate) enum Command {
     Dump {
         script: String,
     },
-    Serve(ServeOptions),
+    Serve(Box<ServeOptions>),
     Packages(Vec<String>),
     Help(&'static str),
     Check(phera_analyzer::config::Options),
@@ -128,6 +141,12 @@ pub(crate) struct ServeOptions {
     pub trusted_proxies: Option<String>,
     /// `--health`: a path the server answers itself.
     pub health_path: Option<String>,
+    pub ws_max_connections: Option<usize>,
+    pub ws_max_message_size: Option<usize>,
+    pub ws_idle_timeout: Option<Duration>,
+    pub ws_ping_interval: Option<Duration>,
+    pub ws_send_queue: Option<usize>,
+    pub ws_allowed_origins: Option<Vec<String>>,
     pub path: PathBuf,
 }
 
@@ -163,7 +182,9 @@ pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, 
             if matches!(arguments.peek().map(String::as_str), Some("--help" | "-h")) {
                 return Ok(Command::Help(USAGE));
             }
-            parse_serve(arguments, files, ini).map(Command::Serve)
+            parse_serve(arguments, files, ini)
+                .map(Box::new)
+                .map(Command::Serve)
         }
         Some("new") => {
             arguments.next();
@@ -330,6 +351,12 @@ fn parse_serve(
         request_read_timeout: None,
         trusted_proxies: None,
         health_path: None,
+        ws_max_connections: None,
+        ws_max_message_size: None,
+        ws_idle_timeout: None,
+        ws_ping_interval: None,
+        ws_send_queue: None,
+        ws_allowed_origins: None,
         path: PathBuf::from("."),
     };
     while let Some(argument) = arguments.next() {
@@ -403,6 +430,47 @@ fn parse_serve(
                     .map_err(|_| format!("Not a number of seconds: {value}"))?;
                 options.request_timeout = Some((seconds > 0).then(|| Duration::from_secs(seconds)));
             }
+            "--ws-max-connections" => {
+                options.ws_max_connections = Some(parse_positive_usize(
+                    &mut arguments,
+                    "--ws-max-connections",
+                )?);
+            }
+            "--ws-max-message-size" => {
+                options.ws_max_message_size = Some(parse_positive_usize(
+                    &mut arguments,
+                    "--ws-max-message-size",
+                )?);
+            }
+            "--ws-idle-timeout" => {
+                options.ws_idle_timeout =
+                    Some(parse_seconds_duration(&mut arguments, "--ws-idle-timeout")?);
+            }
+            "--ws-ping-interval" => {
+                options.ws_ping_interval = Some(parse_seconds_duration(
+                    &mut arguments,
+                    "--ws-ping-interval",
+                )?);
+            }
+            "--ws-send-queue" => {
+                options.ws_send_queue =
+                    Some(parse_positive_usize(&mut arguments, "--ws-send-queue")?);
+            }
+            "--ws-allowed-origins" => {
+                let list = arguments
+                    .next()
+                    .ok_or("--ws-allowed-origins needs a comma-separated list of origins.")?;
+                let origins: Vec<String> = list
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_owned)
+                    .collect();
+                if origins.is_empty() {
+                    return Err("--ws-allowed-origins needs one or more origins.".to_string());
+                }
+                options.ws_allowed_origins = Some(origins);
+            }
             option if option.starts_with("--") => {
                 return Err(format!("Unknown option: {option}"));
             }
@@ -412,8 +480,77 @@ fn parse_serve(
     Ok(options)
 }
 
+fn parse_positive_usize(
+    arguments: &mut impl Iterator<Item = String>,
+    flag: &str,
+) -> Result<usize, String> {
+    let value = arguments
+        .next()
+        .ok_or_else(|| format!("{flag} needs a positive integer."))?;
+    value
+        .parse()
+        .ok()
+        .filter(|&n| n > 0)
+        .ok_or_else(|| format!("Not a positive integer for {flag}: {value}"))
+}
+
+fn parse_seconds_duration(
+    arguments: &mut impl Iterator<Item = String>,
+    flag: &str,
+) -> Result<Duration, String> {
+    let value = arguments
+        .next()
+        .ok_or_else(|| format!("{flag} needs a number of seconds."))?;
+    let seconds: u64 = value
+        .parse()
+        .map_err(|_| format!("Not a non-negative number of seconds for {flag}: {value}"))?;
+    Ok(Duration::from_secs(seconds))
+}
+
 /// Whether `path` can be a warm-up request: a path on this site, in one
 /// piece (the adapters receive the paths separated by white space).
 pub(crate) fn is_warmup_path(path: &str) -> bool {
     path.starts_with('/') && !path.contains(char::is_whitespace)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_serve_websocket_flags() {
+        let cmd = parse(
+            [
+                "serve",
+                "--ws-max-connections",
+                "2000",
+                "--ws-max-message-size",
+                "65536",
+                "--ws-idle-timeout",
+                "0",
+                "--ws-ping-interval",
+                "20",
+                "--ws-send-queue",
+                "16",
+                "--ws-allowed-origins",
+                "https://a.test, https://b.test",
+                "public",
+            ]
+            .into_iter()
+            .map(str::to_owned),
+        )
+        .expect("parse serve");
+        let Command::Serve(options) = cmd else {
+            panic!("expected Serve");
+        };
+        assert_eq!(options.ws_max_connections, Some(2000));
+        assert_eq!(options.ws_max_message_size, Some(65536));
+        assert_eq!(options.ws_idle_timeout, Some(Duration::ZERO));
+        assert_eq!(options.ws_ping_interval, Some(Duration::from_secs(20)));
+        assert_eq!(options.ws_send_queue, Some(16));
+        assert_eq!(
+            options.ws_allowed_origins.as_deref(),
+            Some(["https://a.test".to_owned(), "https://b.test".to_owned()].as_slice())
+        );
+    }
 }

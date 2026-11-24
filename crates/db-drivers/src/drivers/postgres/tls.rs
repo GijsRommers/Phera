@@ -58,12 +58,18 @@ impl Mode {
 }
 
 pub(super) async fn negotiate(
-    mut socket: TcpStream,
+    socket: TcpStream,
     dsn: &Dsn,
     host: &str,
     port: u16,
     mode: Mode,
 ) -> Result<Negotiated, DbError> {
+    #[cfg(target_os = "macos")]
+    let mut socket = super::stream::read_interest::Tcp::new(socket)
+        .map_err(|error| failed(host, port, error))?;
+    #[cfg(not(target_os = "macos"))]
+    let mut socket = socket;
+
     if matches!(mode, Mode::Disable | Mode::Allow) {
         return Ok(Negotiated::plain(socket));
     }

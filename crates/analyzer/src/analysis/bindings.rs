@@ -2,7 +2,10 @@
 //! Reference writes initialize variables, while ordinary closure uses read them.
 
 use super::*;
-use crate::index::{Location, Signature};
+use crate::{
+    index::{Location, Signature},
+    types::{Compatibility, TypePolicy},
+};
 
 impl Analyzer<'_> {
     pub fn ensure_reference(&mut self, expression: &Expression, scope: &mut Scope) {
@@ -34,7 +37,8 @@ impl Analyzer<'_> {
     }
 
     pub fn parameter_scope(&mut self, parameters: &[Parameter], scope: &mut Scope) {
-        for parameter in parameters {
+        let contextual = std::mem::take(&mut self.pending_callback_types);
+        for (position, parameter) in parameters.iter().enumerate() {
             self.check_attributes(&parameter.attributes, scope);
             self.check_type(parameter.ty.as_ref());
             if let Some(default) = &parameter.default {
@@ -42,8 +46,26 @@ impl Analyzer<'_> {
             }
             let ty = if parameter.variadic {
                 ValueType::Array
+            } else if parameter.ty.is_none() {
+                contextual.get(position).cloned().unwrap_or({
+                    if self.level >= 10 {
+                        ValueType::ImplicitMixed
+                    } else {
+                        ValueType::Mixed
+                    }
+                })
             } else {
-                ValueType::parameter(parameter, &self.context.names)
+                let native = ValueType::parameter(parameter, &self.context.names);
+                if native == ValueType::Array
+                    && let Some(ty @ (ValueType::Shape(_) | ValueType::Collection(_))) =
+                        contextual.get(position)
+                    && native.accepts(ty, self.index, TypePolicy::Documentation)
+                        == Compatibility::Accepts
+                {
+                    ty.clone()
+                } else {
+                    native
+                }
             };
             if parameter.by_reference {
                 scope.external_references.insert(parameter.name.clone());
@@ -106,6 +128,7 @@ impl Analyzer<'_> {
             ValueType::declared(closure.return_type.as_ref(), &self.context.names);
         self.check_attributes(&closure.attributes, &mut inner);
         self.parameter_scope(&closure.parameters, &mut inner);
+        self.check_unused_local_bindings(&closure.body, &closure.parameters, &closure.uses);
         self.check_type(closure.return_type.as_ref());
         let flow = self.block(&closure.body, &mut inner);
         self.check_return_path(flow, &closure.body, span);
@@ -179,7 +202,18 @@ impl Analyzer<'_> {
                 line: self.file.lines.line(span.start),
             },
         );
-        if self.level >= 2 && arrow.return_type.is_none() && !arrow.is_generator {
+        if self.level >= 2
+            && !arrow.is_generator
+            && (arrow.return_type.is_none()
+                || self.context.returns == ValueType::ExplicitMixed && !given.is_mixed()
+                || self.level >= 7
+                    && self.context.returns == ValueType::Array
+                    && self
+                        .context
+                        .returns
+                        .accepts(&given, self.index, TypePolicy::Documentation)
+                        == Compatibility::Accepts)
+        {
             signature.returns = given;
         }
         signature.unbound_this = self.context.unbound_this.take().unwrap_or_default();

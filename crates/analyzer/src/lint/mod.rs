@@ -161,6 +161,7 @@ impl Context<'_> {
                     identifier: rule.into(),
                     message,
                     severity,
+                    source_range: None,
                 },
                 fix,
             });

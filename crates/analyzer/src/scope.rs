@@ -5,7 +5,11 @@ use crate::types::ValueType;
 use phera_ast::Expression;
 use std::collections::{BTreeMap, BTreeSet};
 
+mod definition_guards;
+mod offset_expression;
+pub(crate) use definition_guards::GuardKey;
 mod facts;
+pub(crate) use facts::SELF_PROPERTIES;
 pub use facts::{AccessStep, Place};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -31,11 +35,13 @@ pub struct Scope {
     pub aliases: BTreeMap<String, BTreeSet<String>>,
     pub external_references: BTreeSet<String>,
     pub facts: facts::Facts,
+    pub(crate) definition_guards: definition_guards::DefinitionGuards,
 }
 
 impl Scope {
     pub fn define(&mut self, name: &str, ty: ValueType) {
         let ty = ty.limit_complexity();
+        self.definition_guards.reassign(name);
         self.facts.forget_variable(name);
         self.values.remove(name);
         self.known.retain(|symbol| !symbol.refers_to(name));
@@ -48,6 +54,7 @@ impl Scope {
         );
         if let Some(aliases) = self.aliases.get(name).cloned() {
             for alias in aliases {
+                self.definition_guards.reassign(&alias);
                 self.facts.forget_variable(&alias);
                 self.values.remove(&alias);
                 self.known.retain(|symbol| !symbol.refers_to(&alias));
@@ -63,6 +70,7 @@ impl Scope {
     }
 
     pub fn unknown_writes(&mut self) {
+        self.definition_guards = Default::default();
         self.dynamic = true;
         self.facts = facts::Facts::default();
         self.values.clear();
@@ -110,6 +118,8 @@ impl Scope {
     pub fn forget_member_write(&mut self, target: &Expression) {
         let target = Place::of(target);
         self.facts.forget_write(target.as_ref());
+        self.definition_guards
+            .forget_property_write(target.as_ref());
         self.known.retain(|symbol| match symbol {
             Symbol::Property(place, _) | Symbol::Method(place, _) => {
                 !facts::affected_by_write(place, target.as_ref())
@@ -119,6 +129,7 @@ impl Scope {
     }
 
     pub fn detach(&mut self, name: &str) {
+        self.definition_guards.forget(name);
         self.facts.forget_variable(name);
         self.aliases.remove(name);
         self.external_references.remove(name);
@@ -180,28 +191,42 @@ impl Scope {
             .known
             .retain(|symbol| paths.iter().all(|p| p.known.contains(symbol)));
         result.facts.retain_common(paths);
+        result.definition_guards.retain_common(paths);
         result
             .aliases
             .retain(|key, value| paths.iter().all(|p| p.aliases.get(key) == Some(value)));
         for key in keys {
             let values: Vec<_> = paths.iter().map(|p| p.get(&key)).collect();
-            let definite = values.iter().all(|v| v.definition == Definition::Definite);
+            let definition = if values.iter().all(|v| v.definition == Definition::Definite) {
+                Definition::Definite
+            } else if values
+                .iter()
+                .all(|v| matches!(v.definition, Definition::Definite | Definition::Unknown))
+            {
+                Definition::Unknown
+            } else {
+                Definition::Possible
+            };
             let ty = values
                 .iter()
                 .map(|v| v.ty.clone())
                 .reduce(|a, b| a.join(&b))
                 .unwrap_or(ValueType::Mixed);
-            result.variables.insert(
-                key,
-                VariableInfo {
-                    definition: if definite {
-                        Definition::Definite
-                    } else {
-                        Definition::Possible
-                    },
-                    ty,
-                },
-            );
+            let ty = if definition == Definition::Definite
+                && ty == ValueType::Mixed
+                && values.iter().any(|value| {
+                    matches!(
+                        value.ty,
+                        ValueType::ExplicitMixed | ValueType::ImplicitMixed
+                    )
+                }) {
+                ValueType::ImplicitMixed
+            } else {
+                ty
+            };
+            result
+                .variables
+                .insert(key, VariableInfo { definition, ty });
         }
         result
     }
@@ -218,7 +243,7 @@ pub enum Symbol {
 
 impl Symbol {
     fn refers_to(&self, receiver: &str) -> bool {
-        matches!(self, Self::Property(place, _) | Self::Method(place, _) if place.root == receiver)
+        matches!(self, Self::Property(place, _) | Self::Method(place, _) if place.refers_to(receiver))
     }
 
     pub fn constant_name(name: &str) -> String {

@@ -90,6 +90,12 @@ impl CodeCache {
         self.compile_candidates(vec![path], validation).await
     }
 
+    /// The blocking CLI can read its entry file itself. Compilation still
+    /// uses the compiler's dedicated stack.
+    pub(crate) fn compile_cli_entry(&self, path: &Path) -> Result<Arc<CompiledUnit>, RuntimeError> {
+        self.load(path, Validation::Frozen)
+    }
+
     pub(crate) async fn compile_candidates(
         &self,
         candidates: Vec<PathBuf>,
@@ -214,6 +220,7 @@ impl CodeCache {
                         phera_compiler::NativeFunction::General
                     }
                     phera_extension_api::NativeFn::Async(_)
+                    | phera_extension_api::NativeFn::Sync(_)
                         if entry
                             .params
                             .last()

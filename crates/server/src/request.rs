@@ -2,11 +2,12 @@
 
 use std::net::SocketAddr;
 
-/// The HTTP protocol version of a request. HTTP/2 is not supported yet.
+/// The HTTP protocol version of a request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HttpVersion {
     Http10,
     Http11,
+    Http2,
 }
 
 /// A fully buffered HTTP request.
@@ -30,6 +31,8 @@ pub struct Request {
     pub body: Vec<u8>,
     pub remote_addr: SocketAddr,
     pub local_addr: SocketAddr,
+    /// True when the request asks for a WebSocket upgrade (`Upgrade: websocket`).
+    pub is_websocket_upgrade: bool,
 }
 
 impl Request {

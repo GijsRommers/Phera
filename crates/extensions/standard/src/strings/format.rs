@@ -7,7 +7,7 @@ use std::borrow::Cow;
 
 use phera_extension_api::{
     Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType, Registry,
-    Value, args,
+    Value, args, write_after_diagnostics,
 };
 
 mod parser;
@@ -30,7 +30,12 @@ pub(super) fn register(registry: &mut Registry) {
         })
     });
     registry.register_sync_selector("printf", |slots| {
-        scalar_arguments(slots).then_some(|context, arguments| {
+        (quiet_format(slots)
+            && slots
+                .iter()
+                .skip(1)
+                .all(|slot| slot.as_ref().is_some_and(quiet_scalar)))
+        .then_some(|context, arguments| {
             format_sync(
                 context,
                 arguments,
@@ -52,7 +57,9 @@ pub(super) fn register(registry: &mut Registry) {
         })
     });
     registry.register_sync_selector("vprintf", |slots| {
-        scalar_array(slots).then_some(|context, arguments| {
+        (quiet_format(slots)
+            && matches!(slots, [_, Some(Value::Array(array))] if array.values().all(quiet_scalar)))
+        .then_some(|context, arguments| {
             format_sync(
                 context,
                 arguments,
@@ -83,6 +90,21 @@ fn scalar_arguments(slots: &[Option<Value>]) -> bool {
 
 fn scalar_array(slots: &[Option<Value>]) -> bool {
     matches!(slots, [_, Some(Value::Array(array))] if array.values().all(scalar))
+}
+
+// An explicit precision can produce a notice. Floats outside the integer
+// range and NaN can warn during a cast. Send both shapes to the output path
+// that can await a user error handler.
+fn quiet_format(slots: &[Option<Value>]) -> bool {
+    slots
+        .first()
+        .and_then(Option::as_ref)
+        .and_then(Value::as_str_bytes)
+        .is_some_and(|format| !format.contains(&b'.'))
+}
+
+fn quiet_scalar(value: &Value) -> bool {
+    scalar(value) && !matches!(value, Value::Float(_))
 }
 
 /// Where the values come from: the arguments, or one array of them.
@@ -238,7 +260,13 @@ async fn format(
         source,
     )
     .await?;
-    Ok(destination.finish(context, result))
+    match destination {
+        Destination::Return => Ok(Value::from(result)),
+        Destination::Output => {
+            write_after_diagnostics(context, &result).await?;
+            Ok(Value::Int(result.len() as i64))
+        }
+    }
 }
 
 impl Destination {

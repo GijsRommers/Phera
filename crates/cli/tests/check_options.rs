@@ -7,9 +7,10 @@ use check_support::Project;
 #[test]
 fn usage_errors_exit_two() {
     let project = Project::new();
+    project.write("src.php", "<?php");
     for args in [
         &[][..],
-        &["--level", "6"],
+        &["--level", "11", "src.php"],
         &["--format", "xml"],
         &["missing.php"],
         &["--generate-baseline"],
@@ -199,4 +200,30 @@ fn overlapping_psalm_issue_aliases_suppress_their_rules() {
          class A { function f() { echo $this->missing; } }\n",
     );
     assert!(project.run(&["aliases.php"]).status.success());
+}
+
+#[test]
+fn max_selects_level_ten_and_help_names_the_range() {
+    let project = Project::new();
+    project.write(
+        "src.php",
+        "<?php function useValue($value): void { $value->run(); }",
+    );
+    let run = |level| project.run(&["--level", level, "--format", "json", "src.php"]);
+    let highest = run("10");
+    let max = run("max");
+    assert_eq!(highest.status.code(), Some(1));
+    assert_eq!(max.status, highest.status);
+    let findings = |output: std::process::Output| {
+        let json = String::from_utf8(output.stdout).unwrap();
+        json.split_once("\"diagnostics\":").unwrap().1.to_string()
+    };
+    assert_eq!(findings(max), findings(highest));
+    assert_ne!(findings(run("9")), findings(run("10")));
+    let help = project.run(&["--help"]);
+    assert!(
+        String::from_utf8(help.stdout)
+            .unwrap()
+            .contains("0 through 10, or max")
+    );
 }

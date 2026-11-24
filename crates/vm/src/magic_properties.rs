@@ -1,10 +1,9 @@
 //! `$object->name` calls __get only when normal lookup cannot read the slot.
 //! A hook can access the same name again without calling itself recursively.
 
-use std::{
-    collections::HashSet,
-    rc::{Rc, Weak},
-};
+use std::rc::{Rc, Weak};
+
+use foldhash::{HashSet, HashSetExt};
 
 use phera_extension_api::NativeResult;
 use phera_value::{ArrayKey, Object, Value, to_bool};
@@ -30,9 +29,9 @@ pub(crate) struct UnsetProperties {
 }
 
 pub(crate) struct PropertyGuard {
-    object: Weak<Object>,
-    name: ArrayKey,
-    hook: PropertyHook,
+    pub(crate) object: Weak<Object>,
+    pub(crate) name: ArrayKey,
+    pub(crate) hook: PropertyHook,
 }
 
 impl PropertyGuard {

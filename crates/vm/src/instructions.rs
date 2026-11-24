@@ -256,7 +256,6 @@ impl Vm {
                     false
                 };
                 if !handled {
-                    self.prepare_element_site(&self.path(path)?)?;
                     return Ok(Some(BatchExit::Instruction(instruction)));
                 }
             }
@@ -344,7 +343,14 @@ impl Vm {
                 function,
                 binding,
             } => self.make_closure(dst, function, binding)?,
-            I::NewArray { dst, .. } => self.set(dst, Value::Array(PhpArray::new().into())),
+            I::NewArray { dst, capacity } => {
+                let array = if capacity > 0 {
+                    PhpArray::with_capacity(capacity as usize)
+                } else {
+                    PhpArray::new()
+                };
+                self.set(dst, Value::Array(array.into()))
+            }
             I::ArrayPush { array, src } => {
                 self.array_write(array, None, src, ArrayWrite::Element)?;
             }

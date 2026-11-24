@@ -1,6 +1,9 @@
 //! `extension_loaded('Core')` reflects PHP modules registered for this runtime.
 
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::{Arc, OnceLock},
+};
 
 use phera_value::Value;
 
@@ -57,9 +60,30 @@ impl From<&'static str> for ConstantValue {
 }
 
 /// Collects what extensions provide so the runtime can expose it to PHP code.
-/// Built once at startup and then shared, read-only, by every worker thread.
+/// Once populated, the registry can be shared read-only by worker threads.
 #[derive(Clone, Default)]
 pub struct Registry {
+    entries: Registration,
+    deferred: Option<Arc<DeferredRegistration>>,
+}
+
+struct DeferredRegistration {
+    entries: OnceLock<Registration>,
+    load: fn(&mut Registry),
+}
+
+impl DeferredRegistration {
+    fn load(&self) -> &Registration {
+        self.entries.get_or_init(|| {
+            let mut registry = Registry::new();
+            (self.load)(&mut registry);
+            registry.entries
+        })
+    }
+}
+
+#[derive(Clone, Default)]
+struct Registration {
     iconv_converter: Option<crate::IconvConverter>,
     /// Every native function, in registration order; a function's
     /// [`NativeId`](crate::NativeId) is its index here.
@@ -127,66 +151,98 @@ impl Registry {
         Self::default()
     }
 
+    /// An embedding can publish built-ins without registering them until first use.
+    pub fn deferred(load: fn(&mut Self)) -> Self {
+        Self {
+            deferred: Some(Arc::new(DeferredRegistration {
+                entries: OnceLock::new(),
+                load,
+            })),
+            ..Self::default()
+        }
+    }
+
+    fn entries(&self) -> &Registration {
+        match &self.deferred {
+            Some(deferred) => deferred.load(),
+            None => &self.entries,
+        }
+    }
+
+    fn entries_mut(&mut self) -> &mut Registration {
+        if let Some(deferred) = self.deferred.take() {
+            self.entries = deferred.load().clone();
+        }
+        &mut self.entries
+    }
+
     pub fn set_iconv_converter(&mut self, converter: crate::IconvConverter) {
-        self.iconv_converter = Some(converter);
+        self.entries_mut().iconv_converter = Some(converter);
     }
 
     pub fn iconv_converter(&self) -> Option<crate::IconvConverter> {
-        self.iconv_converter
+        self.entries().iconv_converter
     }
 
     /// Says how a fork of a snapshot gets the request state of type `T`
     /// (see [`crate::RequestState::fork`]). Every state type an extension
     /// stores must be registered, or a snapshot that holds it is refused.
     pub fn fork_state<T: 'static>(&mut self, fork: crate::state::StateFork) {
-        self.state_forks.insert(std::any::TypeId::of::<T>(), fork);
+        self.entries_mut()
+            .state_forks
+            .insert(std::any::TypeId::of::<T>(), fork);
     }
 
     /// Ships a class written in PHP: when a script uses `name` and no class
     /// of that name is declared, the VM compiles `source` and runs it.
     pub fn bundled_class(&mut self, name: &str, source: BundledSource) {
-        self.bundled_classes
+        self.entries_mut()
+            .bundled_classes
             .insert(name.to_ascii_lowercase(), source);
     }
 
     /// The PHP source of a bundled class, by lowercase name.
     pub fn bundled_source(&self, lowercase_name: &str) -> Option<BundledSource> {
-        self.bundled_classes.get(lowercase_name).copied()
+        self.entries().bundled_classes.get(lowercase_name).copied()
     }
 
     /// Says how a fork copies an open resource of this kind (`"stream"`).
     pub fn fork_resource(&mut self, kind: &'static str, fork: ResourceFork) {
-        self.resource_forks.insert(kind, fork);
+        self.entries_mut().resource_forks.insert(kind, fork);
     }
 
     /// How a fork copies a resource of this kind, if it can.
     pub fn resource_fork(&self, kind: &str) -> Option<ResourceFork> {
-        self.resource_forks.get(kind).copied()
+        self.entries().resource_forks.get(kind).copied()
     }
 
     pub fn register_resource_release(&mut self, kind: &'static str, release: ResourceReleaseFn) {
-        self.resource_releases.insert(kind, release);
+        self.entries_mut().resource_releases.insert(kind, release);
     }
 
     pub fn resource_release(&self, kind: &str) -> Option<ResourceReleaseFn> {
-        self.resource_releases.get(kind).copied()
+        self.entries().resource_releases.get(kind).copied()
     }
 
     /// The registered forks of request state, by type.
     pub fn state_forks(&self) -> &HashMap<std::any::TypeId, crate::state::StateFork> {
-        &self.state_forks
+        &self.entries().state_forks
     }
 
     /// Runs the extension's registration against this registry.
     pub fn load(&mut self, extension: &dyn crate::Extension) {
-        let previous = std::mem::replace(&mut self.registering_module, extension.php_module());
+        let previous = std::mem::replace(
+            &mut self.entries_mut().registering_module,
+            extension.php_module(),
+        );
         extension.register(self);
-        self.registering_module = previous;
-        self.bundles.push(extension.name());
+        self.entries_mut().registering_module = previous;
+        self.entries_mut().bundles.push(extension.name());
         if let Some(module) = extension.php_module() {
             self.php_module(module);
             if let Some(version) = extension.module_version() {
-                self.module_versions
+                self.entries_mut()
+                    .module_versions
                     .insert(module.to_ascii_lowercase(), version);
             }
         }
@@ -194,73 +250,84 @@ impl Registry {
 
     /// The version a module reports for itself, when it is not PHP's.
     pub fn module_version(&self, name: &str) -> Option<&'static str> {
-        self.module_versions
+        let entries = self.entries();
+        entries
+            .module_versions
             .get(&name.to_ascii_lowercase())
             .copied()
     }
 
     /// Engine-provided PHP modules can register without an extension crate.
     pub fn php_module(&mut self, name: &'static str) {
-        if self
+        let entries = self.entries_mut();
+        if entries
             .extensions
             .iter()
             .any(|module| module.eq_ignore_ascii_case(name))
         {
             return;
         }
-        self.ini.register(name);
-        self.extensions.push(name);
+        entries.ini.register(name);
+        entries.extensions.push(name);
     }
 
     /// Register SAPI settings without reporting them as a loaded extension.
     pub fn sapi_ini(&mut self, name: &str) {
-        self.ini.register(name);
+        let entries = self.entries_mut();
+        entries.ini.register(name);
     }
 
     /// Names and defaults for INI settings of modules loaded by this runtime.
     pub fn ini_entries(
         &self,
     ) -> impl Iterator<Item = (usize, &'static crate::ini::IniDefinition)> + '_ {
-        self.ini.entries()
+        let entries = self.entries();
+        entries.ini.entries()
     }
 
     pub fn ini_entry(&self, name: &[u8]) -> Option<(usize, &'static crate::ini::IniDefinition)> {
-        self.ini.get(name)
+        let entries = self.entries();
+        entries.ini.get(name)
     }
 
     /// Register the effect of a setting already described by the PHP catalog.
     pub fn ini_update(&mut self, name: &'static str, update: crate::ini::IniUpdate) {
-        self.ini.update(name, update);
+        let entries = self.entries_mut();
+        entries.ini.update(name, update);
     }
 
     pub fn ini_hook(&self, name: &str) -> Option<crate::ini::IniUpdate> {
-        self.ini.hook(name)
+        let entries = self.entries();
+        entries.ini.hook(name)
     }
 
     pub fn extensions(&self) -> impl Iterator<Item = &'static str> + '_ {
-        self.extensions.iter().copied()
+        let entries = self.entries();
+        entries.extensions.iter().copied()
     }
 
     pub fn bundles(&self) -> impl Iterator<Item = &'static str> + '_ {
-        self.bundles.iter().copied()
+        let entries = self.entries();
+        entries.bundles.iter().copied()
     }
 
     /// Panics on a duplicate name: extensions are linked at compile time, so a
     /// clash is a build bug, not something to recover from at runtime.
     pub fn function(&mut self, entry: FunctionEntry) {
+        let entries = self.entries_mut();
         let key = entry.name.to_ascii_lowercase();
         assert!(
-            !self.function_ids.contains_key(&key),
+            !entries.function_ids.contains_key(&key),
             "function {}() is already registered",
             entry.name
         );
-        if let Some(module) = self.registering_module {
-            self.function_modules.insert(entry.name, module);
+        if let Some(module) = entries.registering_module {
+            entries.function_modules.insert(entry.name, module);
         }
-        self.function_order.push(entry.name);
-        let id = crate::NativeId(self.functions.len() as u32);
-        self.function_ids.insert(key, id);
-        self.functions.push(FunctionEntry { id, ..entry });
+        entries.function_order.push(entry.name);
+        let id = crate::NativeId(entries.functions.len() as u32);
+        entries.function_ids.insert(key, id);
+        entries.functions.push(FunctionEntry { id, ..entry });
     }
 
     /// Panics on a duplicate name, like [`Registry::function`].
@@ -284,16 +351,17 @@ impl Registry {
         value: ConstantValue,
         deprecated: Option<&'static str>,
     ) {
+        let entries = self.entries_mut();
         assert!(
-            !self.constants.contains_key(name),
+            !entries.constants.contains_key(name),
             "constant {name} is already registered"
         );
-        self.constant_order.push(name.to_owned());
-        self.constants.insert(
+        entries.constant_order.push(name.to_owned());
+        entries.constants.insert(
             name.to_owned(),
             NativeConstant {
                 value,
-                module: self.registering_module.unwrap_or("Core"),
+                module: entries.registering_module.unwrap_or("Core"),
                 deprecated,
             },
         );
@@ -314,47 +382,55 @@ impl Registry {
                 entry.name
             );
         }
-        if let Some(module) = self.registering_module {
-            self.class_modules.insert(entry.name, module);
+        let entries = self.entries_mut();
+        if let Some(module) = entries.registering_module {
+            entries.class_modules.insert(entry.name, module);
         }
-        self.classes.push(entry);
+        entries.classes.push(entry);
     }
 
     /// Clear exception trace arguments when a native function rejects its parameter list.
     pub fn redact_argument_error_trace(&mut self, function: &'static str) {
-        self.trace_redacted_argument_errors.insert(function);
+        let entries = self.entries_mut();
+        entries.trace_redacted_argument_errors.insert(function);
     }
 
     pub fn argument_error_trace_is_redacted(&self, function: &str) -> bool {
-        self.trace_redacted_argument_errors.contains(function)
+        let entries = self.entries();
+        entries.trace_redacted_argument_errors.contains(function)
     }
 
     /// Registers a class implemented by a bundle on behalf of a PHP module.
     pub fn class_in_module(&mut self, module: &'static str, entry: ClassEntry) {
         self.class(entry);
-        self.class_modules.insert(entry.name, module);
+        self.entries_mut().class_modules.insert(entry.name, module);
     }
 
     /// PHP extension name for a native class's canonical name.
     pub fn class_module(&self, name: &str) -> Option<&'static str> {
-        self.class_modules.get(name).copied()
+        let entries = self.entries();
+        entries.class_modules.get(name).copied()
     }
 
     /// Class names ignore case, like function names.
     pub fn get_class(&self, name: &str) -> Option<&ClassEntry> {
-        self.classes
+        let entries = self.entries();
+        entries
+            .classes
             .iter()
             .find(|entry| entry.name.eq_ignore_ascii_case(name))
     }
 
     /// Every class, parents before children.
     pub fn classes(&self) -> impl Iterator<Item = &ClassEntry> {
-        self.classes.iter()
+        let entries = self.entries();
+        entries.classes.iter()
     }
 
     /// PHP module owning a native function's canonical name.
     pub fn function_module(&self, name: &str) -> Option<&'static str> {
-        self.function_modules.get(name).copied()
+        let entries = self.entries();
+        entries.function_modules.get(name).copied()
     }
 
     /// Describe the return type and PHP ownership without growing native call entries.
@@ -364,14 +440,16 @@ impl Registry {
         return_type: &'static str,
         module: Option<&'static str>,
     ) {
-        self.function_return_types.insert(name, return_type);
+        let entries = self.entries_mut();
+        entries.function_return_types.insert(name, return_type);
         if let Some(module) = module {
-            self.function_modules.insert(name, module);
+            entries.function_modules.insert(name, module);
         }
     }
 
     pub fn function_return_type(&self, name: &str) -> Option<&'static str> {
-        self.function_return_types.get(name).copied()
+        let entries = self.entries();
+        entries.function_return_types.get(name).copied()
     }
 
     pub fn get_function(&self, name: &str) -> Option<&FunctionEntry> {
@@ -380,45 +458,53 @@ impl Registry {
 
     /// [`Registry::get_function`] for a name already in lowercase.
     pub fn get_folded_function(&self, lowercase_name: &str) -> Option<&FunctionEntry> {
-        let id = self.function_ids.get(lowercase_name)?;
-        self.function_at(*id)
+        let entries = self.entries();
+        let id = entries.function_ids.get(lowercase_name)?;
+        entries.functions.get(id.0 as usize)
     }
 
     /// The function with this number.
     #[inline]
     pub fn function_at(&self, id: crate::NativeId) -> Option<&FunctionEntry> {
-        self.functions.get(id.0 as usize)
+        self.entries().functions.get(id.0 as usize)
     }
 
     pub fn get_constant(&self, name: &str) -> Option<&ConstantValue> {
-        self.constants.get(name).map(|constant| &constant.value)
+        let entries = self.entries();
+        entries.constants.get(name).map(|constant| &constant.value)
     }
 
     /// `constant('PHP_VERSION')` may be folded. A deprecated constant still
     /// needs a runtime access so it can raise its diagnostic.
     pub fn persistent_constant(&self, name: &str) -> Option<ConstantValue> {
-        let constant = self.constants.get(name)?;
+        let entries = self.entries();
+        let constant = entries.constants.get(name)?;
         constant.deprecated.is_none().then_some(constant.value)
     }
 
     /// Keep a synchronous implementation for other arguments, such as count($array).
     pub fn function_with_object_handler(&mut self, entry: FunctionEntry, callback: crate::AsyncFn) {
         self.function(entry);
-        self.object_handlers.insert(entry.name, callback);
+        self.entries_mut()
+            .object_handlers
+            .insert(entry.name, callback);
     }
 
     /// The first argument is already bound and checked when the VM selects this handler.
     pub fn object_handler(&self, name: &str) -> Option<crate::AsyncFn> {
-        self.object_handlers.get(name).copied()
+        let entries = self.entries();
+        entries.object_handlers.get(name).copied()
     }
 
     /// An async function can select a synchronous handler for an exact shape.
     pub fn register_sync_selector(&mut self, name: &'static str, selector: crate::SyncSelector) {
-        self.sync_selectors.insert(name, selector);
+        let entries = self.entries_mut();
+        entries.sync_selectors.insert(name, selector);
     }
 
     pub fn sync_selector(&self, name: &str) -> Option<crate::SyncSelector> {
-        self.sync_selectors.get(name).copied()
+        let entries = self.entries();
+        entries.sync_selectors.get(name).copied()
     }
 
     /// Provide an alternate body when a native variadic call supplies extra names.
@@ -433,11 +519,14 @@ impl Registry {
 
     /// Attach the extra-name handler independently of the function's frame policy.
     pub fn register_extra_named_handler(&mut self, name: &'static str, handler: crate::SyncFn) {
-        self.extra_named_handlers.insert(name, handler);
+        self.entries_mut()
+            .extra_named_handlers
+            .insert(name, handler);
     }
 
     pub fn extra_named_handler(&self, name: &str) -> Option<crate::SyncFn> {
-        self.extra_named_handlers.get(name).copied()
+        let entries = self.entries();
+        entries.extra_named_handlers.get(name).copied()
     }
 
     /// Register an async function whose PHP callbacks run through an internal stack frame.
@@ -453,28 +542,35 @@ impl Registry {
     /// Keep this function in PHP exception traces when its async body throws or calls PHP.
     pub fn function_with_native_frame(&mut self, entry: FunctionEntry) {
         self.function(entry);
-        self.callback_frames.insert(entry.name);
+        self.entries_mut().callback_frames.insert(entry.name);
     }
 
     pub fn has_callback_frame(&self, name: &str) -> bool {
-        self.callback_frames.contains(name)
+        let entries = self.entries();
+        entries.callback_frames.contains(name)
     }
 
     pub fn functions(&self) -> impl Iterator<Item = &FunctionEntry> {
-        self.function_order
+        let entries = self.entries();
+        entries
+            .function_order
             .iter()
             .filter_map(|name| self.get_function(name))
     }
 
     pub fn constants(&self) -> impl Iterator<Item = (&str, &ConstantValue)> {
-        self.constants
+        let entries = self.entries();
+        entries
+            .constants
             .iter()
             .map(|(name, constant)| (name.as_str(), &constant.value))
     }
 
     pub fn constant_names(&self) -> impl Iterator<Item = (&str, &'static str)> {
-        self.constant_order.iter().filter_map(|name| {
-            self.constants
+        let entries = self.entries();
+        entries.constant_order.iter().filter_map(|name| {
+            entries
+                .constants
                 .get(name)
                 .map(|constant| (name.as_str(), constant.module))
         })
@@ -483,7 +579,9 @@ impl Registry {
     pub fn constant_entries(
         &self,
     ) -> impl Iterator<Item = (&str, &ConstantValue, Option<&'static str>)> {
-        self.constants
+        let entries = self.entries();
+        entries
+            .constants
             .iter()
             .map(|(name, constant)| (name.as_str(), &constant.value, constant.deprecated))
     }
@@ -545,6 +643,25 @@ mod tests {
             Some(&ConstantValue::String("1.0"))
         );
         assert_eq!(registry.get_constant("demo_version"), None);
+    }
+
+    #[test]
+    fn deferred_registration_is_shared_until_a_clone_is_modified() {
+        use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
+
+        static REGISTRATIONS: AtomicUsize = AtomicUsize::new(0);
+        let registry = Registry::deferred(|registry| {
+            REGISTRATIONS.fetch_add(1, Relaxed);
+            registry.load(&Demo);
+        });
+        let mut modified = registry.clone();
+
+        assert_eq!(REGISTRATIONS.load(Relaxed), 0);
+        assert!(registry.get_function("DEMO_ANSWER").is_some());
+        modified.constant("EXTRA", 7);
+        assert_eq!(REGISTRATIONS.load(Relaxed), 1);
+        assert_eq!(modified.get_constant("EXTRA"), Some(&ConstantValue::Int(7)));
+        assert_eq!(registry.get_constant("EXTRA"), None);
     }
 
     #[test]

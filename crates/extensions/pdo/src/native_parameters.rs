@@ -1,6 +1,6 @@
 //! Native drivers also accept numeric bindings for named SQL placeholders.
 
-use std::collections::HashMap;
+use foldhash::HashMap;
 
 use crate::dsn::DriverName;
 use crate::errors::DbError;

@@ -83,6 +83,14 @@ impl Analyzer<'_> {
         if !reference_output && self.incompatible(&parameter.ty, given, self.value_policy()) {
             let given = type_for_message(given, &parameter.ty);
             let expected = &parameter.ty;
+            let (expected, given) = if self.level >= 7 {
+                (
+                    super::member_checks::receiver_name(expected),
+                    super::member_checks::receiver_name(&given),
+                )
+            } else {
+                (expected.to_string(), given.to_string())
+            };
             let provenance = self.narrowed_at(&argument.value, scope);
             self.diagnose(
                 "argument.type",
@@ -205,7 +213,7 @@ fn creates_reference_output(target: &str, parameter: &ParameterInfo) -> bool {
         )
 }
 
-fn type_for_message(given: &ValueType, expected: &ValueType) -> ValueType {
+pub(super) fn type_for_message(given: &ValueType, expected: &ValueType) -> ValueType {
     use ValueType as T;
     match (given, expected) {
         (T::Shape(_), T::Shape(_)) => given.clone(),

@@ -1,9 +1,12 @@
 //! Builtin signatures generated from PHP stubs, e.g. `strlen(string $string): int`.
 //! The table is committed; compiling and checking never require PHP or php-src.
 
+pub(crate) mod analysis_facts;
+mod date_intervals;
 mod decode;
 mod encode;
 mod fields;
+pub(crate) mod regex_version;
 mod runtime_signatures;
 mod virtual_properties;
 
@@ -15,6 +18,7 @@ pub fn load() -> Index {
     let mut index = decode::decode(include_str!("../data/php85.tsv"));
     virtual_properties::add(&mut index);
     runtime_signatures::refine(&mut index);
+    date_intervals::refine(&mut index);
     index.builtin_functions = index.functions.keys().cloned().collect();
     index.builtin_classes = index.classes.keys().cloned().collect();
     index

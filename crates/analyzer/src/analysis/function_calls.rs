@@ -9,6 +9,7 @@ struct ResolvedCall {
     label: String,
     intrinsic: Option<String>,
     kind: CallKind,
+    unknown_result: ValueType,
 }
 
 impl Analyzer<'_> {
@@ -28,16 +29,25 @@ impl Analyzer<'_> {
             if ty == ValueType::Never {
                 return ty;
             }
+            if self.strict_mixed(&ty) {
+                self.diagnose(
+                    "callable.nonCallable",
+                    span,
+                    "Trying to invoke mixed but it's not a callable.".into(),
+                );
+            }
             let label = if matches!(ty, ValueType::StringLiteral(_) | ValueType::Shape(_)) {
                 format!("callable {ty}")
             } else {
                 "callable".into()
             };
+            let unknown_result = self.untyped_callable_result(&ty);
             ResolvedCall {
                 signature: self.callable_signature(ty),
                 label,
                 intrinsic: None,
                 kind: CallKind::Callable,
+                unknown_result,
             }
         };
         // A class string used to probe availability can name a missing
@@ -50,6 +60,11 @@ impl Analyzer<'_> {
             _ => None,
         };
         let inserted = probe.filter(|symbol| scope.known.insert(symbol.clone()));
+        let removal = if self.level >= 8 {
+            super::array_size::Removal::from_call(resolved.intrinsic.as_deref(), arguments, scope)
+        } else {
+            None
+        };
         let facts = self.argument_facts(
             arguments,
             resolved.signature.as_ref(),
@@ -107,14 +122,18 @@ impl Analyzer<'_> {
                 );
                 return signature.returns;
             }
+            if let Some(removal) = removal {
+                return removal.apply(scope);
+            }
             if self.level >= 2
                 && let Some(name) = &resolved.intrinsic
                 && let Some(ty) = self.builtin_result(name, arguments, &facts.types, scope)
             {
                 return ty;
             }
-            resolved.signature.map_or(ValueType::Mixed, |s| {
-                s.infer_return(arguments, &facts.types, self.index)
+            resolved.signature.map_or(resolved.unknown_result, |s| {
+                let ty = s.infer_return(arguments, &facts.types, self.index);
+                self.declared_array_result(&s, ty)
             })
         }
     }
@@ -160,6 +179,7 @@ impl Analyzer<'_> {
             signature: found.map(|(_, signature)| signature),
             intrinsic,
             kind: CallKind::Direct,
+            unknown_result: ValueType::Mixed,
         }
     }
 }

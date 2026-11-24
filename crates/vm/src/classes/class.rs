@@ -1,6 +1,8 @@
 //! Linked metadata shares inherited methods and defaults while each object owns its properties.
 
-use std::{any::Any, collections::HashMap, rc::Rc};
+use std::{any::Any, rc::Rc};
+
+use foldhash::{HashMap, HashSet};
 
 use crate::calls::call_state::ParameterSpec;
 use phera_bytecode::{ClassKind, Visibility};
@@ -19,15 +21,11 @@ pub(crate) struct Class {
     pub(crate) origin: ClassOrigin,
     /// The owning Rc can be recovered from an object's borrowed ClassHandle without a name lookup.
     pub(crate) identity: std::rc::Weak<Class>,
-    /// Only compiled declaration names enter this cache, not arbitrary is_a inputs.
-    /// Keyed by this class and resolved declaration name; immutable ancestry means
-    /// results cannot change during the request, including cached negative results.
-    pub(crate) declaration_matches: std::cell::RefCell<HashMap<String, bool>>,
     pub(crate) name: String,
     /// Class names are immutable PHP strings, shared by self/static/parent::class.
     pub(crate) name_value: Value,
     /// Complete lowercase ancestry is built at linking and stays immutable.
-    pub(crate) ancestors: std::collections::HashSet<String>,
+    pub(crate) ancestors: HashSet<String>,
     pub(crate) parent: Option<Rc<Class>>,
     pub(crate) interfaces: Vec<Rc<Class>>,
     pub(crate) traits: Vec<String>,
@@ -53,6 +51,7 @@ pub(crate) struct Class {
     pub(crate) method_table: std::cell::OnceCell<super::method_table::MethodTable>,
     pub(crate) property_table: std::cell::OnceCell<super::property_table::PropertyTable>,
     pub(crate) constant_table: std::cell::OnceCell<super::property_table::ConstantTable>,
+    pub(crate) static_prop_table: std::cell::OnceCell<super::property_table::StaticPropTable>,
     pub(crate) serialized_fields:
         std::cell::OnceCell<Option<Rc<[phera_extension_api::serialization::SerializedProperty]>>>,
     /// Constructor presence is immutable after linking, including inheritance.
@@ -259,6 +258,7 @@ pub(crate) enum ConstantInitializer {
 }
 
 /// A failed evaluation restores Uninitialized so later accesses can retry.
+#[derive(Clone)]
 pub(crate) enum ConstantState {
     Uninitialized,
     Evaluating,
@@ -359,8 +359,9 @@ pub(crate) struct MethodSignature {
 pub(crate) fn ancestor_names(
     parent: &Option<Rc<Class>>,
     interfaces: &[Rc<Class>],
-) -> std::collections::HashSet<String> {
-    let mut names = std::collections::HashSet::new();
+) -> HashSet<String> {
+    use foldhash::HashSetExt;
+    let mut names = HashSet::new();
     for class in parent.iter().chain(interfaces) {
         names.insert(class.name.to_ascii_lowercase());
         names.extend(class.ancestors.iter().cloned());
@@ -369,21 +370,8 @@ pub(crate) fn ancestor_names(
 }
 
 impl Class {
-    /// Avoid repeated lowercase allocation for names from compiled type declarations.
     pub(crate) fn matches_declaration(&self, name: &str) -> bool {
-        if self.name.eq_ignore_ascii_case(name) {
-            return true;
-        }
-        if let Some(result) = self.declaration_matches.borrow().get(name) {
-            return *result;
-        }
-        let result = self.is_a(name);
-        let mut declarations = self.declaration_matches.borrow_mut();
-        // Native definitions outlive requests. Cache only bounded, canonical ancestry matches.
-        if self.declaration.is_some() || (result && declarations.len() < 64) {
-            declarations.insert(name.to_owned(), result);
-        }
-        result
+        self.is_a(name)
     }
 }
 
@@ -421,18 +409,6 @@ impl Method {
     }
 }
 
-impl Class {
-    /// A complete simple declaration can reuse the same membership result that
-    /// matches_declaration made after resolution. Relative keywords are excluded
-    /// by the caller; compound spellings never enter this name-keyed cache.
-    pub(crate) fn cached_declaration_result(&self, name: &str) -> Option<bool> {
-        if self.name.eq_ignore_ascii_case(name) {
-            return Some(true);
-        }
-        self.declaration_matches.borrow().get(name).copied()
-    }
-}
-
 /// A default int can widen to float without scalar coercion from strings.
 pub(crate) fn widen_property_value(value: Value, ty: Option<&phera_bytecode::Type>) -> Value {
     ty.and_then(|ty| crate::types::widen_int_to_float(&value, ty.mask))
@@ -467,6 +443,13 @@ impl Class {
     pub(crate) fn constant_table(&self) -> &super::property_table::ConstantTable {
         self.constant_table
             .get_or_init(|| super::property_table::ConstantTable::build(self))
+    }
+
+    /// Flat data-oriented static property lookup table, built once and shared across forks.
+    #[inline]
+    pub(crate) fn static_prop_table(&self) -> &super::property_table::StaticPropTable {
+        self.static_prop_table
+            .get_or_init(|| super::property_table::StaticPropTable::build(self))
     }
 
     /// Whether this class is `target`, extends it or implements it: the same

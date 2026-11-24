@@ -7,10 +7,33 @@ impl Analyzer<'_> {
     pub fn refine(&mut self, expression: &Expression, scope: &mut Scope, truth: bool) {
         let mut pending = vec![(expression, truth)];
         while let Some((expression, truth)) = pending.pop() {
+            self.conditional_assertions(expression, scope, truth);
             match &expression.kind {
-                ExpressionKind::Variable(Variable::Named(name)) if truth => {
-                    let ty = scope.get(name).ty;
-                    scope.define(name, ty);
+                ExpressionKind::Variable(Variable::Named(name)) => {
+                    scope.refine_variable_guard(name, truth);
+                    self.refine_null_test_flag(name, truth, scope);
+                    if truth {
+                        if self.level >= 8 {
+                            self.refine_other_non_null(expression, scope, false);
+                        }
+                        let ty = scope.get(name).ty.without_null();
+                        let ty = if self.level >= 7 {
+                            super::truthy_values::truthy_type(&ty)
+                        } else {
+                            ty
+                        };
+                        if ty != ValueType::Never {
+                            if let Some(variable) = scope.variables.get_mut(name) {
+                                variable.definition = Definition::Definite;
+                                variable.ty = ty;
+                            } else {
+                                scope.define(name, ty);
+                            }
+                        }
+                    }
+                }
+                ExpressionKind::Assign { target, .. } if truth && self.level >= 2 => {
+                    pending.push((target, true));
                 }
                 ExpressionKind::Isset(items) if truth => {
                     for item in items {
@@ -47,7 +70,16 @@ impl Analyzer<'_> {
                     operator: operator @ (BinaryOperator::Identical | BinaryOperator::NotIdentical),
                     left,
                     right,
-                } if self.level >= 2 => {
+                } => {
+                    if let Some((guard, inverted)) = self.enum_guard(expression, scope) {
+                        scope.refine_definitions(&guard, truth != inverted);
+                    }
+                    if self.options.strict && truth != (*operator == BinaryOperator::Identical) {
+                        self.refine_nonempty_array_guard(left, right, scope);
+                    }
+                    if self.level < 2 {
+                        continue;
+                    }
                     self.refine_identical(
                         left,
                         right,
@@ -69,6 +101,18 @@ impl Analyzer<'_> {
                         );
                     }
                 }
+                ExpressionKind::Binary {
+                    operator:
+                        operator @ (BinaryOperator::Less
+                        | BinaryOperator::LessEqual
+                        | BinaryOperator::Greater
+                        | BinaryOperator::GreaterEqual),
+                    left,
+                    right,
+                } if self.level >= 8 => {
+                    self.refine_array_size(*operator, left, right, scope, truth);
+                    self.refine_coalesced_comparison(*operator, left, right, scope, truth);
+                }
                 ExpressionKind::InstanceOf { value, class } if truth => {
                     if let ExpressionKind::Variable(Variable::Named(name)) = &value.kind
                         && let ExpressionKind::Name(class) = &class.kind
@@ -77,7 +121,28 @@ impl Analyzer<'_> {
                         scope.define(name, ValueType::Class(class));
                     }
                 }
+                _ if truth && self.level >= 7 => {
+                    self.refine_nullsafe_receivers(expression, scope);
+                    self.refine_truthy_place(expression, scope);
+                }
                 _ => {}
+            }
+        }
+    }
+
+    fn refine_nonempty_array_guard(
+        &self,
+        left: &Expression,
+        right: &Expression,
+        scope: &mut Scope,
+    ) {
+        for (array, empty) in [(left, right), (right, left)] {
+            if matches!(&empty.kind, ExpressionKind::Array(items) if items.is_empty())
+                && let ExpressionKind::Variable(Variable::Named(name)) = &array.kind
+            {
+                scope
+                    .refine_definitions(&crate::scope::GuardKey::NonEmptyArray(name.clone()), true);
+                return;
             }
         }
     }
@@ -85,6 +150,16 @@ impl Analyzer<'_> {
     pub fn refine_defined(&self, expression: &Expression, scope: &mut Scope) {
         if self.level >= 2 {
             self.refine_type(expression, ValueType::Null, scope, false, expression.span);
+        }
+        if self.level >= 7
+            && matches!(expression.kind, ExpressionKind::Index { .. })
+            && let Some(place) = crate::scope::Place::of(expression)
+            && scope.facts.get(&place).is_none()
+        {
+            let ty = self.place_type(&place, scope).without_null();
+            if ty != ValueType::Never {
+                scope.facts.record(place, ty, None);
+            }
         }
         let mut root = expression;
         while let ExpressionKind::Index { target, .. } | ExpressionKind::Property { target, .. } =
@@ -134,6 +209,12 @@ impl Analyzer<'_> {
                 self.refine_type(&argument.value, against, scope, truth, span);
             } else if function == "in_array" {
                 self.refine_in_array(arguments, scope, truth, span);
+            } else if self.level >= 7 && truth && function == "is_scalar" {
+                let scalar = ValueType::Int
+                    .join(&ValueType::Float)
+                    .join(&ValueType::String)
+                    .join(&ValueType::Bool);
+                self.refine_type(&argument.value, scalar, scope, true, span);
             } else if self.level >= 5 && truth && function == "is_numeric" {
                 let numeric =
                     ValueType::Int
@@ -156,6 +237,21 @@ impl Analyzer<'_> {
         }
         if !truth {
             return;
+        }
+        if self.level >= 7
+            && function == "class_exists"
+            && let Some(place) = crate::scope::Place::of(&argument.value)
+        {
+            self.refine_place(
+                place,
+                ValueType::ClassString(std::sync::Arc::new(ValueType::Object)),
+                scope,
+                true,
+                None,
+            );
+        }
+        if self.level >= 7 && function == "array_key_exists" {
+            self.refine_array_key_exists(arguments, scope);
         }
         let symbol = match function.as_str() {
             "class_exists" | "interface_exists" | "trait_exists" | "enum_exists" => {

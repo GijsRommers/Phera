@@ -6,7 +6,9 @@ use super::{Class, Method, MethodBody};
 use phera_bytecode::{ClassKind, Type, TypeMask, Visibility};
 use phera_extension_api::{ClassKind as NativeKind, ConstantValue, NativeMethod};
 use phera_value::{ArrayKey, Object};
-use std::{collections::HashMap, rc::Rc};
+use std::rc::Rc;
+
+use foldhash::{HashMap, HashMapExt, HashSet, HashSetExt};
 
 impl ClassDefinitions {
     /// Registries guarantee parents-first order, allowing native classes to use ordinary inheritance.
@@ -23,8 +25,7 @@ impl ClassDefinitions {
                 operations: super::operations::ClassOperations::default(),
                 origin: super::class::ClassOrigin::Native,
                 identity: identity.clone(),
-                declaration_matches: std::cell::RefCell::new(std::collections::HashMap::new()),
-                ancestors: std::collections::HashSet::new(),
+                ancestors: HashSet::new(),
                 name_value: phera_value::Value::interned(b"stdClass"),
                 name: "stdClass".into(),
                 parent: None,
@@ -43,6 +44,7 @@ impl ClassDefinitions {
                 method_table: std::cell::OnceCell::new(),
                 property_table: std::cell::OnceCell::new(),
                 constant_table: std::cell::OnceCell::new(),
+                static_prop_table: std::cell::OnceCell::new(),
                 serialized_fields: std::cell::OnceCell::new(),
                 constructor: None,
                 magic: None,
@@ -259,7 +261,6 @@ impl ClassDefinitions {
                         super::class::ClassOrigin::Native
                     },
                     identity: identity.clone(),
-                    declaration_matches: std::cell::RefCell::new(std::collections::HashMap::new()),
                     ancestors: super::class::ancestor_names(&parent, &interfaces),
                     name_value: phera_value::Value::interned(entry.name.as_bytes()),
                     name: entry.name.into(),
@@ -290,6 +291,7 @@ impl ClassDefinitions {
                     method_table: std::cell::OnceCell::new(),
                     property_table: std::cell::OnceCell::new(),
                     constant_table: std::cell::OnceCell::new(),
+                    static_prop_table: std::cell::OnceCell::new(),
                     serialized_fields: std::cell::OnceCell::new(),
                     property_template,
                     layout,

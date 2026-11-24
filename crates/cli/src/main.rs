@@ -33,7 +33,7 @@ fn main() -> ExitCode {
             ini,
         }) => run::script(&script, &arguments, files, ini, debug),
         Ok(Command::Dump { script }) => run::dump(&script),
-        Ok(Command::Serve(options)) => serve::serve(options),
+        Ok(Command::Serve(options)) => serve::serve(*options),
         Ok(Command::Help(help)) => {
             print!("{help}");
             ExitCode::SUCCESS

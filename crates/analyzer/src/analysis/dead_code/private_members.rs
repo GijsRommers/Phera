@@ -2,6 +2,7 @@
 //! Dynamic member names and trait bodies can hide uses of private members.
 
 use super::*;
+use crate::framework_knowledge::{AttributeUse, attributes_use};
 use std::collections::BTreeSet;
 
 #[derive(Default)]
@@ -49,6 +50,8 @@ impl Analyzer<'_> {
             return;
         }
         let uses = Uses::collect(declaration);
+        let names = &self.context.names;
+        let command = attributes_use(&declaration.attributes, names, AttributeUse::InvokeCommand);
         for member in &declaration.members {
             match &member.kind {
                 ClassMemberKind::Method(method) => {
@@ -57,6 +60,12 @@ impl Analyzer<'_> {
                         && !name.starts_with("__")
                         && !uses.dynamic_method
                         && !uses.methods.contains(&name.to_ascii_lowercase())
+                        && !(command && name.eq_ignore_ascii_case("execute"))
+                        && !attributes_use(
+                            &method.attributes,
+                            &self.context.names,
+                            AttributeUse::InvokeMethod,
+                        )
                     {
                         let label = if method.modifiers.is_static {
                             "Static method"
@@ -72,6 +81,11 @@ impl Analyzer<'_> {
                     for param in &method.parameters {
                         if is_private(param.modifiers)
                             && !uses.forwarded_parameters.contains(&param.name)
+                            && !attributes_use(
+                                &param.attributes,
+                                &self.context.names,
+                                AttributeUse::ReadWriteProperty,
+                            )
                         {
                             self.check_private_property(
                                 &uses,
@@ -85,8 +99,41 @@ impl Analyzer<'_> {
                     }
                 }
                 ClassMemberKind::Property {
-                    modifiers, items, ..
+                    modifiers,
+                    items,
+                    attributes,
+                    ..
                 } if is_private(*modifiers) => {
+                    if !uses.dynamic_property {
+                        let written_by_extension =
+                            crate::framework_knowledge::configured_property_write(
+                                attributes,
+                                &self.context.names,
+                                self.options,
+                            );
+                        for item in items
+                            .iter()
+                            .filter(|item| !item.has_hook_list && !uses.writes.contains(&item.name))
+                        {
+                            self.check_property_initializer_type(
+                                &class,
+                                item,
+                                written_by_extension,
+                            );
+                        }
+                    }
+                    if attributes_use(
+                        attributes,
+                        &self.context.names,
+                        AttributeUse::ReadWriteProperty,
+                    ) {
+                        continue;
+                    }
+                    let framework_write = attributes_use(
+                        attributes,
+                        &self.context.names,
+                        AttributeUse::WriteProperty,
+                    );
                     for item in items.iter().filter(|item| !item.has_hook_list) {
                         self.check_private_property(
                             &uses,
@@ -94,7 +141,7 @@ impl Analyzer<'_> {
                             &item.name,
                             member.span,
                             modifiers.is_static,
-                            item.default.is_some(),
+                            framework_write || item.default.is_some(),
                         );
                     }
                 }
@@ -156,10 +203,15 @@ impl Uses {
         let mut uses = Self::default();
         let mut statements = Vec::new();
         let mut expressions = Vec::new();
+        attribute_expressions(&declaration.attributes, &mut expressions);
         for member in &declaration.members {
             match &member.kind {
                 ClassMemberKind::Method(method) => {
                     statements.extend(method.body.iter().flatten());
+                    attribute_expressions(&method.attributes, &mut expressions);
+                    for parameter in &method.parameters {
+                        attribute_expressions(&parameter.attributes, &mut expressions);
+                    }
                     expressions.extend(
                         method
                             .parameters
@@ -167,7 +219,10 @@ impl Uses {
                             .filter_map(|param| param.default.as_ref()),
                     );
                 }
-                ClassMemberKind::Property { items, .. } => {
+                ClassMemberKind::Property {
+                    items, attributes, ..
+                } => {
+                    attribute_expressions(attributes, &mut expressions);
                     for item in items {
                         expressions.extend(item.default.iter());
                         for hook in &item.hooks {
@@ -179,8 +234,17 @@ impl Uses {
                         }
                     }
                 }
-                ClassMemberKind::Constant { items, .. } => {
-                    expressions.extend(items.iter().map(|item| &item.value))
+                ClassMemberKind::Constant {
+                    items, attributes, ..
+                } => {
+                    attribute_expressions(attributes, &mut expressions);
+                    expressions.extend(items.iter().map(|item| &item.value));
+                }
+                ClassMemberKind::EnumCase {
+                    value, attributes, ..
+                } => {
+                    attribute_expressions(attributes, &mut expressions);
+                    expressions.extend(value);
                 }
                 _ => {}
             }
@@ -328,4 +392,12 @@ enum PropertyUse {
 
 fn is_private(modifiers: Modifiers) -> bool {
     modifiers.visibility == Some(Visibility::Private)
+}
+
+fn attribute_expressions<'a>(attributes: &'a [Attribute], expressions: &mut Vec<&'a Expression>) {
+    expressions.extend(
+        attributes
+            .iter()
+            .flat_map(|attribute| attribute.arguments.iter().map(|argument| &argument.value)),
+    );
 }

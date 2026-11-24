@@ -1,7 +1,8 @@
 //! `bindParam(':id', $id, PDO::PARAM_INT)` reads the current referenced value on execute.
 
-use std::collections::HashMap;
 use std::rc::Rc;
+
+use foldhash::{HashMap, HashMapExt};
 
 use phera_extension_api::value::{to_bool, to_int, to_php_string};
 use phera_extension_api::{ArrayKey, Context, NativeError, PhpArray, Value};
