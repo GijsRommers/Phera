@@ -87,6 +87,13 @@ impl Handler for WsTestHandler {
                     context: Vec::new(),
                     rooms: Vec::new(),
                 }),
+                "/slow_open" => Response::new(101).with_websocket_upgrade(WebSocketUpgrade {
+                    entry: "slow_open".to_string(),
+                    handler_class: "SlowOpen".to_string(),
+                    subprotocol: None,
+                    context: Vec::new(),
+                    rooms: Vec::new(),
+                }),
                 _ => Response::text(404, "not found\n"),
             }
         })
@@ -100,7 +107,13 @@ impl Handler for WsTestHandler {
         let log = self.log.clone();
         let active_events = self.active_events.clone();
         Box::pin(async move {
-            match (event.entry.as_str(), event.kind) {
+            match (&*event.entry, event.kind) {
+                ("slow_open", WebSocketEventKind::Open) => {
+                    tokio::time::sleep(Duration::from_millis(80)).await;
+                    log.lock()
+                        .unwrap()
+                        .push(format!("slow_open:open:{}", event.connection_id));
+                }
                 (entry, WebSocketEventKind::Open) => {
                     log.lock()
                         .unwrap()
@@ -399,4 +412,165 @@ async fn chat_room_broadcast_http_push_and_slow_consumer_eviction() {
         Message::Close(Some(frame)) => assert_eq!(u16::from(frame.code), 1001),
         other => panic!("expected close 1001 on shutdown, got {other:?}"),
     }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn on_close_still_runs_when_event_queue_is_full() {
+    let config = ServerConfig {
+        workers: 1,
+        websocket: WebSocketConfig {
+            send_queue_len: 1,
+            ..WebSocketConfig::default()
+        },
+        ..common::test_config()
+    };
+    let (server, addr, _hub, log) = spawn_test_server(config);
+
+    let (mut ws, _) = connect_async(format!("ws://{addr}/slow_open"))
+        .await
+        .unwrap();
+    // onOpen sleeps 80ms; send one frame to fill the 1-slot event queue and close right away.
+    ws.send(Message::text("queued-msg")).await.unwrap();
+    ws.close(Some(tokio_tungstenite::tungstenite::protocol::CloseFrame {
+        code: tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode::Normal,
+        reason: "done".into(),
+    }))
+    .await
+    .unwrap();
+    let _ = ws.next().await;
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        if log
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|entry| entry == "slow_open:close:1000:done")
+        {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "onClose missing from log: {:?}",
+            *log.lock().unwrap()
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    server.shutdown();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn close_still_disconnects_when_outbound_queue_is_full() {
+    let config = ServerConfig {
+        workers: 1,
+        websocket: WebSocketConfig {
+            send_queue_len: 2,
+            ..WebSocketConfig::default()
+        },
+        ..common::test_config()
+    };
+    let (server, addr, hub, log) = spawn_test_server(config);
+
+    let (mut ws, _) = connect_async(format!("ws://{addr}/echo")).await.unwrap();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    let conn_id = loop {
+        if let Some(id) = log
+            .lock()
+            .unwrap()
+            .iter()
+            .find_map(|entry| entry.strip_prefix("echo:open:"))
+            .map(str::to_owned)
+        {
+            break id;
+        }
+        assert!(tokio::time::Instant::now() < deadline);
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    };
+
+    // Fill the 2-slot outbound queue before close() so close() hits TrySendError::Full.
+    assert!(hub.send(&conn_id, b"msg-1", false));
+    assert!(hub.send(&conn_id, b"msg-2", false));
+    assert!(hub.close(&conn_id, 4000, "full"));
+
+    let frame = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            match ws.next().await {
+                Some(Ok(Message::Close(Some(frame)))) => return Some(frame),
+                Some(Ok(_)) => continue,
+                _ => return None,
+            }
+        }
+    })
+    .await
+    .expect("socket should close promptly even with full queue")
+    .expect("expected Close frame");
+    assert_eq!(u16::from(frame.code), 4000);
+    assert_eq!(frame.reason.as_str(), "full");
+    server.shutdown();
+}
+
+async fn raw_ws_connect_and_send(addr: std::net::SocketAddr, frame_bytes: &[u8]) -> (u16, String) {
+    let mut stream = TcpStream::connect(addr).await.unwrap();
+    let req = format!(
+        "GET /echo HTTP/1.1\r\nHost: {addr}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+    );
+    stream.write_all(req.as_bytes()).await.unwrap();
+    let mut buf = Vec::new();
+    let mut tmp = [0u8; 1024];
+    loop {
+        let n = stream.read(&mut tmp).await.unwrap();
+        assert!(n > 0, "unexpected EOF waiting for 101");
+        buf.extend_from_slice(&tmp[..n]);
+        if let Some(end) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+            let head = std::str::from_utf8(&buf[..end]).unwrap();
+            assert!(head.starts_with("HTTP/1.1 101 "), "{head}");
+            buf.drain(..end + 4);
+            break;
+        }
+    }
+    stream.write_all(frame_bytes).await.unwrap();
+
+    while buf.len() < 4 {
+        let n = tokio::time::timeout(Duration::from_secs(2), stream.read(&mut tmp))
+            .await
+            .expect("timeout waiting for server close frame")
+            .unwrap();
+        assert!(n > 0, "unexpected EOF waiting for server close frame");
+        buf.extend_from_slice(&tmp[..n]);
+    }
+    assert_eq!(
+        buf[0] & 0x0F,
+        0x08,
+        "expected Close opcode frame: {buf:02x?}"
+    );
+    let len = (buf[1] & 0x7F) as usize;
+    while buf.len() < 2 + len {
+        let n = stream.read(&mut tmp).await.unwrap();
+        assert!(n > 0);
+        buf.extend_from_slice(&tmp[..n]);
+    }
+    let code = u16::from_be_bytes([buf[2], buf[3]]);
+    let reason = String::from_utf8_lossy(&buf[4..2 + len]).into_owned();
+    (code, reason)
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn invalid_utf8_closes_with_1007_and_protocol_error_closes_with_1002() {
+    let config = ServerConfig {
+        workers: 1,
+        ..common::test_config()
+    };
+    let (server, addr, _hub, _log) = spawn_test_server(config);
+
+    // Invalid UTF-8 inside a masked client text frame -> 1007.
+    let invalid_utf8_frame = [0x81, 0x82, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFE];
+    let (code_utf8, _) = raw_ws_connect_and_send(addr, &invalid_utf8_frame).await;
+    assert_eq!(code_utf8, 1007);
+
+    // Unmasked client frame violates RFC 6455 -> 1002.
+    let unmasked_frame = [0x81, 0x02, b'h', b'i'];
+    let (code_proto, _) = raw_ws_connect_and_send(addr, &unmasked_frame).await;
+    assert_eq!(code_proto, 1002);
+
+    server.shutdown();
 }

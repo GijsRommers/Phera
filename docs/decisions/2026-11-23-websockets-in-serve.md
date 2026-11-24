@@ -30,7 +30,11 @@ PHP handler objects across idle connections.
   bounded by `phera.ws_max_context_bytes` (default 16 KiB).
 - Room membership, direct sends, and cross-worker broadcasts go through a
   64-sharded `WebSocketHub` reachable from both WebSocket event handlers and
-  ordinary HTTP requests.
+  ordinary HTTP requests. Sending invalid UTF-8 as a text message (`$binary = false`)
+  from PHP throws `ValueError` at `send()`/`broadcast()` time rather than
+  dropping the message silently.
+- Connection IDs are sequential `ws-<n>` identifiers addressed only by
+  application PHP code and must never be treated as secret bearer tokens.
 (`crates/server/src/websocket/`, `crates/vm/src/websocket.rs`, `crates/runtime/src/websocket/`, `crates/cli/src/serve.rs`)
 
 ## Why

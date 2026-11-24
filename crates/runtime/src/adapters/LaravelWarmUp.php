@@ -55,6 +55,12 @@ final class WarmUp
 
     public static function beforeSnapshot(Application $app): void
     {
+        // WebSocket event forks resolve handlers from the container even when
+        // framework service warm-up is turned off via --no-service-warmup.
+        if (\function_exists('Phera\\WebSocket\\resolveUsing')) {
+            \Phera\WebSocket\resolveUsing(static fn (string $class): object => $app->make($class));
+        }
+
         if (($_SERVER['PHERA_SERVICE_WARMUP'] ?? '') === '0') {
             return;
         }
@@ -394,11 +400,5 @@ final class WarmUp
         (function () use ($callbacks) {
             $this->terminatingCallbacks = $callbacks;
         })->call($app);
-
-        // WebSocket event forks resolve handlers from the container that was
-        // already booted and warmed before Phera\snapshot().
-        if (\function_exists('Phera\\WebSocket\\resolveUsing')) {
-            \Phera\WebSocket\resolveUsing(static fn (string $class): object => $app->make($class));
-        }
     }
 }

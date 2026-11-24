@@ -4,6 +4,7 @@ pub mod handshake;
 pub mod hub;
 pub mod stream;
 
+use std::sync::Arc;
 use std::time::Duration;
 
 pub use hub::WebSocketHub;
@@ -79,9 +80,9 @@ pub enum WebSocketEventKind {
 /// One WebSocket lifecycle event passed to [`crate::Handler::handle_websocket`].
 #[derive(Debug, Clone)]
 pub struct WebSocketEvent {
-    pub connection_id: String,
-    pub entry: String,
-    pub handler_class: String,
+    pub connection_id: Arc<str>,
+    pub entry: Arc<str>,
+    pub handler_class: Arc<str>,
     pub kind: WebSocketEventKind,
 }
 

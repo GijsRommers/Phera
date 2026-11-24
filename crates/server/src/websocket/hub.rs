@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 use bytes::Bytes;
 use tokio::sync::{Notify, mpsc};
@@ -35,9 +35,21 @@ struct ConnectionEntry {
     queued_bytes: Arc<AtomicUsize>,
     max_queue_bytes: usize,
     disconnect: Arc<Notify>,
+    close_notify: Arc<Notify>,
+    pending_close: Arc<Mutex<Option<(u16, String)>>>,
     context: RwLock<Vec<u8>>,
     rooms: RwLock<Vec<String>>,
     closed: AtomicBool,
+}
+
+pub(crate) struct RegisteredConnection {
+    pub(crate) id: u64,
+    pub(crate) id_str: String,
+    pub(crate) rx_outbound: mpsc::Receiver<OutboundCommand>,
+    pub(crate) queued_bytes: Arc<AtomicUsize>,
+    pub(crate) disconnect: Arc<Notify>,
+    pub(crate) close_notify: Arc<Notify>,
+    pub(crate) pending_close: Arc<Mutex<Option<(u16, String)>>>,
 }
 
 #[derive(Clone)]
@@ -82,23 +94,21 @@ impl WebSocketHub {
         &self,
         initial_context: Vec<u8>,
         initial_rooms: Vec<String>,
-    ) -> (
-        u64,
-        String,
-        mpsc::Receiver<OutboundCommand>,
-        Arc<AtomicUsize>,
-        Arc<Notify>,
-    ) {
+    ) -> RegisteredConnection {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let id_str = format!("ws-{id}");
         let (tx, rx) = mpsc::channel(self.send_queue_len);
         let queued_bytes = Arc::new(AtomicUsize::new(0));
         let disconnect = Arc::new(Notify::new());
+        let close_notify = Arc::new(Notify::new());
+        let pending_close = Arc::new(Mutex::new(None));
         let entry = Arc::new(ConnectionEntry {
             tx,
             queued_bytes: queued_bytes.clone(),
             max_queue_bytes: self.send_queue_bytes,
             disconnect: disconnect.clone(),
+            close_notify: close_notify.clone(),
+            pending_close: pending_close.clone(),
             context: RwLock::new(initial_context),
             rooms: RwLock::new(Vec::new()),
             closed: AtomicBool::new(false),
@@ -112,7 +122,15 @@ impl WebSocketHub {
                 self.join(&id_str, &room);
             }
         }
-        (id, id_str, rx, queued_bytes, disconnect)
+        RegisteredConnection {
+            id,
+            id_str,
+            rx_outbound: rx,
+            queued_bytes,
+            disconnect,
+            close_notify,
+            pending_close,
+        }
     }
 
     pub(crate) fn remove(&self, id: u64) {
@@ -143,8 +161,12 @@ impl WebSocketHub {
     }
 
     /// Queue a WebSocket message to a single connection. Returns `false` if the
-    /// connection is gone or its outbound queue overflowed.
+    /// connection is gone, text payload is invalid UTF-8, or its outbound queue
+    /// overflowed.
     pub fn send(&self, connection_id: &str, data: &[u8], binary: bool) -> bool {
+        if !binary && std::str::from_utf8(data).is_err() {
+            return false;
+        }
         let Some(id) = parse_connection_id(connection_id) else {
             return false;
         };
@@ -177,6 +199,9 @@ impl WebSocketHub {
         binary: bool,
         exclude_connection_id: Option<&str>,
     ) -> usize {
+        if !binary && std::str::from_utf8(data).is_err() {
+            return 0;
+        }
         let exclude = exclude_connection_id.and_then(parse_connection_id);
         let room_shard = shard_for_name(room);
         let subscribers = {
@@ -329,7 +354,15 @@ impl WebSocketHub {
             code,
             reason: reason.to_string(),
         };
-        let _ = entry.tx.try_send(cmd);
+        if let Err(mpsc::error::TrySendError::Full(OutboundCommand::Close { code, reason })) =
+            entry.tx.try_send(cmd)
+        {
+            // Queue is backed up; wake the socket loop directly so close() cannot hang.
+            if let Ok(mut pending) = entry.pending_close.lock() {
+                *pending = Some((code, reason));
+            }
+            entry.close_notify.notify_one();
+        }
         true
     }
 

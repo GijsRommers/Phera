@@ -2,14 +2,14 @@
 //! future HTTP/2 extended CONNECT paths.
 
 use std::rc::Rc;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::sync::{Notify, OwnedSemaphorePermit, mpsc, watch};
+use tokio::sync::{Notify, OwnedSemaphorePermit, mpsc, oneshot, watch};
 use tokio::time::Instant;
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Utf8Bytes;
@@ -20,7 +20,7 @@ use tokio_tungstenite::tungstenite::protocol::{
 
 use crate::handler::Handler;
 
-use super::hub::{OutboundCommand, WebSocketHub};
+use super::hub::{OutboundCommand, RegisteredConnection, WebSocketHub};
 use super::{WebSocketConfig, WebSocketEvent, WebSocketEventKind, WebSocketUpgrade};
 
 pub(crate) struct UpgradedContext {
@@ -35,8 +35,10 @@ pub(crate) struct UpgradedContext {
 
 struct IoChannels<'a> {
     rx_outbound: &'a mut mpsc::Receiver<OutboundCommand>,
-    queued_bytes: &'a AtomicUsize,
+    queued_bytes: &'a std::sync::atomic::AtomicUsize,
     disconnect: &'a Notify,
+    close_notify: &'a Notify,
+    pending_close: &'a Mutex<Option<(u16, String)>>,
     tx_events: &'a mpsc::Sender<WebSocketEventKind>,
     fail_rx: &'a mut mpsc::Receiver<()>,
     shutdown: &'a mut watch::Receiver<bool>,
@@ -61,22 +63,31 @@ where
         .max_frame_size(Some(ctx.config.max_message_bytes));
     let mut ws_stream = WebSocketStream::from_raw_socket(io, Role::Server, Some(ws_config)).await;
 
-    let (conn_id, conn_id_str, mut rx_outbound, queued_bytes, disconnect) =
-        ctx.hub.register(ctx.upgrade.context, ctx.upgrade.rooms);
+    let RegisteredConnection {
+        id: conn_id,
+        id_str: conn_id_str,
+        mut rx_outbound,
+        queued_bytes,
+        disconnect,
+        close_notify,
+        pending_close,
+    } = ctx.hub.register(ctx.upgrade.context, ctx.upgrade.rooms);
     let (tx_events, rx_events) = mpsc::channel(ctx.config.send_queue_len.max(1));
     let (fail_tx, mut fail_rx) = mpsc::channel::<()>(1);
+    let (close_tx, close_rx) = oneshot::channel();
 
     // Queue Open before the reader loop pulls any incoming client frame.
     let _ = tx_events.try_send(WebSocketEventKind::Open);
 
     let event_task = tokio::task::spawn_local({
         let handler = ctx.handler.clone();
-        let connection_id = conn_id_str.clone();
-        let entry = ctx.upgrade.entry.clone();
-        let handler_class = ctx.upgrade.handler_class.clone();
+        let connection_id: Arc<str> = Arc::from(conn_id_str.as_str());
+        let entry: Arc<str> = Arc::from(ctx.upgrade.entry.as_str());
+        let handler_class: Arc<str> = Arc::from(ctx.upgrade.handler_class.as_str());
         async move {
             run_events(
                 rx_events,
+                close_rx,
                 handler,
                 connection_id,
                 entry,
@@ -91,6 +102,8 @@ where
         rx_outbound: &mut rx_outbound,
         queued_bytes: &queued_bytes,
         disconnect: &disconnect,
+        close_notify: &close_notify,
+        pending_close: &pending_close,
         tx_events: &tx_events,
         fail_rx: &mut fail_rx,
         shutdown: &mut ctx.shutdown,
@@ -99,7 +112,7 @@ where
     let close_reason = drive_io(&mut ws_stream, &mut channels).await;
 
     if let Some((code, reason)) = close_reason {
-        let _ = tx_events.try_send(WebSocketEventKind::Close { code, reason });
+        let _ = close_tx.send((code, reason));
     }
     drop(tx_events);
 
@@ -137,6 +150,17 @@ async fn drive_io<S: AsyncRead + AsyncWrite + Unpin>(
                 send_close(ws_stream, 1008, "slow consumer", Duration::from_secs(1)).await;
                 return Some((1008, "slow consumer".to_string()));
             }
+            _ = channels.close_notify.notified() => {
+                if let Some((code, reason)) = channels
+                    .pending_close
+                    .lock()
+                    .ok()
+                    .and_then(|mut pending| pending.take())
+                {
+                    send_close(ws_stream, code, &reason, channels.config.write_timeout).await;
+                    return Some((code, reason));
+                }
+            }
             Some(cmd) = channels.rx_outbound.recv() => {
                 match cmd {
                     OutboundCommand::Send { data, binary } => {
@@ -145,7 +169,14 @@ async fn drive_io<S: AsyncRead + AsyncWrite + Unpin>(
                             WsMessage::Binary(data)
                         } else {
                             let Ok(text) = Utf8Bytes::try_from(data) else {
-                                continue;
+                                send_close(
+                                    ws_stream,
+                                    1011,
+                                    "invalid outbound UTF-8",
+                                    channels.config.write_timeout,
+                                )
+                                .await;
+                                return Some((1011, "invalid outbound UTF-8".to_string()));
                             };
                             WsMessage::Text(text)
                         };
@@ -229,16 +260,25 @@ async fn drive_io<S: AsyncRead + AsyncWrite + Unpin>(
                         .await;
                         return Some((1009, "message too big".to_string()));
                     }
-                    Some(Err(
-                        tokio_tungstenite::tungstenite::Error::Protocol(_)
-                        | tokio_tungstenite::tungstenite::Error::Utf8(_),
-                    )) => {
-                        let _ = tokio::time::timeout(
+                    Some(Err(tokio_tungstenite::tungstenite::Error::Utf8(_))) => {
+                        send_close(
+                            ws_stream,
+                            1007,
+                            "invalid UTF-8",
                             channels.config.write_timeout,
-                            ws_stream.flush(),
                         )
                         .await;
-                        return Some((1002, String::new()));
+                        return Some((1007, "invalid UTF-8".to_string()));
+                    }
+                    Some(Err(tokio_tungstenite::tungstenite::Error::Protocol(_))) => {
+                        send_close(
+                            ws_stream,
+                            1002,
+                            "protocol error",
+                            channels.config.write_timeout,
+                        )
+                        .await;
+                        return Some((1002, "protocol error".to_string()));
                     }
                     Some(Err(_)) | None => return Some((1006, String::new())),
                 }
@@ -270,10 +310,11 @@ async fn enqueue_event(
 
 async fn run_events(
     mut rx_events: mpsc::Receiver<WebSocketEventKind>,
+    close_rx: oneshot::Receiver<(u16, String)>,
     handler: Rc<dyn Handler>,
-    connection_id: String,
-    entry: String,
-    handler_class: String,
+    connection_id: Arc<str>,
+    entry: Arc<str>,
+    handler_class: Arc<str>,
     fail_tx: mpsc::Sender<()>,
 ) {
     let mut terminated_1011 = false;
@@ -292,6 +333,16 @@ async fn run_events(
             terminated_1011 = true;
             let _ = fail_tx.try_send(());
         }
+    }
+    if !terminated_1011 && let Ok((code, reason)) = close_rx.await {
+        let _ = handler
+            .handle_websocket(WebSocketEvent {
+                connection_id,
+                entry,
+                handler_class,
+                kind: WebSocketEventKind::Close { code, reason },
+            })
+            .await;
     }
 }
 

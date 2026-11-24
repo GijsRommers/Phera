@@ -109,10 +109,20 @@ fn register_functions(registry: &mut Registry) {
     registry.describe_function("Phera\\WebSocket\\isEvent", "bool", None);
 }
 
-fn utf8_arg(arguments: &[Value], index: usize) -> Result<String, NativeError> {
+pub(super) fn utf8_arg(arguments: &[Value], index: usize) -> Result<String, NativeError> {
     std::str::from_utf8(args::bytes(arguments, index))
         .map(str::to_owned)
         .map_err(|_| NativeError::throw("ValueError", "Argument must be valid UTF-8"))
+}
+
+pub(super) fn validate_outbound_payload(data: &[u8], binary: bool) -> Result<(), NativeError> {
+    if !binary && std::str::from_utf8(data).is_err() {
+        return Err(NativeError::throw(
+            "ValueError",
+            "WebSocket text message must be valid UTF-8",
+        ));
+    }
+    Ok(())
 }
 
 fn accept_fn(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
@@ -192,6 +202,7 @@ fn broadcast_fn(context: &mut dyn Context, arguments: &[Value]) -> NativeResult 
     let room = utf8_arg(arguments, 0)?;
     let data = args::bytes(arguments, 1);
     let binary = args::bool(arguments, 2).unwrap_or(false);
+    validate_outbound_payload(data, binary)?;
     let sent = context
         .websocket_sink()
         .map_or(0, |sink| sink.broadcast(&room, data, binary, None));
@@ -202,6 +213,7 @@ fn send_fn(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let connection_id = utf8_arg(arguments, 0)?;
     let data = args::bytes(arguments, 1);
     let binary = args::bool(arguments, 2).unwrap_or(false);
+    validate_outbound_payload(data, binary)?;
     let ok = context
         .websocket_sink()
         .is_some_and(|sink| sink.send(&connection_id, data, binary));

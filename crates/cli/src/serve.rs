@@ -297,7 +297,7 @@ impl Handler for SiteHandler {
             let outcome = self
                 .runtime
                 .handle_websocket_event(
-                    Path::new(&event.entry),
+                    Path::new(&*event.entry),
                     self.site.document_root(),
                     &event.connection_id,
                     &event.handler_class,

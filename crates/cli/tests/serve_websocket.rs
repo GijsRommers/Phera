@@ -18,10 +18,21 @@ struct WsSite {
     address: String,
     root: PathBuf,
     stderr_handle: Option<std::process::ChildStderr>,
+    _stdout: BufReader<std::process::ChildStdout>,
 }
 
 impl WsSite {
     fn start(name: &str, workers: usize, files: &[(&str, &str)], flags: &[&str]) -> Self {
+        Self::start_in(name, workers, files, ".", flags)
+    }
+
+    fn start_in(
+        name: &str,
+        workers: usize,
+        files: &[(&str, &str)],
+        directory: &str,
+        flags: &[&str],
+    ) -> Self {
         let root = std::env::temp_dir().join(format!("phera-ws-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         for (path, contents) in files {
@@ -42,18 +53,16 @@ impl WsSite {
             .arg(workers.to_string())
             .current_dir(&root)
             .args(flags)
-            .arg(&root)
+            .arg(root.join(directory))
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
             .expect("spawn phera serve");
 
-        let stdout = process.stdout.take().expect("stdout");
+        let mut stdout = BufReader::new(process.stdout.take().expect("stdout"));
         let stderr_handle = process.stderr.take();
         let mut banner = String::new();
-        BufReader::new(stdout)
-            .read_line(&mut banner)
-            .expect("read banner");
+        stdout.read_line(&mut banner).expect("read banner");
         let address = banner
             .split("http://")
             .nth(1)
@@ -66,6 +75,7 @@ impl WsSite {
             address,
             root,
             stderr_handle,
+            _stdout: stdout,
         }
     }
 
@@ -594,4 +604,185 @@ Phera\WebSocket\accept(ShutdownHandler::class);
     assert!(log.contains("closed:1001"), "{log}");
     let exit = site.process.wait().expect("wait exited");
     assert!(exit.success(), "clean shutdown exit: {exit:?}");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn invalid_utf8_text_from_php_throws_value_error() {
+    let script = r#"<?php
+class Utf8CheckHandler implements Phera\WebSocket\Handler
+{
+    public function onOpen(Phera\WebSocket\Connection $conn): void
+    {
+        $caught = [];
+        foreach ([
+            'conn_send' => fn () => $conn->send("\xff\xfe"),
+            'conn_bcast' => fn () => $conn->broadcast('lobby', "\xff\xfe"),
+            'fn_send' => fn () => Phera\WebSocket\send($conn->id(), "\xff\xfe"),
+            'fn_bcast' => fn () => Phera\WebSocket\broadcast('lobby', "\xff\xfe"),
+        ] as $name => $call) {
+            try {
+                $call();
+                $caught[] = "$name:missing";
+            } catch (\ValueError) {
+                $caught[] = "$name:ok";
+            }
+        }
+        $conn->send(implode(',', $caught));
+        // Binary frames still allow arbitrary raw bytes.
+        $conn->send("\xff\xfe", binary: true);
+    }
+    public function onMessage(Phera\WebSocket\Connection $conn, Phera\WebSocket\Message $message): void {}
+    public function onClose(Phera\WebSocket\Connection $conn, int $code, string $reason): void {}
+    public function onError(Phera\WebSocket\Connection $conn, \Throwable $error): void {}
+}
+
+Phera\snapshot();
+Phera\WebSocket\accept(Utf8CheckHandler::class, rooms: ['lobby']);
+"#;
+    let site = WsSite::start("php-utf8", 1, &[("index.php", script)], &[]);
+    let (mut ws, _) = connect_ws(&site.ws_url("/"), &[]).await.expect("connect");
+
+    assert_eq!(
+        ws.next().await.unwrap().unwrap(),
+        Message::Text("conn_send:ok,conn_bcast:ok,fn_send:ok,fn_bcast:ok".into())
+    );
+    assert_eq!(
+        ws.next().await.unwrap().unwrap(),
+        Message::Binary(vec![0xFF, 0xFE].into())
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn laravel_adapter_resolves_ws_handler_with_and_without_service_warmup() {
+    let autoload = r#"<?php
+namespace App {
+    final class GreeterDependency
+    {
+        public function __construct(public readonly string $tag) {}
+    }
+
+    final class InjectedWsHandler implements \Phera\WebSocket\Handler
+    {
+        public function __construct(private readonly GreeterDependency $dep) {}
+
+        public function onOpen(\Phera\WebSocket\Connection $conn): void
+        {
+            $conn->send('dep:' . $this->dep->tag);
+        }
+        public function onMessage(\Phera\WebSocket\Connection $conn, \Phera\WebSocket\Message $message): void
+        {
+            $conn->send('echo:' . $this->dep->tag . ':' . $message->data);
+        }
+        public function onClose(\Phera\WebSocket\Connection $conn, int $code, string $reason): void {}
+        public function onError(\Phera\WebSocket\Connection $conn, \Throwable $error): void {}
+    }
+}
+
+namespace Illuminate\Contracts\Http {
+    interface Kernel { public function bootstrap(): void; }
+}
+namespace Illuminate\Database\Eloquent {
+    class Model {}
+}
+namespace Illuminate\Events {
+    class Dispatcher { public function getRawListeners(): array { return []; } }
+}
+namespace Illuminate\Http {
+    class Request {
+        public static function capture(): self { return new self(); }
+        public static function create(string $uri): self { return new self(); }
+    }
+}
+namespace Illuminate\Foundation {
+    final class ConfigRepo {
+        public function get(string $key, mixed $default = null): mixed {
+            return $key === 'octane.warm' ? ['config'] : $default;
+        }
+    }
+    class Application {
+        public bool $warmed = false;
+        public function make(string $abstract): mixed {
+            return match ($abstract) {
+                \Illuminate\Contracts\Http\Kernel::class => new class implements \Illuminate\Contracts\Http\Kernel {
+                    public function bootstrap(): void {}
+                },
+                'events' => new \Illuminate\Events\Dispatcher(),
+                'config' => $this->markWarmed(),
+                \App\InjectedWsHandler::class => new \App\InjectedWsHandler(
+                    new \App\GreeterDependency($this->warmed ? 'warmed' : 'plain')
+                ),
+                default => new \stdClass(),
+            };
+        }
+        private function markWarmed(): ConfigRepo { $this->warmed = true; return new ConfigRepo(); }
+        public function resolved(string $name): bool { return false; }
+        public function bound(string $name): bool { return $name === 'config'; }
+        public function path(string $sub = ''): string { return __DIR__ . '/no-' . $sub; }
+        public function forgetScopedInstances(): void {}
+        public function instance(string $name, mixed $obj): void {}
+        public function handleRequest(\Illuminate\Http\Request $req): void {
+            \Phera\WebSocket\accept(\App\InjectedWsHandler::class);
+        }
+    }
+}
+"#;
+    let bootstrap = r#"<?php
+return new \Illuminate\Foundation\Application();
+"#;
+    let files = [
+        ("artisan", "#!/usr/bin/env php\n"),
+        ("vendor/autoload.php", autoload),
+        ("bootstrap/app.php", bootstrap),
+        ("public/index.php", "<?php // replaced by LARAVEL_ENTRY\n"),
+    ];
+
+    // 1. Default (service warm-up enabled): resolveUsing runs AND WarmUp resolves 'config'.
+    let mut warm_site = WsSite::start_in("laravel-warm", 1, &files, "public", &[]);
+    let (mut ws_warm, _) = connect_ws(&warm_site.ws_url("/"), &[])
+        .await
+        .unwrap_or_else(|e| {
+            let _ = warm_site.process.kill();
+            let mut err = String::new();
+            if let Some(mut stderr) = warm_site.stderr_handle.take() {
+                let _ = stderr.read_to_string(&mut err);
+            }
+            panic!("connect warm: {e:?}; stderr: {err}");
+        });
+    assert_eq!(
+        ws_warm.next().await.unwrap().unwrap(),
+        Message::Text("dep:warmed".into())
+    );
+    ws_warm.send(Message::Text("hi".into())).await.unwrap();
+    assert_eq!(
+        ws_warm.next().await.unwrap().unwrap(),
+        Message::Text("echo:warmed:hi".into())
+    );
+
+    // 2. --no-service-warmup: WarmUp skips service warm-up, yet resolveUsing STILL resolves via $app->make().
+    let mut no_warm_site = WsSite::start_in(
+        "laravel-nowarm",
+        1,
+        &files,
+        "public",
+        &["--no-service-warmup"],
+    );
+    let (mut ws_no_warm, _) = connect_ws(&no_warm_site.ws_url("/"), &[])
+        .await
+        .unwrap_or_else(|e| {
+            let _ = no_warm_site.process.kill();
+            let mut err = String::new();
+            if let Some(mut stderr) = no_warm_site.stderr_handle.take() {
+                let _ = stderr.read_to_string(&mut err);
+            }
+            panic!("connect no-warm: {e:?}; stderr: {err}");
+        });
+    assert_eq!(
+        ws_no_warm.next().await.unwrap().unwrap(),
+        Message::Text("dep:plain".into())
+    );
+    ws_no_warm.send(Message::Text("hi".into())).await.unwrap();
+    assert_eq!(
+        ws_no_warm.next().await.unwrap().unwrap(),
+        Message::Text("echo:plain:hi".into())
+    );
 }

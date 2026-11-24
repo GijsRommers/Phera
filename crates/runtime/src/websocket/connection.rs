@@ -7,7 +7,9 @@ use phera_extension_api::{
     Param, ParamType, PhpArray, PropertyEntry, PropertyType, Registry, Value, Visibility, args,
 };
 
-use super::{CONNECTION_CLASS, context as ws_context, send_fn, utf8_arg};
+use super::{
+    CONNECTION_CLASS, context as ws_context, send_fn, utf8_arg, validate_outbound_payload,
+};
 
 /// Registers the final `Phera\WebSocket\Connection` class.
 pub(super) fn register(registry: &mut Registry) {
@@ -124,6 +126,7 @@ fn conn_send(
     let id = connection_id(this)?;
     let data = args::bytes(arguments, 0);
     let binary = args::bool(arguments, 1).unwrap_or(false);
+    validate_outbound_payload(data, binary)?;
     let ok = context
         .websocket_sink()
         .is_some_and(|sink| sink.send(&id, data, binary));
@@ -147,6 +150,7 @@ fn conn_broadcast(
     let room = utf8_arg(arguments, 0)?;
     let data = args::bytes(arguments, 1);
     let binary = args::bool(arguments, 2).unwrap_or(false);
+    validate_outbound_payload(data, binary)?;
     let include_self = args::bool(arguments, 3).unwrap_or(false);
     let exclude = (!include_self).then_some(id.as_str());
     let sent = context
