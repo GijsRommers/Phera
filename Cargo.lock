@@ -3058,7 +3058,7 @@ dependencies = [
  "cookie_store",
  "flate2",
  "futures-util",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "http-body-util",
  "httpdate",
  "hyper",
@@ -3152,7 +3152,7 @@ dependencies = [
 name = "phera-ext-gmp"
 version = "0.1.0"
 dependencies = [
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "num-bigint",
  "num-integer",
  "num-traits",
@@ -3166,7 +3166,7 @@ dependencies = [
  "argon2",
  "bcrypt",
  "digest 0.10.7",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "gost94",
  "md-5 0.10.6",
  "md2",
@@ -3264,7 +3264,7 @@ dependencies = [
  "digest 0.10.7",
  "ecb",
  "ed25519-dalek",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "md-5 0.10.6",
  "md-5 0.11.0",
  "ofb",
@@ -3342,7 +3342,7 @@ dependencies = [
 name = "phera-ext-random"
 version = "0.1.0"
 dependencies = [
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "phera-ext-core",
  "phera-extension-api",
  "phera-source",
@@ -3385,7 +3385,7 @@ name = "phera-ext-session"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "phera-ext-http",
  "phera-ext-serialize",
  "phera-ext-streams",
@@ -3433,7 +3433,7 @@ dependencies = [
  "crypto_secretbox",
  "curve25519-dalek",
  "ed25519-dalek",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "hmac 0.12.1",
  "phera-extension-api",
  "poly1305 0.9.1",
