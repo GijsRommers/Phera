@@ -17,22 +17,61 @@ applications actually use, with Symfony and Laravel setting the bar for what has
 to work.
 
 > [!WARNING]
-> Phera is in early development. It runs real applications, but it is slower
-> than PHP today and not ready for production. The numbers below say how far
-> it is.
+> Phera is in early development and not ready for production. It already runs
+> real Symfony and Laravel applications and outperforms PHP 8.5 FPM on Symfony
+> + Doctrine database workloads under load, while plain CLI scripts and Laravel
+> Eloquent routes are still slower than PHP today. The numbers below say where
+> it stands.
 
 ## 📍 Where it stands
 
-Measured in November 2026 against PHP 8.5, the same script or request on both.
+Measured in November 2026 against PHP 8.5.13, with byte-for-byte identical responses on both.
 
 | What | State |
 | --- | --- |
 | Laravel 13 JSON API with Eloquent | Runs. `artisan migrate` and 20 API requests (validation, create, read, update, delete, pagination, relations, a transaction) give PHP's answers on SQLite, MySQL and PostgreSQL |
-| Symfony 7.4 with Doctrine | Runs. `doctrine:schema:create` and 22 API requests (routes with parameters, validation, relations, aggregate queries) give PHP's answers on SQLite |
+| Symfony 7.4 with Doctrine | Runs. `doctrine:schema:create` and 22 API requests (routes with parameters, validation, relations, aggregate queries) give PHP's answers on SQLite, MySQL and PostgreSQL |
 | WordPress | `mysqli` and the engine fixes it needed are in. The end-to-end comparison with PHP has not been repeated since |
 | PHP's own test suite (php-src) | 9,136 of the 13,388 core tests pass. Of 4,542 tests for the later extensions (dom, the XML family, openssl, session, curl, intl and others) 1,737 pass |
-| Speed of plain scripts | Between about the same CPU time as PHP's interpreter (arrays, arithmetic) and 5.5 times as much (method calls) |
-| Speed of a framework request | With warm-up snapshots ([below](#-boot-once-fork-every-request)) against PHP 8.5.13 FPM (OPcache on, JIT off): Symfony 7.4 + Doctrine `/api/products` uses **7.46M vs 6.02M** instructions (**1.24× PHP**), `/api/ping` **5.77M vs 3.21M** (**1.80×**), Laravel 13 `/api/hello` **15.68M vs 5.96M** (**2.63×**), and Laravel `/api/posts?page=2` **34.14M vs 13.70M** (**2.49×**). Under load on 2 cores / 2 GiB RAM with PostgreSQL 17 (2 Phera workers vs 40 static PHP-FPM children behind nginx): Symfony `/api/products` serves **1,075 RPS** (`c=16`) and **1,051 RPS** (`c=64`) vs FPM's **821 / 854 RPS**; with a 20 ms DB wait (`/api/products-io`), **910 RPS** (`c=64`) and **792 RPS** (`c=128`) vs FPM's **721 / 690 RPS**; plain Symfony `/api/ping` serves **1,513 / 1,441 RPS** vs FPM's **1,938 / 1,984 RPS**; Laravel `/api/posts?page=2` serves **243 / 237 RPS** vs FPM's **494 / 513 RPS** |
+| Speed of plain CLI scripts | Between ~1× PHP's interpreter (arrays, arithmetic) and ~6.4–7.5× (generators, reflection, method calls); actively being optimized |
+| Speed of a framework request | With warm-up snapshots ([below](#-boot-once-fork-every-request)), beats PHP 8.5.13 FPM + nginx on Symfony 7.4 + Doctrine across PostgreSQL (**+94%**), MySQL 8.4 (**+41%**), and SQLite WAL (**+23%**); within **4.3%** of FPM on `/api/ping`; still behind FPM on Laravel 13 Eloquent (details below) |
+
+## 📊 Performance
+
+Measured on Linux x86_64 inside a **2-core / 2 GiB RAM** cgroup comparing `phera serve` (**2 workers**, route warm-up snapshots, built-in async DB pool) against **PHP 8.5.13 FPM** (**40 static children**, OPcache ON, JIT OFF) behind **nginx**. Every measured response returned HTTP 200 and matched PHP 8.5.13 FPM byte-for-byte (SHA-256 verified), with zero SQLite lock/busy errors.
+
+### HTTP Throughput (2 cores / 2 GiB)
+
+| Database | Framework & Route | Concurrency | Phera | PHP 8.5 FPM + nginx | Δ vs FPM | New DB connections (Phera / FPM) |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| **PostgreSQL 17.11** | Symfony `/api/products` | 16 | **1,377 RPS** | 716 RPS | **+92.3%** | pooled / per-request |
+| **PostgreSQL 17.11** | Symfony `/api/products` | 64 | **1,330 RPS** | 687 RPS | **+93.6%** | pooled / per-request |
+| **PostgreSQL 17.11** | Symfony `/api/products-io` (20 ms wait) | 64 | **1,198 RPS** | 750 RPS | **+59.9%** | pooled / per-request |
+| **PostgreSQL 17.11** | Symfony `/api/products-io` (20 ms wait) | 128 | **970 RPS** | 756 RPS | **+28.3%** | pooled / per-request |
+| **PostgreSQL 17.11** | Symfony `/api/ping` | 16 | 1,880 RPS | **1,965 RPS** | −4.3% | — |
+| **PostgreSQL 17.11** | Laravel `/api/posts?page=2` | 64 | 329 RPS | **542 RPS** | −39.4% | pooled / per-request |
+| **MySQL 8.4.11** | Symfony `/api/products` | 16 | **1,412 RPS** | 1,012 RPS | **+39.6%** | **1** / 10,137 |
+| **MySQL 8.4.11** | Symfony `/api/products` | 64 | **1,312 RPS** | 934 RPS | **+40.5%** | **2** / 9,406 |
+| **MySQL 8.4.11** | Symfony `/api/products-io` (20 ms wait) | 64 | **940 RPS** | 875 RPS | **+7.5%** | **2** / 8,815 |
+| **MySQL 8.4.11** | Laravel `/api/posts?page=2` | 64 | 359 RPS | **614 RPS** | −41.6% | **2** / 6,205 |
+| **SQLite WAL** | Symfony `/api/products` | 16 | **1,359 RPS** | 1,106 RPS | **+22.9%** | local WAL |
+| **SQLite WAL** | Symfony `/api/products` | 64 | **1,263 RPS** | 1,108 RPS | **+14.0%** | local WAL |
+| **SQLite WAL** | Laravel `/api/posts?page=2` | 64 | 381 RPS | **718 RPS** | −46.9% | local WAL |
+
+### Sequential Request Cost (User Instructions per Request, Warmed L2)
+
+Paired 2-round `perf stat` means (millions of user instructions per request, lower is better):
+
+| Route | Database | Phera | PHP 8.5 FPM | Ratio |
+| --- | --- | ---: | ---: | ---: |
+| Symfony `/api/products` | MySQL 8.4.11 | **5.84M** | 5.89M | **0.99×** |
+| Symfony `/api/products` | PostgreSQL 17.11 | 6.03M | 6.02M | **1.00×** |
+| Symfony `/api/products` | SQLite WAL | 6.05M | 6.05M | **1.00×** |
+| Symfony `/api/ping` | — | 4.64M | 3.21M | 1.45× |
+| Laravel `/api/hello` | — | 12.41M | 5.96M | 2.08× |
+| Laravel `/api/posts?page=2` | PostgreSQL 17.11 | 27.77M | 13.70M | 2.03× |
+| Laravel `/api/posts?page=2` | MySQL 8.4.11 | 27.87M | 13.68M | 2.04× |
+| Laravel `/api/posts?page=2` | SQLite WAL | 28.53M | 14.31M | 1.99× |
 
 Phera validates union and intersection declarations during compilation and
 checks inherited property types when linking classes. Ordinary typed
@@ -509,8 +548,8 @@ warmup = ["/api/posts", "/"]
 or `phera serve --warmup /api/posts --warmup / public` (the option wins over
 the file; both become the environment variable `PHERA_WARMUP`, which you can
 also set yourself). On the test applications a Laravel Eloquent route went
-from 46.9 to 34.1 million instructions per request, and a Symfony Doctrine
-route from 28.2 to 7.5 million.
+from 37.6 to 27.8 million instructions per request, and a Symfony Doctrine
+route from 24.6 to 6.0 million.
 
 The contract:
 
