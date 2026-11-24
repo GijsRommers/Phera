@@ -23,6 +23,7 @@ pub mod request;
 pub mod response;
 mod server;
 mod shutdown;
+pub mod websocket;
 mod worker;
 
 pub use config::ServerConfig;
@@ -30,3 +31,7 @@ pub use handler::{Handler, HandlerFactory};
 pub use request::{HttpVersion, Request};
 pub use response::{Body, FileSlice, Response};
 pub use server::{Server, ServerHandle};
+pub use websocket::{
+    WebSocketConfig, WebSocketEvent, WebSocketEventKind, WebSocketHub, WebSocketOutcome,
+    WebSocketUpgrade,
+};

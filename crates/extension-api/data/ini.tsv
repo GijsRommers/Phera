@@ -211,6 +211,7 @@ core	zend.signal_check	bool	4	30
 phera_server	opcache.revalidate_freq	int	7	32
 phera_server	opcache.revalidate_path	bool	7	30
 phera_server	opcache.validate_timestamps	bool	7	31
+phera_server	phera.ws_max_context_bytes	int	7	3136333834
 mysqli	mysqli.allow_local_infile	bool	4	30
 mysqli	mysqli.allow_persistent	bool	4	31
 mysqli	mysqli.default_host	string	7	-

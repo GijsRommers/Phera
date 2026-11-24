@@ -161,6 +161,30 @@ effect (logging, counting) is called once per warmed class in the warm-up
 boot and then no longer in requests. `phera serve --no-class-warmup` turns
 this off.
 
+### WebSockets
+
+`phera serve` handles RFC 6455 WebSocket connections on the same HTTP listener.
+Upgrade requests run PHP first so scripts can verify auth, set cookies, and
+call `Phera\WebSocket\accept(MyHandler::class, context: [...], rooms: [...], subprotocol: ...)`.
+Idle sockets stay in Rust while each `onOpen`, `onMessage`, and `onClose`
+event runs strictly in arrival order inside an isolated PHP fork:
+
+- Handlers implement `Phera\WebSocket\Handler`. Snapshotted apps (including
+  Laravel and Symfony) resolve handlers through `Phera\WebSocket\resolveUsing(...)`
+  (or `new $handlerClass()`); un-snapshotted scripts guard `accept()` with
+  `if (!Phera\WebSocket\isEvent())`.
+- HTTP requests and WebSocket handlers can push to any connection or room via
+  `Phera\WebSocket\send()`, `Phera\WebSocket\broadcast()`,
+  `Phera\WebSocket\roomCount()`, and `Phera\WebSocket\connections()`.
+- Connection context bags (`$conn->context()`, `$conn->setContext()`) accept
+  `null`, scalars, and nested arrays up to `-d phera.ws_max_context_bytes`
+  (default 16384 bytes).
+- Tune limits via `[server.websocket]` in `phera.toml` (`max_connections`,
+  `max_message_size`, `idle_timeout`, `ping_interval`, `send_queue`,
+  `send_queue_bytes`, `allowed_origins`) or `--ws-max-connections`,
+  `--ws-max-message-size`, `--ws-idle-timeout`, `--ws-ping-interval`,
+  `--ws-send-queue`, and `--ws-allowed-origins`.
+
 ## 🧩 Extensions
 
 Built in, each checked call by call against real PHP: core, standard, ctype,
