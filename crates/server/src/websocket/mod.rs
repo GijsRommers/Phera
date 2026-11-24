@@ -1,5 +1,11 @@
 //! Server-side WebSocket connections, handshake, hub, and framing.
+//!
+//! Two transports reach the same framing loop (`stream`): an HTTP/1.1
+//! `Upgrade: websocket` (`handshake`) and an HTTP/2 extended CONNECT stream
+//! (`extended_connect`, RFC 8441). PHP cannot tell them apart except by
+//! `$_SERVER['SERVER_PROTOCOL']`.
 
+pub(crate) mod extended_connect;
 pub mod handshake;
 pub mod hub;
 pub mod stream;

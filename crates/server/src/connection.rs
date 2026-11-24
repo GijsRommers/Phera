@@ -1,5 +1,6 @@
 //! Per-connection HTTP/1.1, HTTP/2 (h2c), streaming response, and WebSocket
-//! upgrade handling. A PHP `flush()` becomes an HTTP/1.1 chunk or HTTP/2 DATA.
+//! upgrade or extended CONNECT handling. A PHP `flush()` becomes an HTTP/1.1
+//! chunk or HTTP/2 DATA.
 
 use std::error::Error as StdError;
 use std::future::Future;
@@ -30,11 +31,22 @@ use crate::response::Response;
 use crate::response_task::{ConnectionWork, answer};
 use crate::websocket::{
     WebSocketConfig, WebSocketHub,
+    extended_connect::{self, Http2Connect},
     handshake::{
         UpgradeRejection, build_101_response, is_websocket_upgrade_request, validate_handshake,
     },
     stream::{UpgradedContext, run_upgraded_websocket},
 };
+
+/// The receive window of one HTTP/2 stream: hyper's default, written out
+/// because the connection window below is chosen against it.
+const HTTP2_STREAM_WINDOW: u32 = 1024 * 1024;
+
+/// The receive window of a whole HTTP/2 connection. A WebSocket stream whose
+/// PHP handler falls behind stops being read and keeps up to one stream
+/// window of unread DATA; with eight windows per connection, seven such
+/// streams can stall while the other streams still move.
+const HTTP2_CONNECTION_WINDOW: u32 = 8 * HTTP2_STREAM_WINDOW;
 
 /// Runs Hyper's HTTP/2 stream tasks on the worker's `LocalSet` so handlers
 /// stay on the thread that created them and keep their `Rc` state.
@@ -92,13 +104,24 @@ pub(super) async fn handle_connection(mut params: ConnectionParams) {
         let ws = params.ws.clone();
         let ws_shutdown = ws_shutdown.clone();
         async move {
-            let is_upgrade = !http2
-                && is_websocket_upgrade_request(
+            let websocket = if http2 {
+                match extended_connect::classify(&hyper_request) {
+                    Http2Connect::Ordinary => None,
+                    Http2Connect::WebSocket => Some(WebSocketTransport::Http2Connect),
+                    Http2Connect::OtherProtocol => {
+                        let response = extended_connect::other_protocol_response();
+                        return Ok(to_hyper_response(response, http2));
+                    }
+                }
+            } else {
+                is_websocket_upgrade_request(
                     hyper_request.method(),
                     hyper_request.version(),
                     hyper_request.headers(),
-                );
-            let response = if is_upgrade {
+                )
+                .then_some(WebSocketTransport::Http1Upgrade)
+            };
+            let response = if let Some(transport) = websocket {
                 let upgrade = UpgradeState {
                     peer,
                     local_addr,
@@ -109,7 +132,7 @@ pub(super) async fn handle_connection(mut params: ConnectionParams) {
                     ws,
                     shutdown: ws_shutdown,
                 };
-                handle_ws_upgrade(hyper_request, upgrade).await
+                handle_ws_upgrade(hyper_request, transport, upgrade).await
             } else {
                 match to_request(hyper_request, peer, local_addr, limits, started, false).await {
                     Ok(request) => {
@@ -142,7 +165,12 @@ pub(super) async fn handle_connection(mut params: ConnectionParams) {
     builder
         .http2()
         .timer(TokioTimer::new())
-        .keep_alive_interval(Some(limits.idle_timeout));
+        .keep_alive_interval(Some(limits.idle_timeout))
+        // Announces SETTINGS_ENABLE_CONNECT_PROTOCOL = 1 so that clients may
+        // open WebSockets as streams (RFC 8441).
+        .enable_connect_protocol()
+        .initial_stream_window_size(HTTP2_STREAM_WINDOW)
+        .initial_connection_window_size(HTTP2_CONNECTION_WINDOW);
     let conn = builder.serve_connection_with_upgrades(TokioIo::new(preface_stream), service);
     tokio::pin!(conn);
 
@@ -191,6 +219,15 @@ fn is_timeout_error(error: &(dyn StdError + 'static)) -> bool {
     false
 }
 
+/// How a WebSocket request reached the server.
+#[derive(Clone, Copy)]
+enum WebSocketTransport {
+    /// `GET` with `Upgrade: websocket`; the socket switches protocols.
+    Http1Upgrade,
+    /// An HTTP/2 extended CONNECT; one stream becomes the WebSocket.
+    Http2Connect,
+}
+
 struct UpgradeState {
     peer: SocketAddr,
     local_addr: SocketAddr,
@@ -202,16 +239,29 @@ struct UpgradeState {
     shutdown: watch::Receiver<bool>,
 }
 
+/// Run PHP on a WebSocket request and, when it calls `accept()`, answer
+/// `101` (HTTP/1.1) or `200` (HTTP/2) and hand the upgraded transport to the
+/// framing loop. Everything between, origin check and limits included, is
+/// the same for both transports.
 async fn handle_ws_upgrade(
     mut hyper_request: HyperRequest<Incoming>,
+    transport: WebSocketTransport,
     state: UpgradeState,
 ) -> Response {
-    let accept_key = match validate_handshake(hyper_request.headers()) {
+    let http2 = matches!(transport, WebSocketTransport::Http2Connect);
+    let handshake = match transport {
+        WebSocketTransport::Http1Upgrade => validate_handshake(hyper_request.headers()).map(Some),
+        WebSocketTransport::Http2Connect => {
+            extended_connect::validate_handshake(hyper_request.headers()).map(|()| None)
+        }
+    };
+    // The `Sec-WebSocket-Accept` value; HTTP/2 has none.
+    let accept_key = match handshake {
         Ok(key) => key,
         Err(rejection) => return rejection.into_response(),
     };
     let on_upgrade = hyper::upgrade::on(&mut hyper_request);
-    let request = match to_request(
+    let mut request = match to_request(
         hyper_request,
         state.peer,
         state.local_addr,
@@ -222,8 +272,11 @@ async fn handle_ws_upgrade(
     .await
     {
         Ok(request) => request,
-        Err(error) => return body_error_response(error, false),
+        Err(error) => return body_error_response(error, http2),
     };
+    if http2 {
+        extended_connect::present_as_upgrade(&mut request);
+    }
     if !state
         .handler
         .websocket_origin_allowed(&request, state.ws.config.allowed_origins.as_deref())
@@ -246,15 +299,22 @@ async fn handle_ws_upgrade(
     let Some(upgrade) = response.upgrade.take() else {
         return response;
     };
-    let Some(tcp_slot) = state.work.tcp_slot.borrow_mut().take() else {
-        return Response::text(503, "connection already upgraded\n");
+    let tcp_slot = match transport {
+        WebSocketTransport::Http1Upgrade => match state.work.tcp_slot.borrow_mut().take() {
+            Some(slot) => Some(slot),
+            None => return Response::text(503, "connection already upgraded\n"),
+        },
+        WebSocketTransport::Http2Connect => None,
     };
-    let accepted = build_101_response(
-        response,
-        &accept_key,
-        upgrade.subprotocol.as_deref(),
-        client_subprotocols.as_deref(),
-    );
+    let subprotocol = upgrade.subprotocol.as_deref();
+    let accepted = match &accept_key {
+        Some(key) => build_101_response(response, key, subprotocol, client_subprotocols.as_deref()),
+        None => extended_connect::build_200_response(
+            response,
+            subprotocol,
+            client_subprotocols.as_deref(),
+        ),
+    };
     let done = state.ws.done;
     let ws_config = state.ws.config;
     let ws_hub = state.ws.hub;
