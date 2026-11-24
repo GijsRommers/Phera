@@ -280,12 +280,30 @@ impl Machine<'_> {
         {
             return Step::Slow;
         }
-        let value = match source {
+        let mut value = match source {
             Some(source) => self.registers.take(frame.base() + source.index()),
             None => Value::Null,
         };
         self.stack.pop_for_return();
         self.registers.release_frame(frame.start(), frame.base());
+        if !self.ids.has_due()
+            && let Some(next_frame) = crate::calls::native_loops::try_continue_in_machine(
+                self.code,
+                self.classes,
+                self.stack,
+                self.registers,
+                self.frame_limit,
+                &mut value,
+            )
+        {
+            if self.spend_work() {
+                return Step::Yield;
+            }
+            return Step::Switched(Position {
+                frame: next_frame,
+                ip: 0,
+            });
+        }
         self.stack.handed_back = Some(super::execution_loop::HandedBack::NativeLoop(value));
         Step::Yield
     }

@@ -73,8 +73,27 @@ pub(crate) fn push_constructed(
 /// Returns `false`, having done nothing, for a closure over native code.
 pub(crate) fn push_closure_call(
     code: &CodeTable,
+    parts: (&mut CallStack, &mut Registers),
+    object: &Rc<Object>,
+) -> bool {
+    push_closure_call_inner(code, parts, object, false)
+}
+
+/// Same as [`push_closure_call`], requiring `ClosureOrigin::Lexical` in one
+/// borrow of `object.native`.
+pub(crate) fn push_lexical_closure_call(
+    code: &CodeTable,
+    parts: (&mut CallStack, &mut Registers),
+    object: &Rc<Object>,
+) -> bool {
+    push_closure_call_inner(code, parts, object, true)
+}
+
+fn push_closure_call_inner(
+    code: &CodeTable,
     (stack, registers): (&mut CallStack, &mut Registers),
     object: &Rc<Object>,
+    require_lexical: bool,
 ) -> bool {
     let native = object.native.borrow();
     let Some(state) = native
@@ -83,6 +102,9 @@ pub(crate) fn push_closure_call(
     else {
         return false;
     };
+    if require_lexical && state.origin != crate::closures::ClosureOrigin::Lexical {
+        return false;
+    }
     let Some(function) = state.callee.user_function() else {
         return false;
     };

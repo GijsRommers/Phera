@@ -27,6 +27,12 @@ pub(crate) struct PropertyEntry {
     /// An immutable class fact, so a property-site hit avoids a class downcast.
     read_without_static_notice: bool,
     pub(crate) hooks: Option<Box<CachedPropertyHooks>>,
+    /// Direct PHP `__get($name)` handler for undeclared property reads on
+    /// classes without native properties or same-named statics.
+    pub(crate) magic_get: Option<crate::code_table::FunctionIndex>,
+    /// Direct PHP `__set($name, $value)` handler for undeclared property writes
+    /// on classes without native properties or same-named statics.
+    pub(crate) magic_set: Option<crate::code_table::FunctionIndex>,
 }
 
 impl PropertyEntry {
@@ -177,6 +183,84 @@ impl Vm {
             },
             _ => WriteRule::General,
         };
+        let read_without_static_notice = !invokes_getter
+            && class.is_none_or(|class| {
+                class
+                    .static_properties
+                    .iter()
+                    .all(|property| property.name != *name)
+            });
+        let plain_magic_eligible = slot.is_none()
+            && read_without_static_notice
+            && class.is_some_and(|class| {
+                class.property_access.is_none()
+                    && !phera_value::ClassHandle::has_native_properties(class)
+            });
+        let magic_get = if plain_magic_eligible {
+            class
+                .and_then(|class| class.magic.as_deref())
+                .and_then(|magic| magic.get.as_ref())
+                .and_then(|method| {
+                    if method.visibility != phera_bytecode::Visibility::Public {
+                        return None;
+                    }
+                    let crate::classes::MethodBody::User(function) = method.body else {
+                        return None;
+                    };
+                    if self.code.function(function).returns_reference {
+                        return None;
+                    }
+                    let facts = self.code.facts(function);
+                    if facts.shape != crate::function_facts::FunctionShape::Plain
+                        || facts.parameters != 1
+                        || !facts.takes_values_only()
+                    {
+                        return None;
+                    }
+                    if facts.is_typed(0)
+                        && !facts
+                            .parameter_masks
+                            .first()
+                            .is_some_and(|mask| mask.intersects(TypeMask::STRING))
+                    {
+                        return None;
+                    }
+                    Some(function)
+                })
+        } else {
+            None
+        };
+        let magic_set = if plain_magic_eligible {
+            class
+                .and_then(|class| class.magic.as_deref())
+                .and_then(|magic| magic.set.as_ref())
+                .and_then(|method| {
+                    if method.visibility != phera_bytecode::Visibility::Public {
+                        return None;
+                    }
+                    let crate::classes::MethodBody::User(function) = method.body else {
+                        return None;
+                    };
+                    let facts = self.code.facts(function);
+                    if facts.shape != crate::function_facts::FunctionShape::Plain
+                        || facts.parameters != 2
+                        || !facts.takes_values_only()
+                    {
+                        return None;
+                    }
+                    if facts.is_typed(0)
+                        && !facts
+                            .parameter_masks
+                            .first()
+                            .is_some_and(|mask| mask.intersects(TypeMask::STRING))
+                    {
+                        return None;
+                    }
+                    Some(function)
+                })
+        } else {
+            None
+        };
         let entry = Rc::new(PropertyEntry {
             class: object.class.clone(),
             scope,
@@ -200,13 +284,9 @@ impl Vm {
                     guard_receiver,
                 })
             }),
-            read_without_static_notice: !invokes_getter
-                && class.is_none_or(|class| {
-                    class
-                        .static_properties
-                        .iter()
-                        .all(|property| property.name != *name)
-                }),
+            read_without_static_notice,
+            magic_get,
+            magic_set,
         });
         if let Some(frame) = self.current() {
             self.code.write_site(
@@ -249,7 +329,132 @@ impl Vm {
             self.set(destination, value);
             return Ok(true);
         }
-        self.enter_cached_getter(&entry, object, destination)
+        if entry.hooks.is_some() {
+            return self.enter_cached_getter(&entry, object, destination);
+        }
+        self.enter_cached_magic_get(&entry, object, destination)
+    }
+
+    /// Synchronous frame-stack entry into `__get(string $name)` for an
+    /// undeclared missing property, avoiding async dispatch, `Box::pin`, and
+    /// nested `run_batch`.
+    #[inline(never)]
+    fn enter_cached_magic_get(
+        &mut self,
+        entry: &PropertyEntry,
+        object: Rc<Object>,
+        destination: Reg,
+    ) -> Result<bool, NativeError> {
+        let Some(function) = entry.magic_get else {
+            return Ok(false);
+        };
+        if object.lazy().is_some()
+            || self.property_guarded(
+                &object,
+                &entry.key,
+                crate::magic_properties::PropertyHook::Get,
+            )
+        {
+            return Ok(false);
+        }
+        let name_value = match &entry.key {
+            ArrayKey::Interned(name) => Value::InternedStr(name),
+            ArrayKey::String(name) => Value::String(name.clone()),
+            ArrayKey::Int(index) => Value::from(index.to_string()),
+        };
+        self.check_frame_limit()?;
+        let facts = self.code.facts(function);
+        let base = self.registers.len() + 1;
+        self.registers
+            .grow_to(base + (facts.registers as usize).max(1));
+        self.registers.put(base - 1, Value::Object(object.clone()));
+        self.registers.put(base, name_value);
+        self.property_guards
+            .push(crate::magic_properties::PropertyGuard {
+                object: Rc::downgrade(&object),
+                name: entry.key.clone(),
+                hook: crate::magic_properties::PropertyHook::Get,
+            });
+        let frame = crate::calls::frame::Frame::of_kind(
+            function,
+            crate::calls::prepared_call::CallKind::Method,
+            base,
+            Some(destination),
+        );
+        self.call_stack.push(frame);
+        self.call_stack.current_extras_mut().magic_guard = true;
+        Ok(true)
+    }
+
+    /// Synchronous frame-stack entry into `__set(string $name, mixed $value)`
+    /// for an undeclared property write.
+    #[inline(never)]
+    fn enter_cached_magic_set(
+        &mut self,
+        entry: &PropertyEntry,
+        object: Rc<Object>,
+        value: &Value,
+        assignment: Option<(Reg, Reg)>,
+    ) -> Result<bool, NativeError> {
+        let Some(function) = entry.magic_set else {
+            return Ok(false);
+        };
+        if matches!(value, Value::Reference(_))
+            || object.lazy().is_some()
+            || object.has(&entry.key)
+            || self.property_guarded(
+                &object,
+                &entry.key,
+                crate::magic_properties::PropertyHook::Set,
+            )
+        {
+            return Ok(false);
+        }
+        let registers = {
+            let facts = self.code.facts(function);
+            if facts.is_typed(1)
+                && !facts
+                    .parameter_masks
+                    .get(1)
+                    .is_some_and(|mask| mask.intersects(crate::types::own_type(value)))
+            {
+                return Ok(false);
+            }
+            facts.registers as usize
+        };
+        if let Some((source, result)) = assignment {
+            if self.raw_local(source).is_reference() {
+                return Ok(false);
+            }
+            self.set(result, value.clone());
+        }
+        let name_value = match &entry.key {
+            ArrayKey::Interned(name) => Value::InternedStr(name),
+            ArrayKey::String(name) => Value::String(name.clone()),
+            ArrayKey::Int(index) => Value::from(index.to_string()),
+        };
+        self.check_frame_limit()?;
+        let base = self.registers.len() + 1;
+        self.registers.grow_to(base + registers.max(2));
+        self.registers.put(base - 1, Value::Object(object.clone()));
+        self.registers.put(base, name_value);
+        self.registers.put(base + 1, value.clone());
+        self.property_guards
+            .push(crate::magic_properties::PropertyGuard {
+                object: Rc::downgrade(&object),
+                name: entry.key.clone(),
+                hook: crate::magic_properties::PropertyHook::Set,
+            });
+        let mut frame = crate::calls::frame::Frame::of_kind(
+            function,
+            crate::calls::prepared_call::CallKind::Method,
+            base,
+            None,
+        );
+        frame.discard_result();
+        self.call_stack.push(frame);
+        self.call_stack.current_extras_mut().magic_guard = true;
+        Ok(true)
     }
 
     /// Mirrors inc_dec_path and validated write_place only for an existing,
@@ -422,7 +627,10 @@ impl Vm {
         let value = widened.as_ref().unwrap_or(value);
         let accepted = !matches!(value, Value::Reference(_)) && entry.write_rule.accepts(value);
         if !accepted {
-            return self.enter_cached_setter(&entry, object, value, assignment);
+            if entry.hooks.is_some() {
+                return self.enter_cached_setter(&entry, object, value, assignment);
+            }
+            return self.enter_cached_magic_set(&entry, object, value, assignment);
         }
         if !crate::property_storage::write_direct_at(
             &object,

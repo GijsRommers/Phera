@@ -500,7 +500,7 @@ impl Tables<'_> {
             Old::ReturnReference(src) => Instruction::ReturnReference { src },
             Old::Return(src) => Instruction::Return { src },
             Old::Exit(src) => Instruction::Exit { src },
-            Old::Array(dst) => Instruction::NewArray { dst, capacity: 0 },
+            Old::Array(dst, capacity) => Instruction::NewArray { dst, capacity },
             Old::ArrayPush {
                 array,
                 key,
