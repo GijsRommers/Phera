@@ -4,6 +4,7 @@
 mod analysis;
 pub mod baseline;
 pub mod builtins;
+mod certainty;
 pub mod collect;
 mod collect_class;
 mod composer;
@@ -13,6 +14,7 @@ mod constants;
 mod dependencies;
 pub mod diagnostic;
 mod enums;
+mod framework_knowledge;
 pub mod global_effects;
 pub mod index;
 #[cfg(test)]
@@ -62,6 +64,9 @@ fn check_project(options: &Options) -> Result<Report, String> {
     diagnostics.extend(found);
     diagnostics.sort();
     diagnostics.dedup();
+    if options.generate_baseline.is_none() {
+        config::Ignore::filter(&options.phpstan_ignores, &mut diagnostics);
+    }
     Ok(Report {
         diagnostics,
         files: paths.len(),
@@ -77,9 +82,36 @@ pub(crate) fn analyze_files(
     paths: &[std::path::PathBuf],
     options: &Options,
 ) -> Result<(Vec<Diagnostic>, usize), String> {
+    let (mut findings, mut vendor_files) = analyze_types(files, paths, options, true)?;
+    if !options.treat_phpdoc_types_as_certain && findings.iter().any(certainty::required) {
+        let (native, native_vendor_files) = analyze_types(files, paths, options, false)?;
+        certainty::retain_native(&mut findings, &native);
+        vendor_files = vendor_files.max(native_vendor_files);
+    }
+    Ok((findings, vendor_files))
+}
+
+fn analyze_types(
+    files: &[project::ParsedFile],
+    paths: &[std::path::PathBuf],
+    options: &Options,
+    read_docs: bool,
+) -> Result<(Vec<Diagnostic>, usize), String> {
     let mut diagnostics = Vec::new();
     let mut index = builtins::load_supported();
-    index.read_type_docs = options.level >= 2;
+    index.report_maybe_generic_types = options.level >= 7;
+    index.read_type_docs = read_docs
+        && (options.level >= 2
+            || options.strict
+            || options.check_missing_typehints == Some(true)
+            || options.check_phpdoc_missing_return == Some(true)
+            || options.level >= 1 && options.unnecessary_null_coalesce);
+    if options.level >= 4 {
+        builtins::regex_version::add_constants(&mut index);
+    }
+    if options.level >= 7 {
+        builtins::analysis_facts::refine(&mut index);
+    }
     for file in files {
         collect::collect(&mut index, &file.path, &file.source, &file.program);
     }
@@ -104,15 +136,14 @@ pub(crate) fn analyze_files(
             .iter()
             .any(|path| std::path::Path::new(path).is_dir());
     for file in files {
-        let mut found = analysis::Analyzer::new(
+        let found = analysis::Analyzer::new(
             &mut index,
             &mut dependencies,
             file,
-            options.level,
+            options,
             report_unused_traits,
         )
         .run();
-        suppress::filter(file, &mut found);
         diagnostics.extend(found);
     }
     Ok((diagnostics, dependencies.vendor_files))

@@ -41,6 +41,7 @@ impl Mysql {
 
     pub async fn select_db(&mut self, name: &str) -> Result<(), DbError> {
         self.check_pending().await?;
+        self.db_changed = true;
         let name = identifier(name);
         self.connection()?
             .query_drop(format!("USE {name}"))
@@ -122,6 +123,9 @@ impl Mysql {
         owner: &Arc<()>,
     ) -> Result<Outcome, DbError> {
         self.check_pending().await?;
+        if !self.db_changed && super::contains_use_keyword(&sql) {
+            self.db_changed = true;
+        }
         self.validate_native_text(&sql).await?;
         self.stream(super::stream::Query::Text(sql), owner).await
     }
@@ -143,6 +147,9 @@ impl Mysql {
         multiple: bool,
     ) -> Result<Vec<Result<Outcome, DbError>>, DbError> {
         self.check_pending().await?;
+        if !self.db_changed && super::contains_use_keyword(sql) {
+            self.db_changed = true;
+        }
         if !multiple {
             self.validate_native_text(sql).await?;
         }

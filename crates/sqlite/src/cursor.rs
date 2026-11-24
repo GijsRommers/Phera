@@ -16,6 +16,7 @@ enum Command {
     Execute(Vec<(usize, Cell)>, Reply<Execution>),
     Bind(Vec<(usize, Cell)>, Reply<()>),
     Fetch(Reply<Option<Vec<Cell>>>),
+    FetchAll(Reply<Vec<Vec<Cell>>>),
     Reset(Reply<()>),
     Clear(Reply<()>),
     Sql(Reply<Option<String>>),
@@ -47,6 +48,11 @@ impl Statement {
 
     pub async fn fetch(&self) -> Result<Option<Vec<Cell>>, Error> {
         self.ask(Command::Fetch).await
+    }
+
+    /// Drains all remaining rows from the live cursor in a single thread hop.
+    pub async fn fetch_all(&self) -> Result<Vec<Vec<Cell>>, Error> {
+        self.ask(Command::FetchAll).await
     }
 
     pub async fn reset(&self) -> Result<(), Error> {
@@ -115,7 +121,7 @@ pub(crate) async fn serve(
                     let _ = reply.send(Err(error.into()));
                     continue;
                 }
-                let description = Description::read(&statement);
+                let description = Description::read_columns_only(&statement);
                 let mut rows = statement.raw_query();
                 let first = read(&mut rows);
                 let active = matches!(&first, Ok(Some(_)));
@@ -141,6 +147,12 @@ pub(crate) async fn serve(
                                 break;
                             }
                         }
+                        Command::FetchAll(reply) => {
+                            let result = read_all(&mut rows);
+                            busy.store(false, Ordering::Release);
+                            let _ = reply.send(result);
+                            break;
+                        }
                         Command::Sql(reply) => {
                             let _ = reply.send(Ok(rows.as_ref().and_then(|s| s.expanded_sql())));
                         }
@@ -161,6 +173,9 @@ pub(crate) async fn serve(
             Command::Fetch(reply) => {
                 let _ = reply.send(Ok(None));
             }
+            Command::FetchAll(reply) => {
+                let _ = reply.send(Ok(Vec::new()));
+            }
             Command::Reset(reply) => {
                 let _ = reply.send(Ok(()));
             }
@@ -179,8 +194,18 @@ fn read(rows: &mut Rows<'_>) -> Result<Option<Vec<Cell>>, Error> {
     let Some(row) = rows.next()? else {
         return Ok(None);
     };
-    let values = (0..row.as_ref().column_count())
-        .map(|index| row.get_ref(index).map(Cell::from_ref))
-        .collect::<rusqlite::Result<_>>()?;
+    let count = row.as_ref().column_count();
+    let mut values = Vec::with_capacity(count);
+    for index in 0..count {
+        values.push(Cell::from_ref(row.get_ref(index)?));
+    }
     Ok(Some(values))
+}
+
+fn read_all(rows: &mut Rows<'_>) -> Result<Vec<Vec<Cell>>, Error> {
+    let mut batch = Vec::new();
+    while let Some(row) = read(rows)? {
+        batch.push(row);
+    }
+    Ok(batch)
 }

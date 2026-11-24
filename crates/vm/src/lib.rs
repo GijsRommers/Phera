@@ -178,7 +178,6 @@ mod serialization;
 mod snapshot;
 mod spl_autoload;
 mod static_places;
-mod static_sites;
 mod static_variables;
 mod string_comparison;
 mod string_offsets;
@@ -194,6 +193,7 @@ mod unit_caches;
 mod unpacking;
 mod unsupported_items;
 mod web_output;
+mod websocket;
 mod worker_code;
 
 pub use include_lookup::{
@@ -227,8 +227,7 @@ pub struct Vm {
     native_callback_sites: Vec<error_traces::NativeCallbackSite>,
     debug_objects: Vec<u32>,
     property_guards: Vec<magic_properties::PropertyGuard>,
-    unset_typed_properties: std::collections::HashMap<u32, magic_properties::UnsetProperties>,
-    clone_scopes: classes::cloning::CloneScopes,
+    unset_typed_properties: foldhash::HashMap<u32, magic_properties::UnsetProperties>,
     closure_captures: Vec<closures::PendingCapture>,
     /// Pure defaults retain lexical class scope while running outside a method frame.
     initializer_scope: Option<String>,
@@ -238,14 +237,14 @@ pub struct Vm {
     pending_dimension: Option<dimensions::DimensionPath>,
     returned_hook: Option<property_hook_continuation::ReturnedHook>,
     native_view_depth: Option<usize>,
-    prelinked_classes: std::collections::HashSet<(usize, usize)>,
+    prelinked_classes: Rc<foldhash::HashSet<(usize, usize)>>,
     function_table: function_table::FunctionTable,
     /// Every loaded file and function of the request, by number.
     code: code_table::CodeTable,
     /// Static properties and evaluated class constants of this request.
     class_states: classes::class_state::ClassStates,
     globals: globals::Globals,
-    extension_values: std::collections::HashMap<&'static str, Value>,
+    extension_values: foldhash::HashMap<&'static str, Value>,
     static_variables: static_variables::StaticVariables,
     diagnostic_reporter: diagnostic_reporter::DiagnosticReporter,
     diagnostic_location: Option<diagnostics::SourceLocation>,
@@ -279,7 +278,7 @@ pub struct Vm {
     missed_native: Option<Vec<Value>>,
     /// What extensions remember during this request (response headers, ...).
     state: RequestState,
-    reflection_cache: Option<Box<reflection::ReflectionCache>>,
+    reflection_cache: Option<Rc<reflection::ReflectionCache>>,
     property_references: std::rc::Rc<std::cell::RefCell<reference_holders::ReferenceHolders>>,
     autoload: autoload::Autoloaders,
     request_end: request_end::RequestEnd,
@@ -291,6 +290,25 @@ pub struct Vm {
     suspended_fibers: fibers::SuspendedFibers,
     /// What `Phera\snapshot()` does here, and the state it kept.
     snapshot: snapshot::SnapshotState,
+    websocket_sink: Option<Arc<dyn phera_extension_api::websocket::WebSocketSink>>,
+    websocket_resolver: Option<Value>,
+    websocket_is_event: bool,
+    /// When this VM was forked from a snapshot, allows clean teardown to
+    /// return its unmodified `CodeTable` and `ClassTable::local` back to the
+    /// snapshot's recycle pool.
+    code_recycle: Option<snapshot::CodeRecycle>,
+}
+
+impl Vm {
+    /// Returns unmodified snapshot-shared tables (`CodeTable`,
+    /// `ClassTable::local`) back to the originating snapshot's recycle pool
+    /// before this VM is dropped. Safe to call on any VM (no-op for classic
+    /// runs or forks that loaded/declared new symbols).
+    pub fn recycle(&mut self) {
+        if let Some(recycle) = self.code_recycle.take() {
+            recycle.try_return(&mut self.code, &mut self.classes, &self.function_table);
+        }
+    }
 }
 
 impl Vm {
@@ -304,7 +322,7 @@ impl Vm {
         fibers::register(registry);
     }
 
-    /// Start a fresh request with the worker's already linked built-ins.
+    /// Start a fresh request sharing the worker's built-in definitions.
     pub fn with_native_tables(native: &NativeTables) -> Self {
         let classes = classes::ClassTable::new(native.classes.clone(), native.linked.clone());
         let object_ids = classes.ids_handle();
@@ -321,11 +339,14 @@ impl Vm {
             fiber_bailout: false,
             suspended_fibers: Default::default(),
             snapshot: Default::default(),
+            websocket_sink: None,
+            websocket_resolver: None,
+            websocket_is_event: false,
+            code_recycle: None,
             native_callback_sites: Vec::new(),
             debug_objects: Vec::new(),
             property_guards: Vec::new(),
             unset_typed_properties: Default::default(),
-            clone_scopes: classes::cloning::CloneScopes::default(),
             property_references: Default::default(),
             closure_captures: Vec::new(),
             initializer_scope: None,
@@ -335,7 +356,7 @@ impl Vm {
             pending_dimension: None,
             returned_hook: None,
             native_view_depth: None,
-            prelinked_classes: std::collections::HashSet::new(),
+            prelinked_classes: Default::default(),
             function_table: function_table::FunctionTable::new(),
             code: code_table::CodeTable::for_worker(&native.code),
             class_states: classes::class_state::ClassStates::for_worker(&native.slots),
@@ -431,8 +452,11 @@ impl Vm {
             .await
     }
 
-    async fn run_request(&mut self, unit: Arc<CompiledUnit>) -> i32 {
-        let main = self.code.load(&unit);
+    pub(crate) fn load_entry_unit(
+        &mut self,
+        unit: &Arc<CompiledUnit>,
+    ) -> Result<(), phera_extension_api::NativeError> {
+        let main = self.code.load(unit);
         for id in &unit.hoisted {
             if let Some(function) = unit.functions.get(id.index()) {
                 let index = self.code.declared(main, id.index());
@@ -450,8 +474,12 @@ impl Vm {
                 self.registers.window_mut(index, 1)[0] = self.globals.take(name);
             }
         }
-        self.publish_declaration_warnings(&unit);
-        if let Err(error) = self.hoist_classes(&unit, main) {
+        self.publish_declaration_warnings(unit);
+        self.hoist_classes(unit, main)
+    }
+
+    async fn run_request(&mut self, unit: Arc<CompiledUnit>) -> i32 {
+        if let Err(error) = self.load_entry_unit(&unit) {
             self.unwind(error);
             return self.end_script(request_end::ScriptEnd::Fatal).await;
         }

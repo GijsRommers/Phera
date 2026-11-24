@@ -3,13 +3,28 @@
 use std::rc::Rc;
 
 use phera_bytecode::Reg;
-use phera_extension_api::{NativeError, RequestState};
+use phera_extension_api::{LocalFuture, NativeError, OutputDiagnostics, RequestState};
 use phera_value::{Value, to_php_string};
 
 use crate::web_output::{ResponseOutput, WebOutputFactory};
 use crate::{OutputSink, Vm, diagnostics::SourceLocation, output_buffer::Buffers};
 
 impl Vm {
+    #[cold]
+    pub(super) fn drain_output_diagnostics(&mut self) -> LocalFuture<'_, OutputDiagnostics> {
+        Box::pin(async move {
+            use crate::request_end::ScriptEnd;
+
+            match self.drain_error_handlers().await {
+                Ok(()) => OutputDiagnostics::Ready,
+                Err(error) if ScriptEnd::of(&error) == ScriptEnd::Fatal => {
+                    OutputDiagnostics::Stop(error)
+                }
+                Err(error) => OutputDiagnostics::WriteThenUnwind(error),
+            }
+        })
+    }
+
     /// Implements PHP Echo semantics outside the dispatch loop.
     pub(crate) fn echo_value(&mut self, source: Reg) -> Result<(), NativeError> {
         let text = match &*self.operand(source) {

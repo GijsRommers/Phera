@@ -23,10 +23,13 @@ impl Analyzer<'_> {
         if self.level < 4 {
             return false;
         }
-        // If a nested test already supplies the constant, its own rule
-        // can report it without another notice on the enclosing operator.
-        if self.type_test_call(operand) || condition_has_own_rule(operand) {
+        if self.type_test_call(operand) {
             return true;
+        }
+        if condition_has_own_rule(operand) {
+            // The operand rule owns the operand. The combined result can
+            // still be impossible because the tests contradict each other.
+            return value;
         }
         if self.discarded_expression == Some(logical.span) && matches!(side, Side::Right) {
             return false;

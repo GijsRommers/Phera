@@ -35,6 +35,7 @@ use phera_value::Fork;
 use crate::Vm;
 
 pub use boot::{BootOutcome, Snapshot};
+pub(crate) use boot::{CodeRecycle, RecycledTables};
 pub(crate) use copy::SnapshotRefusal;
 
 /// What `Phera\snapshot()` does in this VM.
@@ -151,7 +152,9 @@ impl<T: ForkCopy> ForkCopy for std::collections::VecDeque<T> {
 }
 
 /// Globals keep their order of declaration, so the copy keeps it too.
-impl<K: Clone + Eq + std::hash::Hash, V: ForkCopy> ForkCopy for indexmap::IndexMap<K, V> {
+impl<K: Clone + Eq + std::hash::Hash, V: ForkCopy, S: std::hash::BuildHasher + Default> ForkCopy
+    for indexmap::IndexMap<K, V, S>
+{
     fn fork_copy(&self, fork: &mut Fork<'_>) -> Self {
         self.iter()
             .map(|(key, value)| (key.clone(), value.fork_copy(fork)))
@@ -159,7 +162,9 @@ impl<K: Clone + Eq + std::hash::Hash, V: ForkCopy> ForkCopy for indexmap::IndexM
     }
 }
 
-impl<K: Clone + Eq + std::hash::Hash, V: ForkCopy> ForkCopy for std::collections::HashMap<K, V> {
+impl<K: Clone + Eq + std::hash::Hash, V: ForkCopy, S: std::hash::BuildHasher + Default> ForkCopy
+    for std::collections::HashMap<K, V, S>
+{
     fn fork_copy(&self, fork: &mut Fork<'_>) -> Self {
         self.iter()
             .map(|(key, value)| (key.clone(), value.fork_copy(fork)))

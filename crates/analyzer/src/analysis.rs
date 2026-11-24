@@ -16,6 +16,11 @@ use phera_source::Span;
 
 mod argument_contracts;
 mod arguments;
+mod array_key_guards;
+mod array_merge;
+mod array_property_append;
+mod array_size;
+mod array_sum;
 mod arrays;
 mod assignments;
 mod atoms;
@@ -23,42 +28,76 @@ mod attributes;
 mod binding_statements;
 mod bindings;
 mod builtin_facts;
+mod call_assertions;
 mod callable_signatures;
+mod callback_parameters;
 mod calls;
+mod chain_value;
 mod closure_binding;
 mod closure_effects;
 mod coalesce_assignment;
+mod coalesce_guards;
 mod composite;
 mod condition;
 mod control;
 mod dead_code;
+mod declaration_hints;
 mod declarations;
 mod deferred_declarations;
+mod enum_guards;
 mod exceptions;
 mod expressions;
 mod finally;
+mod foreach_iterable;
 mod function_calls;
 mod generators;
 mod if_ladder;
+mod implicit_mixed;
+mod in_array_guards;
+mod inherited_parameters;
+mod integer_range_contracts;
+mod internal_methods;
+mod interpolated_mixed;
 mod intrinsics;
+mod invalid_array_offset;
 mod invocations;
+mod late_static_new;
 mod logical;
+mod loop_mixed_values;
 mod loop_writes;
 mod loops;
 mod match_expression;
+mod member_checks;
 mod member_expressions;
 mod members;
+mod missing_array_offset;
+mod non_offset_receiver;
 mod not_supported;
+mod null_pairs;
+mod null_test_flags;
+mod nullsafe_guards;
 mod operators;
+mod overwritten_assignments;
+mod phpdoc_fallthrough;
 mod property_hooks;
+mod property_writes;
 mod receiver_types;
+mod redundant_null_coalesce;
 mod refine;
 mod refine_types;
+mod regex_captures;
 mod reporting;
+mod return_template_contracts;
 mod short_circuit;
 mod statements;
+mod strict_mixed;
+mod strict_rules;
+mod string_replacements;
 mod switch;
+mod truthy_values;
 mod type_docs;
+mod unused_local_bindings;
+mod unused_method_parameter;
 mod value_contracts;
 mod write;
 
@@ -85,13 +124,16 @@ pub struct Context {
 }
 
 pub struct Analyzer<'a> {
+    checking_loop_mixed_values: bool,
     pub index: &'a mut Index,
     pub dependencies: &'a mut Dependencies,
     pub file: &'a ParsedFile,
     pub level: u8,
+    pub options: &'a crate::config::Options,
     pub report_unused_traits: bool,
     pub strict_types: bool,
     pub diagnostics: Vec<Diagnostic>,
+    pub unverified_internal_ignores: std::collections::BTreeSet<usize>,
     pub context: Context,
     pub depth: usize,
     pub checked_declarations: std::collections::BTreeSet<usize>,
@@ -99,6 +141,7 @@ pub struct Analyzer<'a> {
     pub return_scopes: Vec<Vec<Scope>>,
     pub controls: Vec<control::ControlFrame>,
     pub statement_docs: std::collections::BTreeMap<usize, Span>,
+    pub pending_callback_types: Vec<ValueType>,
     pub pending_binding: Option<(usize, closure_binding::ClosureBinding)>,
     pub last_condition: Option<Span>,
     pub discarded_expression: Option<Span>,
@@ -110,14 +153,18 @@ impl<'a> Analyzer<'a> {
         index: &'a mut Index,
         dependencies: &'a mut Dependencies,
         file: &'a ParsedFile,
-        level: u8,
+        options: &'a crate::config::Options,
         report_unused_traits: bool,
     ) -> Self {
+        let level = options.level;
+        let read_docs = index.read_type_docs;
         Self {
+            checking_loop_mixed_values: false,
             index,
             dependencies,
             file,
             level,
+            options,
             report_unused_traits,
             strict_types: file.program.statements.iter().any(|statement| {
                 matches!(&statement.kind, StatementKind::Declare { directives, .. }
@@ -125,16 +172,18 @@ impl<'a> Analyzer<'a> {
                         && matches!(directive.value.kind, ExpressionKind::Literal(Literal::Int(1)))))
             }),
             diagnostics: Vec::new(),
+            unverified_internal_ignores: std::collections::BTreeSet::new(),
             depth: 0,
             checked_declarations: std::collections::BTreeSet::new(),
             exception_scopes: Vec::new(),
             return_scopes: Vec::new(),
             controls: Vec::new(),
             pending_binding: None,
+            pending_callback_types: Vec::new(),
             last_condition: None,
             discarded_expression: None,
             trait_diagnostics: None,
-            statement_docs: if level >= 2 {
+            statement_docs: if read_docs {
                 type_docs::statement_comments(&file.source)
             } else {
                 Default::default()
@@ -166,6 +215,12 @@ impl<'a> Analyzer<'a> {
         scope.define("argv", ValueType::Array);
         self.block(&self.file.program.statements, &mut scope);
         self.deferred_declarations();
+        crate::suppress::filter(
+            self.file,
+            &mut self.diagnostics,
+            self.options.report_unmatched_ignores,
+            &self.unverified_internal_ignores,
+        );
         self.diagnostics
     }
 
@@ -334,6 +389,7 @@ impl Access {
 pub enum CallKind {
     Direct,
     Callable,
+    InvalidReceiver,
 }
 
 #[derive(Clone, Copy)]

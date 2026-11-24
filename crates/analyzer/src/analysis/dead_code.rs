@@ -10,6 +10,7 @@ mod discarded_results;
 mod null_checks;
 mod private_members;
 mod type_tests;
+mod unused_property_type;
 
 pub use booleans::Side;
 pub use null_checks::NullCheck;
@@ -63,6 +64,7 @@ impl Analyzer<'_> {
                     identifier: identifier.into(),
                     severity: crate::diagnostic::Severity::Error,
                     message,
+                    source_range: Some((span.start, span.end)),
                 },
             ));
         } else {
@@ -79,21 +81,13 @@ impl Analyzer<'_> {
         scope: &Scope,
         span: Span,
     ) {
-        if self.level >= 4
-            && ty.excludes_null()
-            && matches!(
-                ty,
-                ValueType::Object
-                    | ValueType::Class(_)
-                    | ValueType::Generic(_)
-                    | ValueType::Callable(_)
-            )
-        {
+        if self.level >= 4 && ty.excludes_null() && known_object_type(ty) {
             let span = match member {
                 MemberName::Identifier(name) => name.span,
                 MemberName::Expression(_) => span,
             };
             let provenance = self.narrowed_at(target, scope);
+            let ty = super::member_checks::receiver_name(ty);
             self.diagnose_dead_code(
                 "nullsafe.neverNull",
                 span,
@@ -103,6 +97,21 @@ impl Analyzer<'_> {
             );
         }
     }
+}
+
+fn known_object_type(ty: &ValueType) -> bool {
+    let mut types = vec![ty];
+    while let Some(ty) = types.pop() {
+        match ty {
+            ValueType::Union(arms) => types.extend(arms.iter()),
+            ValueType::Object
+            | ValueType::Class(_)
+            | ValueType::Generic(_)
+            | ValueType::Callable(_) => {}
+            _ => return false,
+        }
+    }
+    true
 }
 
 impl Analyzer<'_> {
@@ -182,7 +191,7 @@ pub fn truth(ty: &ValueType) -> Option<bool> {
     let mut result = None;
     while let Some(ty) = pending.pop() {
         let value = match ty {
-            T::Union(arms) => {
+            T::Union(arms) | T::BenevolentUnion(arms) => {
                 pending.extend(arms.iter());
                 continue;
             }

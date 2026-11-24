@@ -216,7 +216,15 @@ impl Vm {
             let exit = match instruction {
                 // A call of a native function goes straight to it: the
                 // general handler would only find that out and come here.
-                Instruction::Call { dst, .. } if !TRACK_GENERATORS && self.calls_plain_native() => {
+                // Under `TRACK_GENERATORS == true`, keep `PreparedCallee::General`
+                // on `Vm::call::<true>` so synchronous `Generator::send()` stays
+                // in the batch loop, while lean `PreparedCallee::Native(_)` and
+                // `CallNativeDirect` still take the fast path (line 255 checks
+                // `generator_releases_pending()` immediately after).
+                Instruction::Call { dst, .. }
+                    if (!TRACK_GENERATORS && self.calls_plain_native())
+                        || (TRACK_GENERATORS && self.calls_lean_native()) =>
+                {
                     *work += 1;
                     self.call_lean_native(dst)
                 }
@@ -226,7 +234,7 @@ impl Vm {
                     count,
                     dst,
                     ..
-                } if !TRACK_GENERATORS => {
+                } => {
                     *work += 1;
                     self.call_native_direct(function, args, count, dst)
                 }
@@ -274,6 +282,19 @@ impl Vm {
             ) && !call
                 .flags
                 .contains(crate::calls::prepared_call::CallFlags::MAGIC)
+        })
+    }
+
+    /// Lean native function call only (never `Generator::send()` or other
+    /// `PreparedCallee::General` methods).
+    #[inline]
+    fn calls_lean_native(&self) -> bool {
+        use crate::calls::prepared_call::PreparedCallee;
+        self.call_stack.last_call().is_some_and(|call| {
+            matches!(call.callee, PreparedCallee::Native(_))
+                && !call
+                    .flags
+                    .contains(crate::calls::prepared_call::CallFlags::MAGIC)
         })
     }
 }
@@ -475,7 +496,6 @@ impl Machine<'_> {
             Instruction::CheckType { local, ty } => self.check_type(position, local, ty),
             Instruction::New { class } => self.new_object::<GUARDED>(position, class),
             Instruction::InitDynamicCall { callee } => self.prepare_closure(position, callee),
-            Instruction::GuardBuiltin { .. } => self.builtin_guard(position),
             _ => Step::Slow,
         }
     }
@@ -547,8 +567,10 @@ impl Machine<'_> {
             | Instruction::StaticCall { .. }
             | Instruction::CheckType { .. }
             | Instruction::New { .. }
-            | Instruction::InitDynamicCall { .. }
-            | Instruction::GuardBuiltin { .. } => self.cold_step::<GUARDED>(*instruction, position),
+            | Instruction::InitDynamicCall { .. } => {
+                self.cold_step::<GUARDED>(*instruction, position)
+            }
+            Instruction::GuardBuiltin { .. } => self.builtin_guard(position),
             Instruction::CallDirect {
                 function,
                 args,

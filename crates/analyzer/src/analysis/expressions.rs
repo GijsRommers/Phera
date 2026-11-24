@@ -1,6 +1,7 @@
 //! Expression facts: `new DateTime` has a known class; `$unknown()` stays unknown.
 //! The explicit depth bound also protects generated left-deep expression chains.
 
+use super::chain_value::ChainValue;
 use super::*;
 
 impl Analyzer<'_> {
@@ -10,24 +11,45 @@ impl Analyzer<'_> {
         scope: &mut Scope,
         quiet: bool,
     ) -> ValueType {
+        self.chain_expression(expression, scope, quiet)
+            .finish(scope)
+    }
+
+    pub(super) fn chain_expression(
+        &mut self,
+        expression: &Expression,
+        scope: &mut Scope,
+        quiet: bool,
+    ) -> ChainValue {
         if self.depth >= MAX_DEPTH {
             self.context.incomplete = true;
             scope.unknown_writes();
-            return ValueType::Mixed;
+            return ChainValue::plain(ValueType::Mixed);
         }
         self.depth += 1;
-        let ty = self.expression_kind(expression, scope, quiet);
+        let mut value = match &expression.kind {
+            ExpressionKind::MethodCall { .. } if self.level >= 8 => {
+                self.method_chain(expression, scope, quiet)
+            }
+            ExpressionKind::Property { .. } if self.level >= 8 => {
+                self.property_chain(expression, scope, quiet)
+            }
+            ExpressionKind::Index { .. } if self.level >= 8 => {
+                self.offset_chain(expression, scope, quiet)
+            }
+            _ => ChainValue::plain(self.expression_kind(expression, scope, quiet)),
+        };
         self.depth -= 1;
         if self.level >= 2
             && !scope.facts.is_empty()
-            && ty != ValueType::Never
+            && value.ty != ValueType::Never
             && !matches!(&expression.kind, ExpressionKind::Variable(Variable::Named(name)) if name != "this")
             && let Some(place) = crate::scope::Place::of(expression)
             && let Some(fact) = scope.facts.get(&place)
         {
-            return fact.ty.clone();
+            value.ty = fact.ty.clone();
         }
-        ty
+        value
     }
 
     fn expression_kind(
@@ -83,6 +105,7 @@ impl Analyzer<'_> {
         if right_ty == ValueType::Never {
             return right_ty;
         }
+        self.mixed_binary(operator, &left_ty, &right_ty, operation.span, false);
         if matches!(
             operator,
             BinaryOperator::Divide | BinaryOperator::Modulo | BinaryOperator::Power
@@ -110,6 +133,13 @@ impl Analyzer<'_> {
             }
         }
         if self.level >= 3 {
+            if matches!(
+                operator,
+                BinaryOperator::Subtract | BinaryOperator::Multiply | BinaryOperator::Divide
+            ) && (self.strict_mixed(&left_ty) || self.strict_mixed(&right_ty))
+            {
+                return ValueType::OverflowingInt;
+            }
             return super::operators::binary_type(operator, &left_ty, &right_ty);
         }
         match operator {
@@ -140,7 +170,12 @@ impl Analyzer<'_> {
             condition,
             &branches,
         );
-        let (yes, yes_ty) = self.expression_branch(branches.yes, then, branches.ty);
+        let positive = if self.level >= 7 && then.is_none() {
+            super::truthy_values::truthy_type(&branches.ty)
+        } else {
+            branches.ty
+        };
+        let (yes, yes_ty) = self.expression_branch(branches.yes, then, positive);
         let (no, no_ty) = self.expression_branch(branches.no, Some(otherwise), ValueType::Mixed);
         if let Some(after) = super::condition::Condition::merge(yes, no) {
             *scope = after;

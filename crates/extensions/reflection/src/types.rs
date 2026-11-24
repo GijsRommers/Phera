@@ -6,7 +6,7 @@ use phera_extension_api::{
     ClassEntry, ClassKind, Context, MethodEntry, NativeResult, Object, Registry, Value,
 };
 
-use crate::{UNCLONEABLE, allocate, load, values};
+use crate::{UNCLONEABLE, allocate, inspect, load, values};
 
 #[derive(Clone)]
 pub(crate) struct ReflectedType {
@@ -28,13 +28,15 @@ pub(crate) fn register(registry: &mut Registry) {
         methods: const {
             &[
                 MethodEntry::public("allowsNull", &[], |_, o, _| {
-                    Ok(Value::Bool(allows_null(&reflected(o)?.text)))
+                    inspect(o, |ty: &ReflectedType| Value::Bool(allows_null(&ty.text)))
                 })
-                .tentative_return("bool"),
+                .tentative_return("bool")
+                .with_direct(|o, a| direct(o, a, |ty| Value::Bool(allows_null(&ty.text)))),
                 MethodEntry::public("__toString", &[], |_, o, _| {
-                    Ok(Value::from(reflected(o)?.text))
+                    inspect(o, |ty: &ReflectedType| Value::from(ty.text.as_str()))
                 })
-                .returning("string"),
+                .returning("string")
+                .with_direct(|o, a| direct(o, a, |ty| Value::from(ty.text.as_str()))),
             ]
         },
         hooks: Some(&UNCLONEABLE),
@@ -45,14 +47,25 @@ pub(crate) fn register(registry: &mut Registry) {
         methods: const {
             &[
                 MethodEntry::public("getName", &[], |_, o, _| {
-                    Ok(Value::from(reflected(o)?.text.trim_start_matches('?')))
+                    inspect(o, |ty: &ReflectedType| {
+                        Value::from(ty.text.trim_start_matches('?'))
+                    })
                 })
-                .tentative_return("string"),
+                .tentative_return("string")
+                .with_direct(|o, a| {
+                    direct(o, a, |ty| Value::from(ty.text.trim_start_matches('?')))
+                }),
                 MethodEntry::public("isBuiltin", &[], |_, o, _| {
-                    let ty = reflected(o)?;
-                    Ok(Value::Bool(is_builtin(ty.text.trim_start_matches('?'))))
+                    inspect(o, |ty: &ReflectedType| {
+                        Value::Bool(is_builtin(ty.text.trim_start_matches('?')))
+                    })
                 })
-                .tentative_return("bool"),
+                .tentative_return("bool")
+                .with_direct(|o, a| {
+                    direct(o, a, |ty| {
+                        Value::Bool(is_builtin(ty.text.trim_start_matches('?')))
+                    })
+                }),
             ]
         },
         ..ClassEntry::class("ReflectionNamedType")
@@ -96,12 +109,8 @@ pub(crate) fn make(context: &mut dyn Context, declared: Option<&str>) -> NativeR
     allocate(context, name, None, ReflectedType { text, kind })
 }
 
-fn reflected(this: Option<&Rc<Object>>) -> Result<ReflectedType, phera_extension_api::NativeError> {
-    load(this)
-}
-
 fn members(context: &mut dyn Context, this: Option<&Rc<Object>>, _: &[Value]) -> NativeResult {
-    let ty = reflected(this)?;
+    let ty: ReflectedType = load(this)?;
     let separator = if ty.kind == Kind::Union { '|' } else { '&' };
     let mut members = Vec::new();
     for member in ty.text.split(separator) {
@@ -146,4 +155,17 @@ pub(crate) fn allows_null(text: &str) -> bool {
 pub(crate) fn is_builtin(name: &str) -> bool {
     matches!(name, "mixed" | "void" | "never" | "iterable")
         || name != "static" && BUILTIN_ORDER.contains(&name)
+}
+
+fn direct(
+    object: &Object,
+    arguments: &[Option<Value>],
+    read: impl FnOnce(&ReflectedType) -> Value,
+) -> Option<Value> {
+    if !arguments.is_empty() {
+        return None;
+    }
+    let native = object.native.try_borrow().ok()?;
+    let ty = native.as_ref()?.downcast_ref::<ReflectedType>()?;
+    Some(read(ty))
 }

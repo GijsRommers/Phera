@@ -1,6 +1,8 @@
 //! Structural method checks run before publishing inherited tables, avoiding partially linked classes.
 
-use std::{collections::HashMap, rc::Rc};
+use std::rc::Rc;
+
+use foldhash::HashMap;
 
 use phera_bytecode::{ClassKind, Visibility};
 use phera_extension_api::NativeError;

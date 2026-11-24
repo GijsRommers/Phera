@@ -29,10 +29,20 @@ impl Analyzer<'_> {
             {
                 return ValueType::Never;
             }
-            return if self.arguments(arguments, None, "method", scope, span, CallKind::Direct)
+            let invalid_mixed_receiver = matches!(name, MemberName::Identifier(_))
+                && !matches!(access, Access::Guarded | Access::GuardedStatic)
+                && self.strict_mixed(ty);
+            let kind = if invalid_mixed_receiver {
+                CallKind::InvalidReceiver
+            } else {
+                CallKind::Direct
+            };
+            return if self.arguments(arguments, None, "method", scope, span, kind)
                 == Evaluation::Never
             {
                 ValueType::Never
+            } else if invalid_mixed_receiver {
+                ValueType::ImplicitMixed
             } else {
                 ValueType::Mixed
             };
@@ -55,8 +65,19 @@ impl Analyzer<'_> {
             .method_owner(class, &method.name)
             .map(|(owner, signature)| {
                 let signature = signature.clone().typed(self.index);
-                if self.level >= 2 {
+                let signature = if self.level >= 2 {
                     signature.for_receiver(self.index, owner, receiver)
+                } else {
+                    signature
+                };
+                if self.level >= 9 {
+                    signature.with_inherited_return(
+                        self.index,
+                        owner,
+                        &method.name,
+                        receiver,
+                        self.level,
+                    )
                 } else {
                     signature
                 }
@@ -91,6 +112,7 @@ impl Analyzer<'_> {
             self.report(Finding::NotSupported(item), span);
         } else {
             self.validate_method(class, &method.name, signature.as_ref(), span, access);
+            self.check_internal_method(class, &method.name, span);
         }
         // The engine synthesizes Closure::__invoke from each actual closure. The stub
         // placeholder has no usable parameter list; inferred closures use their own signature.
@@ -124,8 +146,22 @@ impl Analyzer<'_> {
             if let Some(signature) = &signature {
                 self.discarded_method_result(span, class, &method.name, signature, access);
             }
-            let returns = if let Some(signature) = signature {
-                signature.infer_return(arguments, &facts.types, self.index)
+            let returns = if self.level >= 7
+                && !access.static_call()
+                && let Arguments::List(args) = arguments
+                && args
+                    .first()
+                    .is_some_and(|arg| arg.name.is_none() && !arg.spread)
+                && let Some(returns) = crate::framework_knowledge::doctrine::return_type(
+                    self.index,
+                    class,
+                    &method.name,
+                    &facts.types,
+                ) {
+                returns
+            } else if let Some(signature) = &signature {
+                let ty = signature.infer_return(arguments, &facts.types, self.index);
+                self.declared_array_result(signature, ty)
             } else if self.level >= 2 && !matches!(access, Access::Guarded | Access::GuardedStatic)
             {
                 let dispatcher = if access.static_call() {
@@ -150,6 +186,29 @@ impl Analyzer<'_> {
                 )
             } else {
                 ValueType::Mixed
+            };
+            let returns = if self.level >= 9 {
+                crate::framework_knowledge::doctrine::query_result(
+                    self.index,
+                    class,
+                    &method.name,
+                    returns,
+                    self.options.doctrine_stubs,
+                )
+            } else {
+                returns
+            };
+            let returns = if self.options.symfony_stubs {
+                crate::framework_knowledge::symfony::return_type(
+                    self.index,
+                    class,
+                    &method.name,
+                    arguments,
+                    &facts.types,
+                    returns,
+                )
+            } else {
+                returns
             };
             self.relative_type(returns, class)
         }
@@ -240,6 +299,9 @@ impl Analyzer<'_> {
         });
         let late_static = matches!(&expression.kind, ExpressionKind::Name(n)
             if n.text.eq_ignore_ascii_case("static"));
+        if late_static && let Some(class) = class.as_deref() {
+            self.check_late_static_new(class, span);
+        }
         if !late_static
             && matches!(expression.kind, ExpressionKind::Name(_))
             && let Some(info) = class.as_ref().and_then(|c| self.index.class(c))

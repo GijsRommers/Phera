@@ -14,8 +14,39 @@ async fn fill(context: &mut dyn Context, this: Option<&Rc<Object>>, all: bool) -
     let Some(handle) = handle else {
         return crate::stream_fetch::fill(context, &state, all).await;
     };
+    if all {
+        match handle.fetch_all().await {
+            Ok(rows) => {
+                let mut statement = state.borrow_mut();
+                if statement.cursor == statement.rows.values.len() {
+                    statement.rows.values.clear();
+                    statement.cursor = 0;
+                }
+                for row in rows {
+                    statement.rows.values.push(
+                        row.into_iter()
+                            .map(crate::drivers::sqlite::statement::value),
+                    );
+                }
+                for column in &mut statement.rows.columns {
+                    if let crate::metadata::Metadata::Sqlite(_, kind) = &mut column.metadata {
+                        *kind = 5;
+                    }
+                }
+                return Ok(Value::Null);
+            }
+            Err(error) => {
+                return crate::statement_execute::fail(
+                    &state,
+                    context,
+                    crate::drivers::sqlite::error(error),
+                    "PDOStatement::fetch",
+                );
+            }
+        }
+    }
     loop {
-        if !all && state.borrow().cursor < state.borrow().rows.values.len() {
+        if state.borrow().cursor < state.borrow().rows.values.len() {
             break;
         }
         match handle.fetch().await {

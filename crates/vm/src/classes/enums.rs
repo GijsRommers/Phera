@@ -1,6 +1,8 @@
 //! `enum State: int { case Ready = 1; }` links an implicit interface and static methods.
 
-use std::{collections::HashMap, rc::Rc};
+use std::rc::Rc;
+
+use foldhash::HashMap;
 
 use phera_bytecode::{ClassDeclaration, ClassKind, CompiledUnit, EnumBacking, Visibility};
 use phera_extension_api::{ClassEntry, MethodEntry, NativeError, Param, ParamType};

@@ -87,6 +87,7 @@ impl Analyzer<'_> {
                         left,
                         right,
                     } => {
+                        self.redundant_null_coalesce(left, right, &scope, "??");
                         let (non_null, fallback) = self.coalescing_condition(left, scope);
                         outcome = non_null;
                         if let Some(scope) = fallback {
@@ -153,6 +154,12 @@ impl Analyzer<'_> {
                         Gate::Or => &mut outcome.yes,
                     };
                     *shortcut = Condition::merge(skipped, shortcut.take());
+                    if self.level >= 8
+                        && matches!(gate, Gate::And)
+                        && let Some(scope) = &mut outcome.no
+                    {
+                        self.remember_non_null_pair(operator, scope);
+                    }
                     outcome.boolean();
                     if !reported && !right_reported {
                         self.constant_logical_result(operator, outcome.truth());
@@ -201,6 +208,7 @@ impl Analyzer<'_> {
         let nullish = self.nullish(left, &scope);
         let truth = self.condition_truth(left, &scope);
         let ty = self.expression(left, &mut scope, true);
+        self.check_nullsafe_coalesce(left, &ty);
         if ty == ValueType::Never {
             return (Condition::default(), None);
         }

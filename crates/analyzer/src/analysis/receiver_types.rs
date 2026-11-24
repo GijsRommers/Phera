@@ -1,7 +1,8 @@
 //! A `Readable&Seekable` receiver can use both contracts.
 //! Levels through 5 accept a member available on at least one union arm.
 
-use super::*;
+use super::{member_checks::receiver_name, *};
+use crate::types::{Field, Shape, ShapeKey, ShapeKind};
 
 #[derive(Default)]
 pub struct Receivers<'a> {
@@ -19,9 +20,10 @@ impl<'a> Receivers<'a> {
                 ValueType::Class(name) => receivers.classes.push(name),
                 ValueType::Generic(generic) => receivers.classes.push(&generic.base),
                 ValueType::Callable(_) => receivers.classes.push("Closure"),
-                ValueType::Union(types) | ValueType::Intersection(types) => {
-                    pending.extend(types.iter())
-                }
+                ValueType::Union(types) => pending.extend(types.iter()),
+                ValueType::Intersection(types) => pending.extend(types.iter().filter(
+                    |ty| !matches!(ty, ValueType::Shape(shape) if shape.kind == ShapeKind::Object),
+                )),
                 ValueType::Template(template) => pending.push(&template.bound),
                 ValueType::Conditional(conditional) => {
                     pending.extend([&conditional.yes, &conditional.no])
@@ -31,6 +33,7 @@ impl<'a> Receivers<'a> {
                 | ValueType::Int
                 | ValueType::IntLiteral(_)
                 | ValueType::IntRange(..)
+                | ValueType::OverflowingInt
                 | ValueType::Float
                 | ValueType::String
                 | ValueType::StringLiteral(_)
@@ -68,6 +71,24 @@ impl Analyzer<'_> {
             return Some(name.clone());
         }
         if self.level < 2 {
+            return None;
+        }
+        if self.strict_receiver(ty) && !matches!(access, Access::Guarded | Access::GuardedStatic) {
+            let receiver = receiver_name(ty);
+            self.diagnose(
+                "method.nonObject",
+                span,
+                format!("Cannot call method {method}() on {receiver}."),
+            );
+            return None;
+        }
+        if self.missing_method_arm(ty, method, access) {
+            let receiver = receiver_name(ty);
+            self.diagnose(
+                "method.notFound",
+                span,
+                format!("Call to an undefined method {receiver}::{method}()."),
+            );
             return None;
         }
         let receivers = Receivers::of(ty);
@@ -114,17 +135,47 @@ impl Analyzer<'_> {
         span: Span,
         quiet: bool,
     ) -> ValueType {
+        if let ValueType::Intersection(components) = ty
+            && let Some(field) = components.iter().find_map(|ty| match ty {
+                ValueType::Shape(shape) if shape.kind == ShapeKind::Object => {
+                    object_field(shape, name).filter(|field| !field.optional)
+                }
+                _ => None,
+            })
+        {
+            return field.value.clone();
+        }
         if let ValueType::Shape(shape) = ty
             && shape.kind == crate::types::ShapeKind::Object
         {
-            if let Some(field) = shape.fields.iter().find(|field|
-                matches!(&field.key, crate::types::ShapeKey::String(key) if key.as_ref() == name))
-            {
+            if let Some(field) = object_field(shape, name) {
                 return field.value.clone();
             }
             if !quiet && shape.remainder.is_none() {
                 self.report(Finding::UnknownProperty(ty.to_string(), name.into()), span);
             }
+            return ValueType::Mixed;
+        }
+        if !quiet && self.strict_receiver(ty) {
+            let receiver = receiver_name(ty);
+            self.diagnose(
+                "property.nonObject",
+                span,
+                format!("Cannot access property ${name} on {receiver}."),
+            );
+            if self.strict_mixed(ty) {
+                // An unresolved member has no declared type, even on explicit mixed.
+                return ValueType::ImplicitMixed;
+            }
+            return ValueType::Mixed;
+        }
+        if !quiet && self.missing_property_arm(ty, name) {
+            let receiver = receiver_name(ty);
+            self.diagnose(
+                "property.notFound",
+                span,
+                format!("Access to an undefined property {receiver}::${name}."),
+            );
             return ValueType::Mixed;
         }
         let receivers = Receivers::of(ty);
@@ -164,4 +215,11 @@ impl Analyzer<'_> {
             ty_result
         }
     }
+}
+
+fn object_field<'a>(shape: &'a Shape, name: &str) -> Option<&'a Field> {
+    shape
+        .fields
+        .iter()
+        .find(|field| matches!(&field.key, ShapeKey::String(key) if key.as_ref() == name))
 }

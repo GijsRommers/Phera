@@ -65,7 +65,7 @@ impl Analyzer<'_> {
         let mut scope = Scope::default();
         self.check_attributes(&function.attributes, &mut scope);
         self.parameter_scope(&function.parameters, &mut scope);
-        if self.level >= 2 && function.doc_comment.is_some() {
+        if self.index.read_type_docs && function.doc_comment.is_some() {
             let signature = self.declaration_signature(
                 &function.parameters,
                 function.return_type.as_ref(),
@@ -78,6 +78,8 @@ impl Analyzer<'_> {
             }
         }
         self.check_type(function.return_type.as_ref());
+        self.function_hints(function);
+        self.check_unused_local_bindings(&function.body, &function.parameters, &[]);
         let flow = self.block(&function.body, &mut scope);
         self.check_return_path(flow, &function.body, span);
         self.context = previous;
@@ -90,14 +92,23 @@ impl Analyzer<'_> {
         if !self.checked_declarations.insert(class.span.start) {
             return;
         }
+        let class_name = class.name.as_ref().map_or_else(
+            || crate::collect::anonymous_name(&self.file.path, class.span.start),
+            |name| self.context.names.declaration(&name.name),
+        );
+        if self.index.class(&class_name).is_some_and(|indexed| {
+            indexed.location.file == self.file.path
+                && indexed.location.line != self.file.lines.line(class.span.start)
+        }) {
+            // Another conditional declaration of this name is in the index.
+            // Its member table cannot validate the members of this variant.
+            return;
+        }
         let previous = self.context.clone();
         let exceptions = std::mem::take(&mut self.exception_scopes);
         let controls = std::mem::take(&mut self.controls);
         let returns = std::mem::take(&mut self.return_scopes);
-        self.context.class = Some(class.name.as_ref().map_or_else(
-            || crate::collect::anonymous_name(&self.file.path, class.span.start),
-            |n| self.context.names.declaration(&n.name),
-        ));
+        self.context.class = Some(class_name);
         self.context
             .documentation_class
             .clone_from(&self.context.class);
@@ -164,6 +175,7 @@ impl Analyzer<'_> {
                         }
                     }
                     for item in items {
+                        self.property_hints(&item.name, item.span);
                         if let Some(default) = &item.default {
                             let given = self.expression(default, &mut Scope::default(), false);
                             self.check_property_default(&item.name, &given, item.span);
@@ -237,18 +249,22 @@ impl Analyzer<'_> {
         let mut scope = Scope::default();
         self.check_attributes(&method.attributes, &mut scope);
         self.parameter_scope(&method.parameters, &mut scope);
-        if self.level >= 2 && doc.is_some() {
+        if self.index.read_type_docs && doc.is_some() {
             let signature =
                 self.declaration_signature(&method.parameters, method.return_type.as_ref(), span);
             if let Some(returns) = self.function_documentation(doc, &signature, span, &mut scope) {
                 self.context.documented_return = Some(returns);
             }
         }
+        self.inherit_parameter_types(method, &mut scope);
         self.check_type(method.return_type.as_ref());
+        self.method_hints(method);
+        self.unused_method_parameters(method, doc);
         for parameter in &method.parameters {
             self.property_hooks(&parameter.name, parameter.ty.as_ref(), &parameter.hooks);
         }
         if let Some(body) = &method.body {
+            self.check_unused_local_bindings(body, &method.parameters, &[]);
             let flow = self.block(body, &mut scope);
             self.check_return_path(flow, body, span);
         }

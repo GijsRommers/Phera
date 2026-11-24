@@ -27,7 +27,10 @@ if ($result === []) {{ echo 'done'; }} else {{ echo 'bad'; }}
         binary.as_ref(),
         &root,
         1,
-        &[("PHERA_REDIS_POOL_SIZE", "512")],
+        &[
+            ("PHERA_REDIS_POOL_SIZE", "512"),
+            ("PHERA_MAX_CONCURRENT_REQUESTS_PER_WORKER", "512"),
+        ],
     );
     let started = Instant::now();
     let responses = server.get_all((0..500).map(|index| format!("/?key={index}")));

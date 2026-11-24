@@ -18,6 +18,10 @@ use crate::errors::DbError;
 
 const CHECK_TIMEOUT: Duration = Duration::from_secs(5);
 const EXPIRY_INTERVAL: Duration = Duration::from_secs(1);
+/// Brief grace period before a balanced worker gives up an idle socket to
+/// another worker, preventing connection teardown ping-pong during the short
+/// CPU window between sequential requests.
+const RECLAIM_GRACE: Duration = Duration::from_millis(25);
 
 thread_local! {
     static BUCKETS: RefCell<Vec<Weak<Worker>>> = const { RefCell::new(Vec::new()) };
@@ -25,8 +29,8 @@ thread_local! {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) struct WorkerId {
-    thread: ThreadId,
-    runtime: Id,
+    pub(super) thread: ThreadId,
+    pub(super) runtime: Id,
 }
 
 pub(super) struct Worker {
@@ -60,6 +64,14 @@ impl Slots {
             .min_by_key(|(_, idle)| idle.returned)?;
         self.free.push(index);
         self.connections[index].take()
+    }
+
+    fn oldest_returned(&self) -> Option<(Instant, Arc<Key>)> {
+        self.connections
+            .iter()
+            .filter_map(Option::as_ref)
+            .min_by_key(|idle| idle.returned)
+            .map(|idle| (idle.returned, idle.key.clone()))
     }
 
     fn insert(&mut self, idle: Idle) {
@@ -162,7 +174,7 @@ impl Worker {
                 returned: Instant::now(),
             };
             if let Some(idle) = self.admission.offer(self.id, idle) {
-                if let Some(reclaim) = self.admission.reclaim() {
+                if let Some(reclaim) = self.admission.reclaim_on_return(self.id, &idle.key) {
                     idle.socket.close().await;
                     drop(reclaim);
                 } else {
@@ -194,12 +206,25 @@ impl Worker {
             if closing {
                 return;
             }
+            let mut sleep_for = interval;
             let reclaim = {
                 let mut idle = self.idle();
-                if idle.connections.len() == idle.free.len() {
-                    None
-                } else if let Some(reclaim) = self.admission.reclaim() {
-                    idle.take(|_| true).map(|idle| (idle, reclaim))
+                if let Some((returned, oldest_key)) = idle.oldest_returned() {
+                    if let Some(reclaim) = self.admission.reclaim_on_return(self.id, &oldest_key) {
+                        idle.take(|_| true).map(|idle| (idle, reclaim))
+                    } else if self.admission.has_waiters() {
+                        let elapsed = returned.elapsed();
+                        if elapsed >= RECLAIM_GRACE {
+                            self.admission
+                                .reclaim()
+                                .and_then(|reclaim| idle.take(|_| true).map(|idle| (idle, reclaim)))
+                        } else {
+                            sleep_for = sleep_for.min(RECLAIM_GRACE.saturating_sub(elapsed));
+                            None
+                        }
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 }
@@ -211,7 +236,7 @@ impl Worker {
             }
             tokio::select! {
                 _ = self.changed.notified() => {}
-                _ = tokio::time::sleep(interval) => {}
+                _ = tokio::time::sleep(sleep_for) => {}
             }
         }
     }

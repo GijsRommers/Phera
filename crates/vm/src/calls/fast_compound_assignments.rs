@@ -22,11 +22,11 @@
 //! operators, `.=` (which the VM can append to in place), and the guarded
 //! loop, where the old value let go of could leave a destructor due.
 
-use phera_bytecode::{BinaryOp, IncDec, PathBase, PathId, Reg, Step as PathStep};
+use phera_bytecode::{BinaryOp, IncDec, NameId, PathBase, PathId, Reg, Step as PathStep};
 use phera_value::Value;
 
 use crate::calls::execution_loop::{Machine, Position, Step};
-use crate::calls::fast_properties::Shape;
+use crate::calls::fast_properties::write_slot_direct;
 use crate::element_writes::{Target, writable, write};
 use crate::fast::store;
 use crate::fast_values::quiet_binary;
@@ -124,9 +124,13 @@ impl Machine<'_> {
             (PathBase::Register(root), [PathStep::Index(_), ..]) => {
                 self.update_local_element(position, root, &path_body.steps, update)
             }
-            (_, [PathStep::Property(_)]) => self.update_property(position, path, update),
-            (_, [PathStep::Property(_), PathStep::Index(_), ..]) => {
-                self.update_property_element(position, path, &path_body.steps[1..], update)
+            (path_base, [PathStep::Property(name)]) => {
+                self.update_property(position, path_base, *name, update)
+            }
+            (path_base, [PathStep::Property(name), rest @ ..])
+                if rest.iter().all(|step| matches!(step, PathStep::Index(_))) =>
+            {
+                self.update_property_element(position, path_base, *name, rest, update)
             }
             _ => None,
         };
@@ -139,24 +143,36 @@ impl Machine<'_> {
         Step::Done(position.ip)
     }
 
-    /// `$this->property op= $value`: the expression's value.
+    /// `$this->property op= $value`: direct flat [`PropertyTable`] read & write
+    /// with zero per-instruction site cache or `RefCell` borrow.
     fn update_property(
         &self,
         position: Position,
-        path: PathId,
+        path_base: PathBase,
+        name: NameId,
         update: impl FnOnce(&Value) -> Option<Update>,
     ) -> Option<Value> {
-        self.with_site(position, (path, Shape::Write), |entry, object, scope| {
-            if entry.hooks.is_some() {
-                return None;
-            }
-            let left = entry.read_matching(object, scope)?;
-            let Update { stored, result } = update(&left)?;
-            drop(left);
-            entry
-                .write_matching(object, scope, &stored)
-                .then_some(result)
-        })
+        let object = self.property_object(position, path_base)?;
+        let scope = self.caller_scope_index(position);
+        let (table, packed) = self.resolve_prop(position, object, name, scope)?;
+        if !packed.is_plain_writable() {
+            return None;
+        }
+        let slot = packed.slot();
+        let left = object
+            .with_properties(|properties| match properties.slot(slot)? {
+                Value::Reference(_) => None,
+                value => Some(value.clone()),
+            })
+            .flatten()?;
+        let Update { stored, result } = update(&left)?;
+        drop(left);
+        if !packed.allows_type(crate::types::own_type(&stored)) {
+            return None;
+        }
+        let mut stored = Some(stored);
+        write_slot_direct(object, slot, &mut stored, table.fills_missing_directly())
+            .then_some(result)
     }
 
     /// `$local[$key]... op= $value`: the expression's value.
@@ -184,38 +200,42 @@ impl Machine<'_> {
         Some(result)
     }
 
-    /// `$this->property[$key]... op= $value`: the expression's value.
+    /// `$this->property[$key]... op= $value`: direct flat [`PropertyTable`]
+    /// single-borrow update with zero array clone or site cache.
     fn update_property_element(
         &self,
         position: Position,
-        path: PathId,
+        path_base: PathBase,
+        name: NameId,
         steps: &[PathStep],
         update: impl FnOnce(&Value) -> Option<Update>,
     ) -> Option<Value> {
         let keys = self
             .write_keys(position, steps)
             .filter(|keys| matches!(keys.target, Target::Last))?;
-        self.with_site(position, (path, Shape::Element), |entry, object, scope| {
-            if entry.hooks.is_some() {
-                return None;
-            }
-            // The array is read and let go of before the write, so that the
-            // write finds it with no second owner and need not copy it.
-            let Update { stored, result } = {
-                let Value::Array(array) = entry.read_matching(object, scope)? else {
+        let object = self.property_object(position, path_base)?;
+        let scope = self.caller_scope_index(position);
+        let (_, packed) = self.resolve_prop(position, object, name, scope)?;
+        if !packed.is_plain_writable() || !packed.allows_array() {
+            return None;
+        }
+        let slot = packed.slot();
+        let (result, old) = object
+            .update(|properties| {
+                properties.layout()?;
+                let Some(Value::Array(array)) = properties.slot_mut(slot) else {
                     return None;
                 };
-                update(element(&array, keys.as_slice())?)?
-            };
-            let old = entry.write_element_matching(
-                object,
-                scope,
-                (keys.as_slice(), Target::Last),
-                stored,
-            )?;
-            drop(old);
-            Some(result)
-        })
+                if !writable(array, keys.as_slice(), Target::Last) {
+                    return None;
+                }
+                let Update { stored, result } = update(element(array, keys.as_slice())?)?;
+                let old = write(array, keys.as_slice(), Target::Last, stored)?;
+                Some((result, old))
+            })
+            .flatten()?;
+        drop(old);
+        Some(result)
     }
 }
 

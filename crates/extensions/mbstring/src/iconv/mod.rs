@@ -22,10 +22,11 @@
 mod convert;
 mod mime;
 pub(crate) mod settings;
+mod stream;
 
 use phera_extension_api::{
-    Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType, Registry,
-    Value, args,
+    Context, FunctionEntry, IconvConverter, LocalFuture, NativeError, NativeResult, Param,
+    ParamType, Registry, Value, args,
 };
 
 use self::convert::{code_points, convert_text, points_of_ucs4};
@@ -33,7 +34,10 @@ use self::settings::encoding_argument;
 use crate::text::bounds;
 
 pub fn register(registry: &mut Registry) {
-    registry.set_iconv_converter(convert::try_convert);
+    registry.set_iconv_converter(IconvConverter {
+        convert: convert::try_convert,
+        stream: stream::open,
+    });
     registry.function(FunctionEntry::asynchronous("iconv", ICONV, iconv));
     registry.function(FunctionEntry::asynchronous(
         "iconv_strlen",

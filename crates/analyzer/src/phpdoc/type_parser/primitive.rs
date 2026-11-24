@@ -13,7 +13,8 @@ pub fn from_name(
     use ValueType as T;
     let first = || arguments.first().cloned().unwrap_or(T::Mixed);
     match name {
-        "mixed" | "non-empty-mixed" | "empty" => T::Mixed,
+        "mixed" => T::ExplicitMixed,
+        "non-empty-mixed" | "empty" => T::Mixed,
         "never" | "never-return" | "never-returns" | "no-return" | "noreturn" => T::Never,
         "void" => T::Void,
         "null" => T::Null,
@@ -48,7 +49,7 @@ pub fn from_name(
         "class-string" | "interface-string" | "trait-string" | "enum-string" => {
             T::ClassString(Arc::new(arguments.first().cloned().unwrap_or(T::Object)))
         }
-        "array-key" => T::Int.join(&T::String),
+        "array-key" => T::Int.join(&T::String).benevolent(),
         "number" => T::Int.join(&T::Float),
         "numeric" => T::Int
             .join(&T::Float)
@@ -74,7 +75,17 @@ pub fn from_name(
         }
         _ if word.contains('-') => approximate(name),
         _ => {
-            if let Some(bound) = templates.get(word) {
+            if let Some(alias) = templates.aliases.get(word) {
+                return if templates.imported_aliases.contains(word) {
+                    alias.clone()
+                } else {
+                    T::Template(Arc::new(Template {
+                        name: word.into(),
+                        bound: alias.clone(),
+                    }))
+                };
+            }
+            if let Some(bound) = templates.parameters.get(word) {
                 return T::Template(Arc::new(Template {
                     name: word.into(),
                     bound: bound.clone(),
@@ -114,7 +125,7 @@ pub fn collection(kind: CollectionKind, non_empty: bool, arguments: Vec<ValueTyp
     let key = match kind {
         CollectionKind::List => ValueType::Int,
         CollectionKind::Iterable => ValueType::Mixed,
-        CollectionKind::Array => ValueType::Int.join(&ValueType::String),
+        CollectionKind::Array => ValueType::Int.join(&ValueType::String).benevolent(),
     };
     let (key, value) = match arguments.as_slice() {
         [value] => (key, value.clone()),

@@ -1,6 +1,6 @@
 //! Function static variables retain their reference identity between calls.
 
-use std::collections::HashMap;
+use foldhash::{HashMap, HashMapExt};
 
 use phera_value::Value;
 

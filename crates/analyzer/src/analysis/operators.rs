@@ -22,8 +22,16 @@ pub fn binary_type(operator: BinaryOperator, left: &ValueType, right: &ValueType
         Op::Spaceship => T::IntRange(-1, 1),
         Op::ShiftLeft | Op::ShiftRight | Op::Modulo => T::Int,
         Op::BitwiseAnd | Op::BitwiseOr | Op::BitwiseXor => {
-            if is_string(left) && is_string(right) {
+            if let (T::IntLiteral(left), T::IntLiteral(right)) = (left, right) {
+                T::IntLiteral(match operator {
+                    Op::BitwiseAnd => left & right,
+                    Op::BitwiseOr => left | right,
+                    _ => left ^ right,
+                })
+            } else if is_string(left) && is_string(right) {
                 T::String
+            } else if is_numeric(left) || is_numeric(right) {
+                T::Int
             } else {
                 T::Int.join(&T::String)
             }
@@ -45,7 +53,7 @@ pub fn binary_type(operator: BinaryOperator, left: &ValueType, right: &ValueType
                 if left == &T::Float || right == &T::Float {
                     T::Float
                 } else {
-                    T::Int.join(&T::Float)
+                    T::OverflowingInt
                 }
             } else {
                 T::Mixed
@@ -68,7 +76,7 @@ pub fn unary_type(operator: UnaryOperator, value: ValueType) -> ValueType {
         UnaryOperator::Minus if is_numeric(&value) => match value {
             T::IntLiteral(value) => value.checked_neg().map_or(T::Float, T::IntLiteral),
             T::Float => T::Float,
-            _ => T::Int.join(&T::Float),
+            _ => T::OverflowingInt,
         },
         UnaryOperator::BitwiseNot if is_string(&value) => T::String,
         UnaryOperator::BitwiseNot if is_numeric(&value) => T::Int,
@@ -79,7 +87,11 @@ pub fn unary_type(operator: UnaryOperator, value: ValueType) -> ValueType {
 fn is_numeric(ty: &ValueType) -> bool {
     matches!(
         ty,
-        ValueType::Int | ValueType::IntLiteral(_) | ValueType::IntRange(..) | ValueType::Float
+        ValueType::Int
+            | ValueType::IntLiteral(_)
+            | ValueType::IntRange(..)
+            | ValueType::OverflowingInt
+            | ValueType::Float
     )
 }
 
@@ -93,7 +105,7 @@ fn is_string(ty: &ValueType) -> bool {
     )
 }
 
-fn is_array(ty: &ValueType) -> bool {
+pub(super) fn is_array(ty: &ValueType) -> bool {
     match ty {
         ValueType::Array => true,
         ValueType::Collection(collection) => {

@@ -2,7 +2,7 @@
 //! `fastcgi_finish_request(); do_more_work();` keeps running on the worker
 //! after the client has received the response.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::future::{Future, poll_fn};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::Pin;
@@ -14,12 +14,13 @@ use std::time::Duration;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, watch};
 
 use crate::response_stream::{ResponseExchange, ResponseSlot, ResponseWriter};
+use crate::worker::ConnectionSlot;
 use crate::{Handler, Request, Response};
 
 /// A detached request retains its connection's slot and participates in
 /// graceful shutdown even after its socket is gone.
 pub(crate) struct ConnectionWork {
-    pub(crate) _slot: OwnedSemaphorePermit,
+    pub(crate) tcp_slot: RefCell<Option<ConnectionSlot>>,
     pub(crate) detached: Rc<DetachedRequests>,
     pub(crate) response: ResponseSlot,
 }

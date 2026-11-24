@@ -28,7 +28,7 @@ use crate::errors::DbError;
 pub static POOL: Pool = Pool::new();
 
 const DEFAULTS: Options = Options {
-    size: 20,
+    size: 64,
     idle: Duration::from_secs(60),
     lifetime: Duration::from_secs(1800),
     wait: Duration::from_secs(30),

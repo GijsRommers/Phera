@@ -18,8 +18,8 @@
 //! itself and adds an entry. Entries whose file revision nothing holds any
 //! more are dropped with that revision's function numbers.
 
+use foldhash::HashMap;
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::{Arc, Weak};
 

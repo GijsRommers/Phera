@@ -16,7 +16,7 @@
 //! object into the fork if the object is copied, and is dead otherwise.
 
 use std::cell::{Cell, RefCell};
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 use super::Fork;
 use crate::destruction::Destruction;
@@ -49,7 +49,10 @@ impl Fork<'_> {
             Destruction::Never => {}
         }
         self.objects.insert(address, copy.clone());
-        self.identities.insert(original.identity(), copy.identity());
+        let original_identity = original.identity();
+        if original_identity != address {
+            self.identities.insert(original_identity, copy.identity());
+        }
         self.unfilled_objects.push((original.clone(), copy.clone()));
         copy
     }
@@ -71,20 +74,18 @@ impl Fork<'_> {
     /// The identity of the copy of the object whose identity was
     /// `original`, if that object has been copied.
     pub fn identity(&self, original: usize) -> Option<usize> {
-        self.identities.get(&original).copied()
+        self.objects
+            .get(&original)
+            .map(|copy| copy.identity())
+            .or_else(|| self.identities.get(&original).copied())
     }
 
     pub(super) fn fill_object(&mut self, original: &Rc<Object>, copy: &Rc<Object>) {
-        let properties = original.with_properties(crate::Properties::clone);
-        let mut properties = properties.unwrap_or_default();
-        for slot in properties.slots_mut().iter_mut().flatten() {
-            if super::arrays::needs_copy(slot) {
-                *slot = self.value(slot);
-            }
-        }
-        if let Some(others) = properties.others_mut() {
-            self.array_contents(others);
-        }
+        let properties = original
+            .properties
+            .try_borrow()
+            .map(|properties| properties.fork_with(self))
+            .unwrap_or_default();
         *copy.properties.borrow_mut() = properties;
         let native = match original.native.try_borrow() {
             Ok(native) => native.as_deref().map(|state| {
@@ -144,5 +145,18 @@ impl Fork<'_> {
             .into_iter()
             .filter(|copy| Rc::strong_count(copy) > 1)
             .collect()
+    }
+
+    /// Single-pass weak handle collection for `ClassTable::objects`.
+    pub(super) fn into_weak_copies(self) -> Vec<Weak<Object>> {
+        let mut weak = Vec::with_capacity(self.objects.len());
+        for copy in self.objects.into_values() {
+            if Rc::strong_count(&copy) == 1 {
+                copy.mark_destructed();
+            } else {
+                weak.push(Rc::downgrade(&copy));
+            }
+        }
+        weak
     }
 }

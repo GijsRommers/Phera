@@ -31,6 +31,9 @@ pub(crate) struct FrameExtras {
     pub(crate) variadic: Option<std::rc::Rc<phera_value::PhpArray>>,
     /// A property operation resumes only when this hook returns normally.
     pub(crate) property_hook: Option<Box<crate::property_hook_continuation::HookContinuation>>,
+    /// This frame pushed a `PropertyGuard` for a synchronous `__get`/`__set`
+    /// entry that must be popped when the frame returns or unwinds.
+    pub(crate) magic_guard: bool,
 }
 
 /// How many arguments a call passed and where the surplus ones are, for
@@ -66,6 +69,7 @@ impl FrameExtras {
             arguments: ArgumentFacts::default(),
             variadic: None,
             property_hook: None,
+            magic_guard: false,
         }
     }
 
@@ -77,6 +81,7 @@ impl FrameExtras {
             && self.iterators.is_empty()
             && self.arguments.is_default()
             && self.variadic.is_none()
+            && !self.magic_guard
     }
 
     /// Releases what the frame owned, keeping the storage for the next frame
@@ -89,12 +94,13 @@ impl FrameExtras {
         self.arguments = ArgumentFacts::default();
         self.variadic = None;
         self.property_hook = None;
+        self.magic_guard = false;
     }
 }
 
 impl crate::snapshot::ForkCopy for FrameExtras {
     fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
-        if self.property_hook.is_some() {
+        if self.property_hook.is_some() || self.magic_guard {
             fork.refuse_state(
                 "property hook",
                 "Phera\\snapshot() was called inside a property hook",
@@ -108,6 +114,7 @@ impl crate::snapshot::ForkCopy for FrameExtras {
             arguments: self.arguments,
             variadic: self.variadic.fork_copy(fork),
             property_hook: None,
+            magic_guard: false,
         }
     }
 }

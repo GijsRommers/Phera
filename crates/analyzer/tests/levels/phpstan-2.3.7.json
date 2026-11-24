@@ -1,0 +1,216 @@
+{
+  "generic_variance.php": [
+    [7, 42, "argument.type", "Parameter #1 $source of function readDog expects Source<Dog>, Source<Animal> given."],
+    [7, 44, "argument.type", "Parameter #1 $sink of function writeAnimal expects Sink<Animal>, Sink<Dog> given."],
+    [5, 45, "argument.type", "Parameter #1 $cell of function keepAnimal expects Cell<Animal>, Cell<Dog> given."]
+  ],
+  "mixed_offset_chains.php": [
+    [6, 10, "missingType.parameter", "Function useOffsets() has parameter $position with no type specified."],
+    [10, 12, "argument.type", "Parameter #1 $label of function displayRow expects string, mixed given."],
+    [10, 12, "offsetAccess.nonOffsetAccessible", "Cannot access offset 0 on mixed."],
+    [9, 12, "property.nonObject", "Cannot access property $rows on mixed."],
+    [10, 13, "argument.type", "Parameter #1 $label of function displayRow expects string, mixed given."],
+    [9, 13, "method.nonObject", "Cannot call method resolve() on mixed."],
+    [10, 13, "property.nonObject", "Cannot access property $label on mixed."],
+    [9, 14, "argument.type", "Parameter #1 $label of function displayRow expects string, mixed given."],
+    [9, 14, "offsetAccess.nonOffsetAccessible", "Cannot access offset 0 on mixed."],
+    [9, 14, "offsetAccess.nonOffsetAccessible", "Cannot access offset 0 on mixed."],
+    [10, 15, "binaryOp.invalid", "Binary operation \"-\" between mixed and 1 results in an error."],
+    [10, 15, "binaryOp.invalid", "Binary operation \"-\" between mixed and 1 results in an error."],
+    [10, 15, "offsetAccess.nonOffsetAccessible", "Cannot access an offset on mixed."],
+    [10, 15, "offsetAccess.nonOffsetAccessible", "Cannot access offset (float|int) on mixed."],
+    [10, 15, "offsetAccess.nonOffsetAccessible", "Cannot access offset (float|int) on mixed."],
+    [9, 15, "property.nonObject", "Cannot access property $rows on mixed."],
+    [9, 15, "property.nonObject", "Cannot access property $rows on mixed."],
+    [9, 16, "offsetAccess.nonOffsetAccessible", "Cannot access an offset on mixed."],
+    [9, 17, "method.nonObject", "Cannot call method resolve() on mixed."],
+    [10, 17, "offsetAccess.nonOffsetAccessible", "Cannot access offset mixed on mixed."],
+    [10, 17, "offsetAccess.nonOffsetAccessible", "Cannot access offset mixed on mixed."],
+    [9, 17, "property.nonObject", "Cannot access property $rows on mixed."],
+    [9, 17, "property.nonObject", "Cannot access property $rows on mixed."],
+    [10, 19, "binaryOp.invalid", "Binary operation \"-\" between mixed and 0 results in an error."],
+    [10, 19, "offsetAccess.nonOffsetAccessible", "Cannot access offset (float|int) on mixed."],
+    [9, 19, "property.nonObject", "Cannot access property $rows on mixed."],
+    [10, 20, "binaryOp.invalid", "Binary operation \"-\" between mixed and 0 results in an error."],
+    [9, 20, "property.nonObject", "Cannot access property $rows on mixed."],
+    [10, 21, "binaryOp.invalid", "Binary operation \"-\" between mixed and 0 results in an error."],
+    [9, 21, "property.nonObject", "Cannot access property $rows on mixed."],
+    [10, 22, "binaryOp.invalid", "Binary operation \"-\" between mixed and 0 results in an error."],
+    [9, 22, "property.nonObject", "Cannot access property $rows on mixed."],
+    [10, 24, "argument.type", "Parameter #1 $label of function displayRow expects string, mixed given."],
+    [10, 24, "binaryOp.invalid", "Binary operation \"-\" between mixed and 0 results in an error."],
+    [9, 24, "property.nonObject", "Cannot access property $rows on mixed."],
+    [10, 27, "binaryOp.invalid", "Binary operation \"-\" between mixed and 0 results in an error."],
+    [10, 27, "foreach.nonIterable", "Argument of an invalid type mixed supplied for foreach, only iterables are supported."],
+    [9, 27, "property.nonObject", "Cannot access property $rows on mixed."],
+    [10, 28, "argument.type", "Parameter #1 $label of function displayRow expects string, mixed given."],
+    [10, 28, "binaryOp.invalid", "Binary operation \"-\" between mixed and 0 results in an error."],
+    [9, 28, "property.nonObject", "Cannot access property $rows on mixed."],
+    [10, 29, "argument.type", "Parameter #1 $label of function displayRow expects string, mixed given."],
+    [10, 29, "binaryOp.invalid", "Binary operation \"-\" between mixed and 0 results in an error."],
+    [10, 29, "offsetAccess.nonOffsetAccessible", "Cannot access offset (float|int) on mixed."],
+    [9, 29, "property.nonObject", "Cannot access property $rows on mixed."]
+  ],
+  "conditional_phpdoc_assertions.php": [],
+  "implicit_array_result.php": [
+    [6, 3, "missingType.iterableValue", "Function payload() return type has no value type specified in iterable type array."],
+    [10, 14, "argument.type", "Parameter #1 $name of function requireName expects string, mixed given."],
+    [10, 17, "cast.string", "Cannot cast mixed to string."]
+  ],
+  "known_offset_receivers.php": [
+    [7, 6, "offsetAccess.nonOffsetAccessible", "Cannot access offset 0 on list<string>|false."]
+  ],
+  "mixed_operators.php": [
+    [9, 5, "assignOp.invalid", "Binary operation \".=\" between string and mixed results in an error."],
+    [9, 6, "preInc.type", "Cannot use ++ on mixed."],
+    [9, 14, "offsetAccess.invalidOffset", "Possibly invalid array key type mixed."]
+  ],
+  "loop_mixed_result.php": [
+    [10, 6, "argument.type", "Parameter #1 $string of function strlen expects string, mixed given."]
+  ],
+  "redundant_nullsafe.php": [
+    [4, 8, "nullsafe.neverNull", "Using nullsafe method call on non-nullable type First|Second. Use -> instead."],
+    [4, 13, "nullCoalesce.expr", "Expression on left side of ?? is not nullable."],
+    [4, 13, "nullsafe.neverNull", "Using nullsafe method call on non-nullable type First. Use -> instead."]
+  ],
+  "class_string_guard.php": [
+    [7, 9, "return.type", "Function rowClass() should return class-string<Row> but returns class-string."]
+  ],
+  "integer_range_contract.php": [
+    [7, 6, "return.type", "Function countOrUnknown() should return -1|int<1, max> but returns int."]
+  ],
+  "union_shape_keys.php": [
+    [7, 6, "offsetAccess.notFound", "Offset 'value' might not exist on array{}|array{value: string}."],
+    [7, 12, "offsetAccess.notFound", "Offset 'value' might not exist on array{value?: string}."]
+  ],
+  "template_key_append.php": [
+    [7, 15, "assign.propertyType", "Property Store<K of (int|string),V>::$entries (array<K of (int|string), V>) does not accept array<int|K of (int|string), V>."]
+  ],
+  "template_return_contract.php": [
+    [7, 12, "return.type", "Function readEntry() should return T of Entry but returns Entry."],
+    [7, 18, "offsetAccess.notFound", "Offset string|null might not exist on array<class-string, string>."]
+  ],
+  "implicit_callable_result.php": [
+    [10, 6, "return.type", "Function readClosure() should return string but returns mixed."],
+    [10, 11, "return.type", "Function readCallable() should return string but returns mixed."],
+    [10, 33, "return.type", "Function readOptional() should return string but returns mixed."]
+  ],
+  "inherited_mixed_interpolation.php": [
+    [9, 21, "encapsedStringPart.nonString", "Part $value (mixed) of encapsed string cannot be cast to string."]
+  ],
+  "runtime_regex_version.php": [
+    [4, 3, "smaller.alwaysFalse", "Comparison operation \"<\" between 10 and 10 is always false."]
+  ],
+  "proven_null_check.php": [
+    [4, 6, "nullCoalesce.offset", "Offset 'name' on array{label?: string} on left side of ?? does not exist."],
+    [4, 13, "booleanAnd.alwaysFalse", "Result of && is always false."]
+  ],
+  "untyped_require.php": [
+    [10, 6, "offsetAccess.nonOffsetAccessible", "Cannot access offset 'name' on mixed."],
+    [10, 6, "return.type", "Function readData() should return string but returns mixed."]
+  ],
+  "contextual_array_parameters.php": [],
+  "guard_overlap.php": [],
+  "optional_ternary_results.php": [],
+  "unpacked_array_merge.php": [],
+  "widened_array_sum.php": [],
+  "regex_required_captures.php": [
+    [8, 11, "argument.type", "Parameter #1 $text of function acceptCapture expects string, string|null given."]
+  ],
+  "array_count_removals.php": [
+    [8, 15, "argument.type", "Parameter #1 $item of function storeRequired expects string, string|null given."]
+  ],
+  "arrow_array_shapes.php": [],
+  "arrow_native_mixed.php": [
+    [9, 21, "cast.int", "Cannot cast mixed to int."]
+  ],
+  "array_totals.php": [],
+  "bitwise_class_constants.php": [],
+  "branch_and_key_types.php": [],
+  "conditional_defaults.php": [],
+  "docs.php": [],
+  "guards.php": [],
+  "missing.php": [
+    [6, 4, "missingType.iterableValue", "Function incomplete() has parameter $items with no value type specified in iterable type array."],
+    [6, 4, "missingType.iterableValue", "Function incomplete() has parameter $iter with no value type specified in iterable type iterable."],
+    [6, 4, "missingType.iterableValue", "Function incomplete() return type has no value type specified in iterable type array."],
+    [6, 4, "missingType.parameter", "Function incomplete() has parameter $value with no type specified."],
+    [6, 7, "missingType.property", "Property Incomplete::$value has no type specified."],
+    [6, 8, "missingType.iterableValue", "Property Incomplete::$items type has no value type specified in iterable type iterable."],
+    [6, 9, "missingType.parameter", "Method Incomplete::value() has parameter $arg with no type specified."],
+    [6, 9, "missingType.return", "Method Incomplete::value() has no return type specified."],
+    [6, 11, "missingType.generics", "Function box() has parameter $box with generic class Box but does not specify its types: T"],
+    [6, 11, "missingType.generics", "Function box() return type with generic class Box does not specify its types: T"]
+  ],
+  "mixed.php": [
+    [9, 7, "argument.type", "Parameter #1 $value of function takeText expects string, mixed given."],
+    [9, 8, "property.nonObject", "Cannot access property $name on mixed."],
+    [9, 9, "method.nonObject", "Cannot call method label() on mixed."],
+    [9, 10, "offsetAccess.nonOffsetAccessible", "Cannot access offset 0 on mixed."],
+    [9, 11, "binaryOp.invalid", "Binary operation \"+\" between mixed and 1 results in an error."],
+    [9, 12, "callable.nonCallable", "Trying to invoke mixed but it's not a callable."],
+    [9, 13, "staticMethod.nonObject", "Cannot call static method label() on mixed."],
+    [9, 14, "print.nonString", "Parameter mixed of print cannot be converted to string."],
+    [9, 15, "echo.nonString", "Parameter #1 (mixed) of echo cannot be converted to string."],
+    [9, 16, "foreach.nonIterable", "Argument of an invalid type mixed supplied for foreach, only iterables are supported."],
+    [9, 17, "throw.notThrowable", "Invalid type mixed to throw."],
+    [9, 22, "argument.type", "Parameter #1 $value of function takeText expects string, mixed given."],
+    [9, 23, "property.nonObject", "Cannot access property $name on mixed."],
+    [6, 25, "missingType.parameter", "Function implicit() has parameter $value with no type specified."],
+    [10, 28, "argument.type", "Parameter #1 $value of function takeText expects string, mixed given."],
+    [10, 29, "property.nonObject", "Cannot access property $name on mixed."],
+    [10, 30, "method.nonObject", "Cannot call method label() on mixed."]
+  ],
+  "nullable.php": [
+    [8, 11, "method.nonObject", "Cannot call method label() on Thing|null."],
+    [8, 12, "property.nonObject", "Cannot access property $name on Thing|null."],
+    [8, 13, "argument.type", "Parameter #1 $value of function takeThing expects Thing, Thing|null given."]
+  ],
+  "nullsafe_and_coalesce_guards.php": [],
+  "nullsafe_arguments.php": [
+    [8, 13, "method.nonObject", "Cannot call method name() on LabelNode|null."]
+  ],
+  "date_interval_days.php": [
+    [7, 14, "return.type", "Function anyDays() should return int but returns int|false."]
+  ],
+  "date_timezone.php": [],
+  "decryption_guard.php": [],
+  "generic_array_callbacks.php": [],
+  "method_arguments_guard.php": [
+    [8, 18, "argument.type", "Parameter #1 $name of function takeName expects string, string|null given."],
+    [8, 23, "argument.type", "Parameter #1 $name of function takeName expects string, string|null given."]
+  ],
+  "nullable_template.php": [],
+  "nullable_comparison_peer.php": [],
+  "nullsafe_chain.php": [
+    [8, 30, "method.nonObject", "Cannot call method id() on ChainRow|null."]
+  ],
+  "null_test_flags.php": [
+    [8, 24, "method.nonObject", "Cannot call method text() on GuardedLabel|null."]
+  ],
+  "return_annotations.php": [],
+  "return_messages.php": [
+    [5, 4, "return.type", "Anonymous function should return int but returns string."],
+    [5, 7, "return.type", "Method ReturnSample::read() should return int but returns string."]
+  ],
+  "scalar_guards.php": [],
+  "strict_context.php": [],
+  "strict_lookup_constants.php": [],
+  "static_lookup_guards.php": [
+    [8, 22, "method.nonObject", "Cannot call method id() on OptionalLookup|null."]
+  ],
+  "typed_overrides.php": [],
+  "union_property_guard.php": [],
+  "typed_property_normal_write.php": [
+    [8, 8, "assign.propertyType", "Property TextHolder::$text (string) does not accept string|null."],
+    [8, 12, "assign.propertyType", "Property TextHolder::$text (string) does not accept string|null."],
+    [8, 25, "assign.propertyType", "Property TextHolder::$text (string) does not accept string|null."]
+  ],
+  "union.php": [
+    [7, 12, "method.notFound", "Call to an undefined method Left|Right::label()."],
+    [7, 13, "property.notFound", "Access to an undefined property Left|Right::$name."],
+    [7, 14, "method.nonObject", "Cannot call method label() on int|Left."],
+    [7, 15, "property.nonObject", "Cannot access property $name on int|Left."],
+    [7, 16, "argument.type", "Parameter #1 $value of function takeText expects string, int|string given."]
+  ]
+}

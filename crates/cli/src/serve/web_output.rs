@@ -90,5 +90,6 @@ fn to_response(head: ResponseHead, body: Vec<u8>) -> Response {
         status: head.status,
         headers: head.headers,
         body: phera_server::Body::Bytes(body),
+        upgrade: None,
     }
 }

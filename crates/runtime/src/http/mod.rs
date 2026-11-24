@@ -83,6 +83,7 @@ pub struct HttpResponse {
     pub status: u16,
     pub headers: Vec<(String, Vec<u8>)>,
     pub body: Vec<u8>,
+    pub websocket: Option<phera_extension_api::websocket::WebSocketAccept>,
 }
 
 impl HttpResponse {
@@ -95,6 +96,7 @@ impl HttpResponse {
                 b"text/plain; charset=UTF-8".to_vec(),
             )],
             body: body.into(),
+            websocket: None,
         }
     }
 
