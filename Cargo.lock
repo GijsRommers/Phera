@@ -2988,7 +2988,7 @@ dependencies = [
 name = "phera-db-drivers"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "bytes",
  "fallible-iterator 0.2.0",
  "futures-core",
@@ -3053,7 +3053,7 @@ name = "phera-ext-curl"
 version = "0.1.0"
 dependencies = [
  "async-compression",
- "base64 0.22.1",
+ "base64 0.23.1",
  "bytes",
  "cookie_store",
  "flate2",
@@ -3233,7 +3233,7 @@ dependencies = [
 name = "phera-ext-mbstring"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "encoding_rs",
  "iconv-native",
  "phera-ext-process",
@@ -3424,7 +3424,7 @@ dependencies = [
  "aes-gcm",
  "argon2",
  "base16ct",
- "base64 0.22.1",
+ "base64 0.23.1",
  "blake2b_simd",
  "block-padding",
  "chacha20",
@@ -3485,7 +3485,7 @@ dependencies = [
 name = "phera-ext-streams"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "bytes",
  "flate2",
  "http-body-util",
@@ -3598,7 +3598,7 @@ name = "phera-packages"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "base64 0.22.1",
+ "base64 0.23.1",
  "flate2",
  "glob",
  "md-5 0.10.6",

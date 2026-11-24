@@ -119,7 +119,7 @@ base16ct = { version = "1", features = ["alloc"] }
 cssparser = "0.38"
 precomputed-hash = "0.1"
 selectors = "0.41"
-base64 = "0.22"
+base64 = "0.23"
 phera-ext-json = { path = "crates/extensions/json" }
 phera-ext-sodium = { path = "crates/extensions/sodium" }
 phera-ext-openssl = { path = "crates/extensions/openssl" }
