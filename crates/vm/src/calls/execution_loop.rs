@@ -216,7 +216,9 @@ impl Vm {
             let exit = match instruction {
                 // A call of a native function goes straight to it: the
                 // general handler would only find that out and come here.
-                Instruction::Call { dst, .. } if !TRACK_GENERATORS && self.calls_plain_native() => {
+                // Line 253 checks `generator_releases_pending()` immediately
+                // after, so `TRACK_GENERATORS == true` stays exact too.
+                Instruction::Call { dst, .. } if self.calls_plain_native() => {
                     *work += 1;
                     self.call_lean_native(dst)
                 }
@@ -226,7 +228,7 @@ impl Vm {
                     count,
                     dst,
                     ..
-                } if !TRACK_GENERATORS => {
+                } => {
                     *work += 1;
                     self.call_native_direct(function, args, count, dst)
                 }
@@ -475,7 +477,6 @@ impl Machine<'_> {
             Instruction::CheckType { local, ty } => self.check_type(position, local, ty),
             Instruction::New { class } => self.new_object::<GUARDED>(position, class),
             Instruction::InitDynamicCall { callee } => self.prepare_closure(position, callee),
-            Instruction::GuardBuiltin { .. } => self.builtin_guard(position),
             _ => Step::Slow,
         }
     }
@@ -547,8 +548,10 @@ impl Machine<'_> {
             | Instruction::StaticCall { .. }
             | Instruction::CheckType { .. }
             | Instruction::New { .. }
-            | Instruction::InitDynamicCall { .. }
-            | Instruction::GuardBuiltin { .. } => self.cold_step::<GUARDED>(*instruction, position),
+            | Instruction::InitDynamicCall { .. } => {
+                self.cold_step::<GUARDED>(*instruction, position)
+            }
+            Instruction::GuardBuiltin { .. } => self.builtin_guard(position),
             Instruction::CallDirect {
                 function,
                 args,

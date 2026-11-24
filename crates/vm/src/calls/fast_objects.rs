@@ -67,14 +67,26 @@ impl Machine<'_> {
         let template = template.clone();
         let object = self.classes.allocate_with_properties(class, template);
         if constructor.is_none()
-            && !GUARDED
             && let Some(Instruction::Call { dst, .. }) = self
                 .code
                 .instructions(position.frame.function)
                 .get(position.ip)
         {
             let slots = self.registers.tail_mut(position.frame.base());
-            if let Some(slot) = slots.get_mut(dst.index()) {
+            if let Some(slot) = slots.get_mut(dst.index())
+                && (!GUARDED
+                    || slot.as_ref().is_none_or(|v| {
+                        matches!(
+                            v,
+                            Value::Null
+                                | Value::Bool(_)
+                                | Value::Int(_)
+                                | Value::Float(_)
+                                | Value::InternedStr(_)
+                                | Value::String(_)
+                        )
+                    }))
+            {
                 *slot = Some(Value::Object(object));
                 return Step::Done(position.ip + 1);
             }

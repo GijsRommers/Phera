@@ -102,7 +102,7 @@ impl Machine<'_> {
         let Some(destination) = frame.destination() else {
             return if frame.discards_result() {
                 self.leave_discarded(frame, source)
-            } else if !GUARDED && frame.returns_to_native_loop() {
+            } else if frame.returns_to_native_loop() {
                 self.leave_to_native_loop(frame, source)
             } else if !GUARDED && self.stack.depth() == self.stop + 1 {
                 self.leave_to_native(frame, source)
@@ -286,7 +286,7 @@ impl Machine<'_> {
         };
         self.stack.pop_for_return();
         self.registers.release_frame(frame.start(), frame.base());
-        if !self.ids.has_due()
+        if !self.ids.has_doomed()
             && let Some(next_frame) = crate::calls::native_loops::try_continue_in_machine(
                 self.code,
                 self.classes,

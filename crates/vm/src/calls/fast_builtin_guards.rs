@@ -16,6 +16,7 @@ use crate::unit_caches::CachedSite;
 
 impl Machine<'_> {
     /// `GuardBuiltin`, when the site found the global built-in.
+    #[inline(always)]
     pub(super) fn builtin_guard(&self, position: Position) -> Step {
         let function = position.frame.function;
         // The VM keys the site by the position after the instruction,
