@@ -68,6 +68,7 @@ impl Vm {
             return;
         };
         let value = match value.to_ascii_lowercase().as_str() {
+            _ if name.starts_with("xdebug.") => value,
             "on" | "yes" | "true" => "1",
             "off" | "no" | "false" | "none" | "null" => "",
             _ => value,

@@ -2961,6 +2961,7 @@ dependencies = [
  "phera-phpt",
  "phera-runtime",
  "phera-server",
+ "quick-xml",
  "rcgen",
  "rustix",
  "semver",
@@ -3737,6 +3738,7 @@ dependencies = [
 name = "phera-vm"
 version = "0.1.0"
 dependencies = [
+ "base64 0.23.1",
  "chrono",
  "foldhash",
  "indexmap",
@@ -3747,8 +3749,10 @@ dependencies = [
  "phera-extension-api",
  "phera-source",
  "phera-value",
+ "quick-xml",
  "rustix",
  "tokio",
+ "url",
 ]
 
 [[package]]

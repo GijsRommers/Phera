@@ -135,6 +135,7 @@ foreach (explode("\n", git('ls-tree', '-r', '--name-only', $commit)) as $file) {
 }
 $records = pdo_methods($records);
 $records += redis_methods();
+$records["xdebug_break"] = [[], "Xdebug 3.5.0 reflection", ""];
 ksort($records);
 
 foreach ($records as $name => [$parameters, $location, $namespace]) {

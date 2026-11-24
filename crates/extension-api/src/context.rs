@@ -52,6 +52,16 @@ pub trait Context {
     /// Appends to the request's output, as `echo` does.
     fn write(&mut self, bytes: &[u8]);
 
+    /// Request a breakpoint if a debugger is attached to this context.
+    fn break_into_debugger(&mut self) -> bool {
+        false
+    }
+
+    /// Return whether a standard descriptor should also receive this write.
+    fn debugger_output(&mut self, _stderr: bool, _bytes: &[u8]) -> bool {
+        true
+    }
+
     /// Write a piece of an asynchronous transfer, waiting for the web
     /// transport when it needs to send that piece before the next read.
     fn write_chunk(&mut self, bytes: &[u8]) -> Option<LocalFuture<'_, Result<(), NativeError>>> {

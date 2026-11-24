@@ -10,6 +10,7 @@ mod boot;
 mod boot_changes;
 mod cache;
 mod constant_calls;
+mod debugger;
 mod environment;
 mod error;
 #[cfg(test)]
@@ -51,7 +52,7 @@ pub use http::{HttpRequest, HttpResponse, web_output::WebOutput};
 pub use phera_ext_http::ResponseHead;
 pub use phera_extension_api::web_log::flush as flush_web_log;
 pub use phera_extension_api::websocket::{WebSocketEvent, WebSocketEventOutcome, WebSocketSink};
-pub use phera_vm::OutputSink;
+pub use phera_vm::{DebugConfig, DebugTimeLimit, OutputSink};
 pub use preload::PreloadSummary;
 pub use snapshots::{remembered as snapshot_remembered, requests_from_the_top};
 
@@ -91,6 +92,7 @@ pub struct Runtime {
     /// Scripts that run PHP source Phera ships in place of the file (an
     /// adapter's entry script), by the script's path.
     entry_scripts: Arc<std::collections::HashMap<std::path::PathBuf, &'static str>>,
+    debug: Option<Arc<DebugConfig>>,
     /// WebSocket hub exposed to `Phera\WebSocket\*` when running under `phera serve`.
     websocket_sink: Option<Arc<dyn phera_extension_api::websocket::WebSocketSink>>,
     /// Maximum number of active request VMs running concurrently on one worker
@@ -119,6 +121,19 @@ pub struct WebWorker {
 }
 
 impl WebWorker {
+    /// A debug-enabled server can pause its request deadline while PHP waits for the IDE.
+    pub async fn handle_debug_request(
+        &self,
+        script: &Path,
+        document_root: &Path,
+        request: HttpRequest,
+        time_limit: Option<DebugTimeLimit>,
+    ) -> HttpResponse {
+        self.runtime
+            .handle_web_request::<true>(self, script, document_root, request, time_limit)
+            .await
+    }
+
     /// Lets this worker boot scripts in the background (a first request
     /// that reached `Phera\snapshot()`, a changed file). Only for a worker
     /// whose requests run on a Tokio `LocalSet`, as `phera serve`'s do.
@@ -160,7 +175,7 @@ impl WebWorker {
         request: HttpRequest,
     ) -> HttpResponse {
         self.runtime
-            .handle_web_request(self, script, document_root, request)
+            .handle_web_request::<false>(self, script, document_root, request, None)
             .await
     }
 
@@ -236,6 +251,7 @@ impl Runtime {
             startup_ini: Arc::new([]),
             web_development: false,
             no_process: false,
+            debug: None,
             class_warmup: true,
             include_policy: phera_vm::IncludeCachePolicy::default(),
             entry_scripts: Arc::default(),
@@ -380,6 +396,9 @@ impl Runtime {
         for (name, stream) in phera_ext_streams::standard_constants() {
             phera_ext_streams::track_standard(vm.state_mut(), &stream);
             vm.set_constant(name, stream);
+        }
+        if self.debug.is_some() {
+            self.connect_debugger(&mut vm, &unit.file, None).await;
         }
         let status = vm.run(unit).await;
         Ok(RunResult {
@@ -546,12 +565,13 @@ impl Runtime {
         outcome
     }
 
-    async fn handle_web_request(
+    async fn handle_web_request<const DEBUG: bool>(
         &self,
         worker: &WebWorker,
         script: &Path,
         document_root: &Path,
         request: HttpRequest,
+        debug_time_limit: Option<DebugTimeLimit>,
     ) -> HttpResponse {
         let code = Rc::new(RequestCodeCache::new(worker.code.clone()));
         let compiled = match self.entry_unit(&code, script).await {
@@ -643,6 +663,10 @@ impl Runtime {
         }
         if let Some(warning) = form_warning {
             vm.request_startup_warning(warning);
+        }
+        if DEBUG && let Ok(unit) = &compiled {
+            self.connect_debugger(&mut vm, &unit.file, debug_time_limit)
+                .await;
         }
         match compiled {
             Ok(_) if forked => {

@@ -1,0 +1,23 @@
+status
+feature_set -n resolved_breakpoints -v 1
+feature_set -n notify_ok -v 1
+breakpoint_set -t line -f {file} -n 17
+run
+stack_depth
+stack_get
+context_names
+context_get -d 0 -c 2
+property_get -n $count -d 0 -c 0
+property_set -n $count -d 0 -c 0 -- NDE=
+property_get -n $count -d 0 -c 0
+eval -- JHBhY2tldC0+c2l6ZSgp
+property_value -n "$data['bin']" -d 0 -c 0 -m 1
+source -b 1 -e 2
+step_into
+stack_get
+step_over
+stack_get
+step_out
+stack_get
+run
+stop

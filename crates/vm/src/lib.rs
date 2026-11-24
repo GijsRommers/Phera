@@ -64,6 +64,7 @@ mod context;
 mod control_flow;
 mod cycles;
 mod debug_info;
+mod debugger;
 mod declaration_diagnostics;
 mod default_autoload;
 #[cfg(test)]
@@ -196,6 +197,8 @@ mod web_output;
 mod websocket;
 mod worker_code;
 
+pub use debugger::{DebugConfig, DebugTimeLimit, Start as DebugStart};
+
 pub use include_lookup::{
     CodeLoadError, CodeLoader, IncludeCachePolicy, IncludeLoad, IncludeLookup, RelativeInclude,
     StreamInclude,
@@ -290,6 +293,8 @@ pub struct Vm {
     suspended_fibers: fibers::SuspendedFibers,
     /// What `Phera\snapshot()` does here, and the state it kept.
     snapshot: snapshot::SnapshotState,
+    debugger: Option<Box<debugger::Session>>,
+    debug_evaluating: bool,
     websocket_sink: Option<Arc<dyn phera_extension_api::websocket::WebSocketSink>>,
     websocket_resolver: Option<Value>,
     websocket_is_event: bool,
@@ -317,6 +322,11 @@ impl Vm {
         Self::with_native_tables(&NativeTables::new(registry))
     }
 
+    /// Expose the debugger's PHP function and startup directives.
+    pub fn register_debugger(registry: &mut Registry) {
+        debugger::php_api::register(registry);
+    }
+
     /// Register VM-owned fiber classes after Core and Reflection.
     pub fn register_fiber_classes(registry: &mut Registry) {
         fibers::register(registry);
@@ -339,6 +349,8 @@ impl Vm {
             fiber_bailout: false,
             suspended_fibers: Default::default(),
             snapshot: Default::default(),
+            debugger: None,
+            debug_evaluating: false,
             websocket_sink: None,
             websocket_resolver: None,
             websocket_is_event: false,
@@ -519,6 +531,9 @@ impl Vm {
         self.finish_request(end).await;
         self.finish_request_headers().await;
         self.finish_resource_finalizers().await;
+        if self.debugger.is_some() {
+            self.finish_debugger().await;
+        }
         self.complete_streamed_response().await;
         self.status
     }

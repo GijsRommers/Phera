@@ -2507,6 +2507,35 @@ Rector provide starting points for rule semantics. For a future
 and PHP/HTML boundaries and associate them with AST nodes. Lint edits only
 need the spans for the particular tokens and trivia a rule examines.
 
+### 11.10 Step debugging
+
+DBGp clients connect by listening for the runtime's outgoing session. The
+runtime selects a session from startup settings and the request's parsed
+trigger fields before executing PHP. Each session owns its own features,
+breakpoints, continuation command, and asynchronous TCP stream.
+
+Workers select their HTTP handler when the server starts. The ordinary
+handler calls the ordinary runtime specialization. Enabling debugging
+registers the debugger's PHP functions and directives at process startup.
+
+The VM selects the debugger batch after a connection succeeds. The debugger
+batch publishes the next instruction before a source stop and uses the same
+guarded register operations and slow instruction handlers as ordinary PHP
+execution. The plain interpreter loop and its destructor checks retain
+their existing instruction dispatch.
+
+A connection belongs to one VM. An IDE stop suspends the PHP request task
+on Tokio and pauses that request's wall-clock timer. The PHP CPU timer
+already charges only while the task is being polled.
+
+With snapshot and fork, the runtime sets up request globals before choosing
+whether to attach the request debugger. A fork has its own connection and
+can stop in request code from files compiled during boot. Breakpoints
+resolve against the fork's copy of the worker's loaded code table.
+A development server can attach to the boot
+VM with `--debug --dev --debug-boot`. Snapshot creation closes the boot's
+debugger session and the snapshot retains no connection state.
+
 ## 12. What to take from Hack and HHVM, and what not
 
 Facebook's HHVM ran PHP much faster, then became the runtime of a different

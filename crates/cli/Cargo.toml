@@ -39,6 +39,7 @@ mimalloc.workspace = true
 
 [dev-dependencies]
 futures-util.workspace = true
+quick-xml.workspace = true
 phera-extension-api.workspace = true
 phera-phpt.workspace = true
 rcgen.workspace = true

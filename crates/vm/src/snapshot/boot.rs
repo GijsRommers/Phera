@@ -172,6 +172,9 @@ impl Vm {
     pub async fn boot(&mut self, unit: Arc<CompiledUnit>) -> BootOutcome {
         self.snapshot.mode = SnapshotMode::Boot;
         let status = self.run(unit).await;
+        if self.debugger.is_some() {
+            self.finish_debugger().await;
+        }
         match (self.snapshot.taken.take(), self.snapshot.refused.take()) {
             (Some(snapshot), _) => BootOutcome::Snapshot(snapshot),
             (None, Some(message)) => BootOutcome::Refused(message),

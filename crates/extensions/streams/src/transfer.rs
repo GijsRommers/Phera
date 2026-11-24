@@ -281,6 +281,18 @@ pub async fn write_unfiltered(
         };
         (wrapper, action)
     })?;
+    if wrapper == Wrapper::Standard {
+        let stderr = with_stream(resource, |stream| match stream.uri.as_slice() {
+            b"php://stdout" => Some(false),
+            b"php://stderr" => Some(true),
+            _ => None,
+        })?;
+        if let Some(stderr) = stderr
+            && !context.debugger_output(stderr, data)
+        {
+            return Ok(Value::Int(length as i64));
+        }
+    }
     let result = match action {
         WriteAction::Socket(socket) => socket.write(data).await,
         WriteAction::Pipe(pipe) => {

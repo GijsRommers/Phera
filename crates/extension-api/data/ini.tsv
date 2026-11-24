@@ -234,3 +234,10 @@ bcmath	bcmath.scale	int	7	30
 zlib	zlib.output_compression	bool	7	30
 zlib	zlib.output_compression_level	int	7	2d31
 zlib	zlib.output_handler	string	7	=
+phera_debugger	xdebug.mode	list	4	6f6666
+phera_debugger	xdebug.client_host	string	4	3132372e302e302e31
+phera_debugger	xdebug.client_port	int	4	39303033
+phera_debugger	xdebug.start_with_request	string	4	64656661756c74
+phera_debugger	xdebug.idekey	string	4	=
+phera_debugger	xdebug.connect_timeout_ms	int	4	323030
+phera_debugger	xdebug.log	string	4	=

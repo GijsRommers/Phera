@@ -8,13 +8,16 @@ use std::time::Duration;
 
 pub(crate) const USAGE: &str = "\
 Usage:
-  phera [run] [ENV OPTIONS] [-d NAME=VALUE] <file.php> [arguments...]   run a script
+  phera [run] [--debug] [ENV OPTIONS] [-d NAME=VALUE] <file.php> [arguments...]   run a script
   phera serve [OPTIONS] [PATH]            serve PATH (a directory, or one
                                           script that answers every request)
     --listen ADDRESS                      default 127.0.0.1:8080, or
                                           0.0.0.0:$PORT when PORT is set
     --workers N                           default: one per CPU core
     --preload                             compile Composer files before listening
+    --debug                               start a DBGp session for each request
+    --debug-boot                          debug worker boot with --debug --dev
+    --allow-remote-debug                  allow debug mode on a non-loopback address
     --no-class-warmup                     do not declare in the snapshot the
                                           classes requests autoload
     --no-service-warmup                   Laravel, Symfony: do not resolve the
@@ -84,6 +87,7 @@ ENV OPTIONS: --env-file PATH (repeatable) or --no-env-file";
 
 pub(crate) enum Command {
     Run {
+        debug: bool,
         files: FileSelection,
         ini: Vec<(String, String)>,
         script: String,
@@ -107,6 +111,9 @@ pub(crate) struct ServeOptions {
     pub files: FileSelection,
     pub ini: Vec<(String, String)>,
     pub dev: bool,
+    pub debug: bool,
+    pub debug_boot: bool,
+    pub allow_remote_debug: bool,
     /// `None`: `0.0.0.0:$PORT` when a platform sets `PORT`, else
     /// `127.0.0.1:8080`.
     pub listen: Option<SocketAddr>,
@@ -147,7 +154,8 @@ pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, 
     let mut arguments = arguments.peekable();
     let mut files = FileSelection::Automatic;
     let mut ini = Vec::new();
-    leading_options(&mut arguments, &mut files, &mut ini)?;
+    let mut debug = false;
+    leading_options(&mut arguments, &mut files, &mut ini, &mut debug)?;
     match arguments.peek().map(String::as_str) {
         None => Err("No script given.".to_string()),
         Some("--version") => Ok(Command::Version),
@@ -196,6 +204,7 @@ pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, 
         Some(_) => {
             let named = arguments.next_if(|argument| argument == "run").is_some();
             if named
+                && !debug
                 && matches!(&files, FileSelection::Automatic)
                 && ini.is_empty()
                 && arguments
@@ -207,10 +216,11 @@ pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, 
                     .collect();
                 return Ok(Command::Packages(args));
             }
-            leading_options(&mut arguments, &mut files, &mut ini)?;
+            leading_options(&mut arguments, &mut files, &mut ini, &mut debug)?;
             let arguments: Vec<String> = arguments.collect();
             let script = arguments.first().cloned().ok_or("No script given.")?;
             Ok(Command::Run {
+                debug,
                 script,
                 arguments,
                 files,
@@ -266,12 +276,18 @@ fn leading_options(
     arguments: &mut std::iter::Peekable<impl Iterator<Item = String>>,
     files: &mut FileSelection,
     ini: &mut Vec<(String, String)>,
+    debug: &mut bool,
 ) -> Result<(), String> {
-    while let Some(option) =
-        arguments.next_if(|s| matches!(s.as_str(), "--env-file" | "--no-env-file" | "-d"))
-    {
+    while let Some(option) = arguments.next_if(|s| {
+        matches!(
+            s.as_str(),
+            "--env-file" | "--no-env-file" | "-d" | "--debug"
+        )
+    }) {
         if option == "-d" {
             ini.push(ini_option(arguments)?);
+        } else if option == "--debug" {
+            *debug = true;
         } else {
             file_option(&option, arguments, files)?;
         }
@@ -320,6 +336,9 @@ fn parse_serve(
         files,
         ini,
         dev: false,
+        debug: false,
+        debug_boot: false,
+        allow_remote_debug: false,
         listen: None,
         workers: None,
         preload: false,
@@ -374,6 +393,9 @@ fn parse_serve(
                 options.warmup.push(path);
             }
             "--dev" => options.dev = true,
+            "--debug" => options.debug = true,
+            "--debug-boot" => options.debug_boot = true,
+            "--allow-remote-debug" => options.allow_remote_debug = true,
             "--no-process" => options.no_process = true,
             "--trusted-proxies" => {
                 let list = arguments
