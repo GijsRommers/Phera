@@ -208,6 +208,21 @@ $k = 0;
 $m = [0 => 5, 1 => 9];
 $m[$k] += $m[$k];
 echo $m[0] . "\n";
+
+// Undefined index variable must still warn before null-offset deprecation.
+function undef_index_write() {
+    $notDefined[$undefIdx] = 'test';
+}
+$warnings = [];
+set_error_handler(function ($errno, $errstr) use (&$warnings) {
+    $warnings[] = $errstr;
+    return true;
+});
+undef_index_write();
+echo implode("|", $warnings) . "\n";
 "#);
-    assert_eq!(out, "20,30,26,no\n10\n");
+    assert_eq!(
+        out,
+        "20,30,26,no\n10\nUndefined variable $undefIdx|Using null as an array offset is deprecated, use an empty string instead\n"
+    );
 }
