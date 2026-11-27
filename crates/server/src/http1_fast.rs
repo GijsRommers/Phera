@@ -321,12 +321,16 @@ pub(crate) async fn serve_connection(
             }
         };
 
-        let head_started = Instant::now();
-        let head_deadline = head_started + read_limit;
+        let mut head_started: Option<Instant> = None;
 
         // Step 2: Read and parse the HTTP/1.x request head (or sniff HTTP/2 preface).
-        let parsed = loop {
+        // When the entire head + fixed-length body is already in `buf` (the common
+        // case), `parse_fast_request` builds `Request` in a single `httparse` pass
+        // with zero second parse and zero `Instant::now()` syscall.
+        let (meta, ready_request) = loop {
             if buf.is_empty() {
+                let started = *head_started.get_or_insert_with(Instant::now);
+                let head_deadline = started + read_limit;
                 match read_chunk(&mut stream, &mut buf, head_deadline, shutdown_fut.as_mut()).await
                 {
                     ReadOutcome::GotBytes => {}
@@ -345,6 +349,8 @@ pub(crate) async fn serve_connection(
                     handoff_to_hyper(buf, stream, peer, shutdown, work, &worker).await;
                     return;
                 }
+                let started = *head_started.get_or_insert_with(Instant::now);
+                let head_deadline = started + read_limit;
                 match read_chunk(&mut stream, &mut buf, head_deadline, shutdown_fut.as_mut()).await
                 {
                     ReadOutcome::GotBytes => continue,
@@ -360,13 +366,16 @@ pub(crate) async fn serve_connection(
                 }
             }
 
-            match parse_head_meta(&buf) {
-                ParseResult::Complete(info) => break info,
+            match parse_fast_request(&buf, limits.max_body_bytes, peer, worker.local_addr) {
+                ParseResult::Ready(ready) => break (ready.meta, Some(ready.request)),
+                ParseResult::NeedBody(meta) => break (meta, None),
                 ParseResult::Partial => {
                     if buf.len() >= MAX_FAST_HEAD_BYTES {
                         handoff_to_hyper(buf, stream, peer, shutdown, work, &worker).await;
                         return;
                     }
+                    let started = *head_started.get_or_insert_with(Instant::now);
+                    let head_deadline = started + read_limit;
                     match read_chunk(&mut stream, &mut buf, head_deadline, shutdown_fut.as_mut())
                         .await
                     {
@@ -401,24 +410,21 @@ pub(crate) async fn serve_connection(
 
         first_request = false;
 
-        // Check body size & framing fallback before reading body bytes.
-        let content_length = parsed.content_length;
-        if content_length > limits.max_body_bytes || content_length > MAX_FAST_BODY_BYTES {
-            handoff_to_hyper(buf, stream, peer, shutdown, work, &worker).await;
-            return;
-        }
-
-        // Step 3: Read any remaining fixed-length body bytes under the shared
-        // head+body budget and body_idle_timeout.
-        let total_needed = parsed.head_len + content_length;
-        if buf.len() < total_needed {
+        // Step 3 + 4: Finish reading any remaining fixed-length body bytes (slow
+        // path only) and return the scratch read buffer BEFORE awaiting the PHP
+        // handler (so slow async handlers hold zero read buffers).
+        let total_needed = meta.head_len + meta.content_length;
+        let request = if let Some(request) = ready_request {
+            request
+        } else {
+            let started = *head_started.get_or_insert_with(Instant::now);
             buf.reserve(total_needed - buf.len());
             while buf.len() < total_needed {
-                let body_so_far = buf.len() - parsed.head_len;
+                let body_so_far = buf.len() - meta.head_len;
                 let total_budget = limits
                     .request_read_timeout
                     .saturating_add(body_time_credit(body_so_far));
-                let remaining = total_budget.saturating_sub(head_started.elapsed());
+                let remaining = total_budget.saturating_sub(started.elapsed());
                 if remaining.is_zero() {
                     worker.scratch.return_read_buf(buf);
                     let _ = write_stalled_408(&mut stream).await;
@@ -439,18 +445,15 @@ pub(crate) async fn serve_connection(
                     }
                 }
             }
-        }
-
-        // Step 4: Construct Request and return the scratch read buffer BEFORE
-        // awaiting the PHP handler (so slow async handlers hold zero read buffers).
-        let is_head = parsed.is_head;
-        let version = parsed.version;
+            build_request(&buf, meta, peer, worker.local_addr)
+        };
+        let is_head = meta.is_head;
+        let version = meta.version;
         let client_keep_alive = match version {
-            HttpVersion::Http11 => !parsed.connection_close,
-            HttpVersion::Http10 => parsed.connection_keep_alive,
+            HttpVersion::Http11 => !meta.connection_close,
+            HttpVersion::Http10 => meta.connection_keep_alive,
             HttpVersion::Http2 => false,
         };
-        let request = build_request(&buf, parsed, peer, worker.local_addr);
         if buf.len() > total_needed {
             pending = Some(buf[total_needed..].to_vec());
         }
@@ -567,14 +570,71 @@ struct HeadMeta {
     is_head: bool,
 }
 
+struct ReadyRequest {
+    request: Request,
+    meta: HeadMeta,
+}
+
+/// `Ready` is the 99.99% hot path and is destructured immediately on the stack
+/// without crossing an `.await` point, so avoiding `Box` eliminates a heap
+/// allocation per request.
+#[allow(clippy::large_enum_variant)]
 enum ParseResult {
-    Complete(HeadMeta),
+    Ready(ReadyRequest),
+    NeedBody(HeadMeta),
     Partial,
     FallbackToHyper,
     BadRequest,
 }
 
-fn parse_head_meta(buf: &[u8]) -> ParseResult {
+fn build_request_from_parsed(
+    method_str: &str,
+    target_str: &str,
+    raw_headers: &[httparse::Header<'_>],
+    buf: &[u8],
+    meta: HeadMeta,
+    peer: SocketAddr,
+    local_addr: SocketAddr,
+) -> Request {
+    let (path, query) = match target_str.split_once('?') {
+        Some((p, q)) => (p.to_owned(), q.to_owned()),
+        None => (target_str.to_owned(), String::new()),
+    };
+    let target = if query.is_empty() && target_str.len() == path.len() {
+        path.clone()
+    } else {
+        target_str.to_owned()
+    };
+    let mut headers = Vec::with_capacity(raw_headers.len());
+    for header in raw_headers {
+        let lower = header.name.to_ascii_lowercase();
+        headers.push((lower, trim_ows(header.value).to_vec()));
+    }
+    let body = if meta.content_length == 0 {
+        Vec::new()
+    } else {
+        buf[meta.head_len..meta.head_len + meta.content_length].to_vec()
+    };
+    Request {
+        method: method_str.to_owned(),
+        target,
+        path,
+        query,
+        version: meta.version,
+        headers,
+        body,
+        remote_addr: peer,
+        local_addr,
+        is_websocket_upgrade: false,
+    }
+}
+
+fn parse_fast_request(
+    buf: &[u8],
+    max_body_bytes: usize,
+    peer: SocketAddr,
+    local_addr: SocketAddr,
+) -> ParseResult {
     let mut raw_headers = [httparse::EMPTY_HEADER; MAX_FAST_HEADERS];
     let mut req = httparse::Request::new(&mut raw_headers);
     let head_len = match req.parse(buf) {
@@ -652,14 +712,34 @@ fn parse_head_meta(buf: &[u8]) -> ParseResult {
         return ParseResult::BadRequest;
     }
 
-    ParseResult::Complete(HeadMeta {
+    let content_length = content_length.unwrap_or(0);
+    if content_length > max_body_bytes || content_length > MAX_FAST_BODY_BYTES {
+        return ParseResult::FallbackToHyper;
+    }
+
+    let meta = HeadMeta {
         head_len,
-        content_length: content_length.unwrap_or(0),
+        content_length,
         version,
         connection_close,
         connection_keep_alive,
         is_head: method_str == "HEAD",
-    })
+    };
+
+    if buf.len() >= head_len + content_length {
+        let request = build_request_from_parsed(
+            method_str,
+            target_str,
+            req.headers,
+            buf,
+            meta,
+            peer,
+            local_addr,
+        );
+        ParseResult::Ready(ReadyRequest { request, meta })
+    } else {
+        ParseResult::NeedBody(meta)
+    }
 }
 
 fn build_request(buf: &[u8], meta: HeadMeta, peer: SocketAddr, local_addr: SocketAddr) -> Request {
@@ -668,37 +748,15 @@ fn build_request(buf: &[u8], meta: HeadMeta, peer: SocketAddr, local_addr: Socke
     let _ = req.parse(&buf[..meta.head_len]);
     let method_str = req.method.unwrap_or("GET");
     let target_str = req.path.unwrap_or("/");
-    let (path, query) = match target_str.split_once('?') {
-        Some((p, q)) => (p.to_owned(), q.to_owned()),
-        None => (target_str.to_owned(), String::new()),
-    };
-    let target = if query.is_empty() && target_str.len() == path.len() {
-        path.clone()
-    } else {
-        target_str.to_owned()
-    };
-    let mut headers = Vec::with_capacity(req.headers.len());
-    for header in req.headers.iter() {
-        let lower = header.name.to_ascii_lowercase();
-        headers.push((lower, trim_ows(header.value).to_vec()));
-    }
-    let body = if meta.content_length == 0 {
-        Vec::new()
-    } else {
-        buf[meta.head_len..meta.head_len + meta.content_length].to_vec()
-    };
-    Request {
-        method: method_str.to_owned(),
-        target,
-        path,
-        query,
-        version: meta.version,
-        headers,
-        body,
-        remote_addr: peer,
+    build_request_from_parsed(
+        method_str,
+        target_str,
+        req.headers,
+        buf,
+        meta,
+        peer,
         local_addr,
-        is_websocket_upgrade: false,
-    }
+    )
 }
 
 fn trim_ows(mut bytes: &[u8]) -> &[u8] {

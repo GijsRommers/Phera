@@ -53,7 +53,10 @@ pub enum RouteDispatch {
 
 struct PooledVm {
     vm: Vm,
-    router_obj: Rc<Object>,
+    /// Cached frozen route handlers and fallback from `RouterData` so hot
+    /// dispatch avoids `RefCell::borrow` + `downcast_ref` + `Value::clone`.
+    handlers: Vec<Value>,
+    fallback: Option<Value>,
 }
 
 struct RoutePool {
@@ -67,7 +70,10 @@ struct RoutePool {
     /// `None` if boot opened an un-forkable resource directly instead of using
     /// `onStart()` — falls back safely to 1 persistent instance.
     snapshot: Option<Rc<Snapshot>>,
-    idle: RefCell<Vec<PooledVm>>,
+    /// Boxed `PooledVm` keeps idle pop/push and `dispatch_on_pool`'s async
+    /// future pointer-sized (8 bytes) instead of moving `Vm` by value.
+    #[allow(clippy::vec_box)]
+    idle: RefCell<Vec<Box<PooledVm>>>,
     /// Concurrency limiter for this pool (`active_requests` when forkable, or 1
     /// when `snapshot` is `None`).
     limit: Option<Rc<tokio::sync::Semaphore>>,
@@ -235,8 +241,13 @@ impl WebWorker {
             Err(_) => {
                 // Boot opened an un-forkable resource directly (instead of onStart):
                 // keep this single booted VM alive safely with concurrency capped at 1.
-                let mut instance = PooledVm { vm, router_obj };
-                if let Err(error) = run_on_start(&mut instance, self.index).await {
+                let (handlers, fallback, on_start) = extract_router_callbacks(&router_obj);
+                let mut instance = Box::new(PooledVm {
+                    vm,
+                    handlers,
+                    fallback,
+                });
+                if let Err(error) = run_on_start(&mut instance.vm, &on_start, self.index).await {
                     return RouteBootReport::Failed(error);
                 }
                 (
@@ -286,9 +297,9 @@ impl WebWorker {
             .borrow_mut()
             .changed(self.runtime.include_policy);
         if stale {
-            let _ = self
-                .boot_router(&pool.script, &pool.document_root, pool.hybrid, true)
-                .await;
+            let _ =
+                Box::pin(self.boot_router(&pool.script, &pool.document_root, pool.hybrid, true))
+                    .await;
             let Some(refreshed) = self.router.pool.borrow().clone() else {
                 return RouteDispatch::Fallthrough(request);
             };
@@ -343,12 +354,14 @@ impl WebWorker {
 
         // Pop a warm persistent VM from the worker's idle stack, or fork one on demand
         // when all existing instances are concurrently parked at an async `.await`.
+        // The cold `fork_instance` future is boxed so its `Vm` initialization state
+        // never bloats the hot `dispatch_on_pool` future.
         let popped = pool.idle.borrow_mut().pop();
         let mut instance = match popped {
             Some(instance) => instance,
             None => match &pool.snapshot {
                 Some(snapshot) => {
-                    match fork_instance(snapshot, pool.worker_index, &self.code).await {
+                    match Box::pin(fork_instance(snapshot, pool.worker_index, &self.code)).await {
                         Ok(instance) => instance,
                         Err(error) => {
                             eprintln!(
@@ -368,28 +381,29 @@ impl WebWorker {
             },
         };
 
-        let resolved = {
-            let native = instance.router_obj.native.borrow();
-            let Some(data) = native.as_ref().and_then(|n| n.downcast_ref::<RouterData>()) else {
-                return RouteDispatch::Handled(HttpResponse::plain(500, "Internal Server Error"));
-            };
-            match target {
-                Target::Route { route, params } => {
-                    Some((data.handlers[route as usize].clone(), Some(route), params))
-                }
-                Target::Fallback => data
+        let outcome = {
+            let inner = &mut *instance;
+            let resolved = match target {
+                Target::Route { route, params } => inner
+                    .handlers
+                    .get(route as usize)
+                    .map(|handler| (handler, Some(route), params)),
+                Target::Fallback => inner
                     .fallback
                     .as_ref()
-                    .map(|fb| (fb.clone(), None, ParamRanges::new())),
+                    .map(|handler| (handler, None, ParamRanges::new())),
+            };
+            if let Some((handler, route_opt, params)) = resolved {
+                let data = RequestData::new(request, Rc::clone(&pool.router), route_opt, params);
+                Some(run_handler(&mut inner.vm, handler, data).await)
+            } else {
+                None
             }
         };
-        let Some((handler, route_opt, params)) = resolved else {
+        let Some(outcome) = outcome else {
             pool.idle.borrow_mut().push(instance);
             return RouteDispatch::Handled(HttpResponse::plain(404, "Not Found"));
         };
-
-        let data = RequestData::new(request, Rc::clone(&pool.router), route_opt, params);
-        let outcome = run_handler(&mut instance.vm, &handler, data).await;
         let (response, keep_instance) = match outcome {
             Ok(resp) => (resp, true),
             Err(error) => match instance.vm.report_unhandled(error) {
@@ -417,11 +431,23 @@ impl WebWorker {
     }
 }
 
+fn extract_router_callbacks(router_obj: &Rc<Object>) -> (Vec<Value>, Option<Value>, Vec<Value>) {
+    let native = router_obj.native.borrow();
+    match native.as_ref().and_then(|n| n.downcast_ref::<RouterData>()) {
+        Some(data) => (
+            data.handlers.clone(),
+            data.fallback.clone(),
+            data.on_start.clone(),
+        ),
+        None => (Vec::new(), None, Vec::new()),
+    }
+}
+
 async fn fork_instance(
     snapshot: &Snapshot,
     worker_index: usize,
     code: &Rc<crate::worker_code_cache::WorkerCodeCache>,
-) -> Result<PooledVm, String> {
+) -> Result<Box<PooledVm>, String> {
     let mut vm = snapshot.fork()?;
     vm.set_local_loader(Rc::new(crate::worker_code_cache::RequestCodeCache::new(
         code.clone(),
@@ -431,29 +457,24 @@ async fn fork_instance(
         .get::<ActiveRouterSlot>()
         .and_then(|slot| slot.0.clone())
         .ok_or_else(|| "route snapshot is missing its Phera\\Http\\Router".to_owned())?;
-    let mut instance = PooledVm { vm, router_obj };
-    run_on_start(&mut instance, worker_index).await?;
+    let (handlers, fallback, on_start) = extract_router_callbacks(&router_obj);
+    let mut instance = Box::new(PooledVm {
+        vm,
+        handlers,
+        fallback,
+    });
+    run_on_start(&mut instance.vm, &on_start, worker_index).await?;
     Ok(instance)
 }
 
-async fn run_on_start(instance: &mut PooledVm, worker_index: usize) -> Result<(), String> {
-    let callbacks: Vec<Value> = {
-        let native = instance.router_obj.native.borrow();
-        match native.as_ref().and_then(|n| n.downcast_ref::<RouterData>()) {
-            Some(data) => data.on_start.clone(),
-            None => Vec::new(),
-        }
-    };
+async fn run_on_start(vm: &mut Vm, callbacks: &[Value], worker_index: usize) -> Result<(), String> {
     for callback in callbacks {
-        if let Err(error) = instance
-            .vm
-            .call_callable(&callback, vec![Value::Int(worker_index as i64)])
+        if let Err(error) = vm
+            .call_callable(callback, vec![Value::Int(worker_index as i64)])
             .await
         {
-            let _ = instance.vm.report_unhandled(error);
-            let output = String::from_utf8_lossy(&instance.vm.output)
-                .trim()
-                .to_owned();
+            let _ = vm.report_unhandled(error);
+            let output = String::from_utf8_lossy(&vm.output).trim().to_owned();
             return Err(if output.is_empty() {
                 "onStart callback failed".to_owned()
             } else {
@@ -461,7 +482,7 @@ async fn run_on_start(instance: &mut PooledVm, worker_index: usize) -> Result<()
             });
         }
     }
-    instance.vm.output.clear();
+    vm.output.clear();
     Ok(())
 }
 
@@ -485,4 +506,36 @@ fn unit_references_http_router(unit: &phera_bytecode::CompiledUnit) -> bool {
             sym.name.eq_ignore_ascii_case("phera\\http\\router")
                 || sym.name.eq_ignore_ascii_case("phera\\http\\serve")
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::future::Future;
+
+    use super::*;
+
+    /// Guard against accidentally storing `Vm` by value in `PooledVm` or
+    /// `dispatch_on_pool`'s async state machine (which caused ~5 KiB `memmove`s
+    /// on every request).
+    #[test]
+    fn dispatch_on_pool_future_stays_compact() {
+        fn pool_size<'a, F: Future>(
+            _: fn(&'a WebWorker, Rc<RoutePool>, HttpRequest) -> F,
+        ) -> usize {
+            std::mem::size_of::<F>()
+        }
+        fn router_size<'a, F: Future>(_: fn(&'a WebWorker, HttpRequest) -> F) -> usize {
+            std::mem::size_of::<F>()
+        }
+        let on_pool = pool_size(WebWorker::dispatch_on_pool);
+        let router = router_size(WebWorker::dispatch_router);
+        assert!(
+            on_pool <= 2048,
+            "dispatch_on_pool future grew to {on_pool} bytes (expected <= 2048)"
+        );
+        assert!(
+            router <= 2560,
+            "dispatch_router future grew to {router} bytes (expected <= 2560)"
+        );
+    }
 }

@@ -492,7 +492,23 @@ struct SiteHandler {
 
 impl Handler for SiteHandler {
     fn handle(&self, request: Request) -> Pin<Box<dyn Future<Output = Response> + '_>> {
-        Box::pin(self.respond::<false>(request, None))
+        if self.health_path.as_deref() == Some(request.path.as_str()) {
+            return Box::pin(std::future::ready(health_response()));
+        }
+        if self.runtime.router_handles(&request.method, &request.path) {
+            return Box::pin(self.respond_router(request));
+        }
+        Box::pin(self.respond_classic::<false>(request, None))
+    }
+
+    fn handle_owned(self: Rc<Self>, request: Request) -> Pin<Box<dyn Future<Output = Response>>> {
+        if self.health_path.as_deref() == Some(request.path.as_str()) {
+            return Box::pin(std::future::ready(health_response()));
+        }
+        if self.runtime.router_handles(&request.method, &request.path) {
+            return Box::pin(async move { self.respond_router(request).await });
+        }
+        Box::pin(async move { self.respond_classic::<false>(request, None).await })
     }
 
     fn start(&self) -> Pin<Box<dyn Future<Output = ()> + '_>> {
@@ -561,8 +577,27 @@ struct DebugSiteHandler {
 
 impl Handler for DebugSiteHandler {
     fn handle(&self, request: Request) -> Pin<Box<dyn Future<Output = Response> + '_>> {
+        if self.site.health_path.as_deref() == Some(request.path.as_str()) {
+            return Box::pin(std::future::ready(health_response()));
+        }
         match self.timeout {
             None => Box::pin(self.site.respond::<true>(request, None)),
+            Some(timeout) => Box::pin(async move {
+                let clock = DebugTimeLimit::new(timeout);
+                clock
+                    .run(self.site.respond::<true>(request, Some(clock.clone())))
+                    .await
+                    .unwrap_or_else(|| Response::text(504, "the request took too long\n"))
+            }),
+        }
+    }
+
+    fn handle_owned(self: Rc<Self>, request: Request) -> Pin<Box<dyn Future<Output = Response>>> {
+        if self.site.health_path.as_deref() == Some(request.path.as_str()) {
+            return Box::pin(std::future::ready(health_response()));
+        }
+        match self.timeout {
+            None => Box::pin(async move { self.site.respond::<true>(request, None).await }),
             Some(timeout) => Box::pin(async move {
                 let clock = DebugTimeLimit::new(timeout);
                 clock
@@ -674,42 +709,45 @@ impl SiteHandler {
         request: Request,
         time_limit: Option<DebugTimeLimit>,
     ) -> Response {
-        // A platform asks "are you alive?" every few seconds. The answer
-        // must not depend on the application, its database or a free worker
-        // slot in PHP.
         if self.health_path.as_deref() == Some(request.path.as_str()) {
-            // How many requests ran from the top because a snapshot could
-            // not be kept or copied: each one is a defect to fix.
-            let from_the_top = phera_runtime::requests_from_the_top().to_string();
-            return Response::text(200, "ok\n")
-                .with_header("Cache-Control", "no-store")
-                .with_header("Phera-From-The-Top", from_the_top);
+            return health_response();
         }
-        // In-memory `Phera\Http\Router` dispatch runs ahead of any filesystem
-        // lookup (`site.resolve`), keeping routed APIs completely in memory.
         if self.runtime.router_handles(&request.method, &request.path) {
-            let accept_encoding = if self.compress {
-                request
-                    .header("accept-encoding")
-                    .map(|value| String::from_utf8_lossy(value).into_owned())
-            } else {
-                None
-            };
-            let rt_request = to_runtime(request, &self.trusted_proxies);
-            match self.runtime.dispatch_router(rt_request).await {
-                RouteDispatch::Handled(response) => {
-                    let response = from_runtime(response, self.site.document_root());
-                    return if self.compress && response.upgrade.is_none() {
-                        compress::php_response(response, accept_encoding.as_deref()).await
-                    } else {
-                        response
-                    };
-                }
-                RouteDispatch::Fallthrough(_) => {
-                    return Response::text(404, "Not Found\n");
+            return self.respond_router(request).await;
+        }
+        self.respond_classic::<DEBUG>(request, time_limit).await
+    }
+
+    /// Compact hot path for `Phera\Http\Router` requests: isolated from classic
+    /// PHP (`handle_request`) and static-file futures so per-request allocation
+    /// stays minimal.
+    async fn respond_router(&self, request: Request) -> Response {
+        let accept_encoding = if self.compress {
+            request
+                .header("accept-encoding")
+                .map(|value| String::from_utf8_lossy(value).into_owned())
+        } else {
+            None
+        };
+        let rt_request = to_runtime(request, &self.trusted_proxies);
+        match self.runtime.dispatch_router(rt_request).await {
+            RouteDispatch::Handled(response) => {
+                let response = from_runtime(response, self.site.document_root());
+                if self.compress && response.upgrade.is_none() {
+                    Box::pin(compress::php_response(response, accept_encoding.as_deref())).await
+                } else {
+                    response
                 }
             }
+            RouteDispatch::Fallthrough(_) => Response::text(404, "Not Found\n"),
         }
+    }
+
+    async fn respond_classic<const DEBUG: bool>(
+        &self,
+        request: Request,
+        time_limit: Option<DebugTimeLimit>,
+    ) -> Response {
         // Finding what the path names costs a `stat` or two of a file the
         // kernel has cached, so it runs here, on the worker thread, as in
         // nginx's event loop. Handing it to the blocking pool cost more
@@ -796,21 +834,33 @@ fn to_runtime(mut request: Request, trusted_proxies: &TrustedProxies) -> HttpReq
     }
 }
 
+/// A platform asks "are you alive?" every few seconds. The answer must not
+/// depend on the application, its database or a free worker slot in PHP.
+fn health_response() -> Response {
+    // How many requests ran from the top because a snapshot could
+    // not be kept or copied: each one is a defect to fix.
+    let from_the_top = phera_runtime::requests_from_the_top().to_string();
+    Response::text(200, "ok\n")
+        .with_header("Cache-Control", "no-store")
+        .with_header("Phera-From-The-Top", from_the_top)
+}
+
 fn from_runtime(response: HttpResponse, script: &Path) -> Response {
-    let mut converted = Response::new(response.status).with_body(response.body);
-    for (name, value) in response.headers {
-        converted = converted.with_header(name, value);
-    }
-    if let Some(ws) = response.websocket {
-        converted = converted.with_websocket_upgrade(WebSocketUpgrade {
+    let upgrade = response.websocket.map(|ws| {
+        Box::new(WebSocketUpgrade {
             entry: script.to_string_lossy().into_owned(),
             handler_class: ws.handler,
             subprotocol: ws.subprotocol,
             context: ws.context,
             rooms: ws.rooms,
-        });
+        })
+    });
+    Response {
+        status: response.status,
+        headers: response.headers,
+        body: phera_server::Body::Bytes(response.body),
+        upgrade,
     }
-    converted
 }
 
 fn apply_websocket_config(

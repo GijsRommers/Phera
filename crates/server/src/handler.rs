@@ -16,6 +16,12 @@ use crate::websocket::{WebSocketEvent, WebSocketOutcome};
 pub trait Handler: 'static {
     fn handle(&self, request: Request) -> Pin<Box<dyn Future<Output = Response> + '_>>;
 
+    /// Handles one request with an owned `Rc<Self>`, returning a `'static`
+    /// future so the server avoids double-boxing on the sync fast path.
+    fn handle_owned(self: Rc<Self>, request: Request) -> Pin<Box<dyn Future<Output = Response>>> {
+        Box::pin(async move { self.handle(request).await })
+    }
+
     /// Runs once on the worker's thread before it accepts connections, for
     /// work no request should wait for (booting an application). Clients
     /// that connect meanwhile wait in the operating system's queue.
