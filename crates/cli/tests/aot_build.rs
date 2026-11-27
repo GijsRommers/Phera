@@ -999,3 +999,425 @@ fn serve_never_exposes_phb_image_as_static_file() {
         "leaked custom image: {custom_resp}"
     );
 }
+
+#[test]
+fn soundness_oracle_verifies_deep_facts_layouts_flow_calls_and_props_end_to_end() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+
+    write_file(
+        &root.join("src/types.php"),
+        r#"<?php
+namespace App;
+
+trait MixA {
+    public int $traitCount = 5;
+    private string $traitSecret = 'ts';
+    public function collide(): string { return 'A'; }
+    public function readTraitSecret(): string { return $this->traitSecret; }
+}
+
+trait MixB {
+    public function collide(): string { return 'B'; }
+}
+
+enum Color: string {
+    case Red = 'red';
+    case Blue = 'blue';
+}
+
+class Base {
+    private int $secret = 10;
+    protected int $shared = 20;
+    public int $uninit;
+
+    public function __construct(int $s = 10) {
+        $this->secret = $s;
+    }
+
+    private function priv(): string {
+        return 'base-priv:' . $this->secret;
+    }
+
+    public function callPriv(): string {
+        return $this->priv();
+    }
+
+    public function mono(): int {
+        return $this->shared;
+    }
+
+    public function poly(): string {
+        return 'base';
+    }
+
+    public static function who(): string {
+        return 'base-static';
+    }
+}
+
+final class Child extends Base {
+    use MixA, MixB {
+        MixA::collide insteadof MixB;
+        MixB::collide as collideB;
+    }
+
+    private string $secret = 'child-secret';
+    public int $shared = 30;
+    public string $hooked {
+        get => 'hook:' . $this->shared;
+    }
+
+    public function __construct(int $baseSecret, int $shared) {
+        parent::__construct($baseSecret);
+        $this->shared = $shared;
+    }
+
+    public function priv(): string {
+        return 'child-pub:' . $this->secret;
+    }
+
+    public function poly(): string {
+        return 'child';
+    }
+
+    public function sumWith(int $delta = 1): int {
+        $acc = $this->shared;
+        for ($i = 0; $i < 3; $i++) {
+            $acc = (int)($acc + $delta);
+        }
+        return $acc;
+    }
+}
+
+class MagicBox {
+    public int $x = 1;
+    public function __get(string $name): mixed { return 99; }
+    public function __set(string $name, mixed $val): void {}
+}
+
+class RebindTarget {
+    public string $tag = 'rebound';
+}
+
+function cross_double(int $n): int {
+    return (int)($n * 2);
+}
+
+function coerce_float(int $n): float {
+    return $n;
+}
+
+function exact_identity(int $n): int {
+    return $n;
+}
+
+function try_finally_ret(int $n): float {
+    try {
+        if ($n < 0) {
+            throw new \RuntimeException('neg');
+        }
+        return $n;
+    } catch (\RuntimeException $e) {
+        return 0.5;
+    } finally {
+        $cleanup = $n + 1;
+    }
+}
+"#,
+    );
+
+    write_file(
+        &root.join("index.php"),
+        r#"<?php
+require __DIR__ . '/src/types.php';
+
+use App\Base;
+use App\Child;
+use App\Color;
+use App\MagicBox;
+use App\RebindTarget;
+
+function local_loop(int $n): int {
+    $sum = 0;
+    for ($i = 0; $i < $n; $i++) {
+        $sum = (int)($sum + $i);
+    }
+    return $sum;
+}
+
+function exercise_nullable(?Child $maybe): int {
+    if ($maybe === null) {
+        return -1;
+    }
+    $fallback = $maybe->uninit ?? 7;
+    return (int)($maybe->shared + $fallback);
+}
+
+function exercise_instanceof(Base $b): string {
+    if ($b instanceof Child) {
+        return $b->priv() . '|' . $b->collide() . '|' . $b->collideB() . '|' . $b->readTraitSecret();
+    }
+    return $b->poly();
+}
+
+function exercise_overflow(): string {
+    $max = PHP_INT_MAX;
+    $over = $max + 1;
+    $min = PHP_INT_MIN;
+    $neg = -$min;
+    $inc = PHP_INT_MAX;
+    $inc++;
+    return gettype($over) . ',' . gettype($neg) . ',' . gettype($inc);
+}
+
+function exercise_refs(): int {
+    $a = 1;
+    $b = &$a;
+    $b = 'mutated';
+    $arr = [1, 2, 3];
+    foreach ($arr as &$v) {
+        $v = $v * 10;
+    }
+    unset($v);
+    $c = 0;
+    $inc = function () use (&$c): void { $c++; };
+    $inc();
+    return strlen($a) + $arr[2] + $c;
+}
+
+function exercise_closure_rebind(): string {
+    $child = new Child(11, 22);
+    $fn = (function (): string {
+        return $this->tag ?? 'no-tag';
+    })->bindTo(new RebindTarget(), RebindTarget::class);
+    return $fn() . ':' . $child->hooked;
+}
+
+function exercise_gmp(): string {
+    $g = gmp_init(5);
+    $r = $g + 1;
+    return get_class($r) . ':' . gmp_strval($r);
+}
+
+function exercise_reflection_dynamic_extract(): string {
+    try {
+        (new ReflectionFunction('extract'))->invoke(['k' => 1]);
+        return 'unexpected';
+    } catch (Error $e) {
+        return $e->getMessage();
+    }
+}
+
+$child = new Child(11, 30);
+$base = new Base(5);
+$magic = new MagicBox();
+$color = Color::Red;
+
+echo implode("\n", [
+    'priv=' . $child->callPriv(),
+    'mono=' . $child->mono() . ',' . $base->mono(),
+    'poly=' . $child->poly() . ',' . $base->poly(),
+    'static=' . Child::who(),
+    'sum=' . $child->sumWith() . ',' . $child->sumWith(2),
+    'cross=' . App\cross_double(21) . ',' . App\exact_identity(9) . ',' . App\coerce_float(3),
+    'tf=' . App\try_finally_ret(4) . ',' . App\try_finally_ret(-1),
+    'loop=' . local_loop(10),
+    'null=' . exercise_nullable(null) . ',' . exercise_nullable($child),
+    'inst=' . exercise_instanceof($child) . ';' . exercise_instanceof($base),
+    'over=' . exercise_overflow(),
+    'refs=' . exercise_refs(),
+    'rebind=' . exercise_closure_rebind(),
+    'magic=' . $magic->x . ',' . $magic->missing,
+    'enum=' . $color->name . ':' . $color->value,
+    'gmp=' . exercise_gmp(),
+    'refl=' . exercise_reflection_dynamic_extract(),
+]), "\n";
+"#,
+    );
+
+    let expected_stdout = "\
+priv=base-priv:11
+mono=30,20
+poly=child,base
+static=base-static
+sum=33,36
+cross=42,9,3
+tf=4,0.5
+loop=45
+null=-1,37
+inst=child-pub:child-secret|A|B|ts;base
+over=double,double,double
+refs=38
+rebind=rebound:hook:22
+magic=1,99
+enum=Red:red
+gmp=GMP:6
+refl=Cannot call extract() dynamically
+";
+
+    for mode in ["strict", "hybrid"] {
+        let image_path = root.join(format!("oracle-{mode}.phb"));
+        let build = Command::new(phera_bin())
+            .args([
+                "build",
+                "--mode",
+                mode,
+                "--target",
+                "cli",
+                "--entry",
+                "index.php",
+                "-o",
+            ])
+            .arg(&image_path)
+            .arg(root)
+            .output()
+            .expect("build oracle image");
+        assert!(
+            build.status.success(),
+            "build ({mode}) failed:\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&build.stdout),
+            String::from_utf8_lossy(&build.stderr)
+        );
+
+        let image = phera_runtime::image::open_image(&image_path).expect("open .phb image");
+        let facts = image.program_facts().expect("program_facts present");
+
+        // Verify exact class layouts and method tables were populated.
+        let child_layout = facts
+            .classes
+            .iter()
+            .find(|c| &*c.name == "app\\child")
+            .expect("app\\child class layout");
+        assert!(
+            child_layout
+                .flags
+                .contains(phera_bytecode::facts::ClassFlags::LAYOUT_EXACT),
+            "Child should have LAYOUT_EXACT"
+        );
+        let slot_keys: Vec<&[u8]> = child_layout.slots.iter().map(|s| &*s.key).collect();
+        assert_eq!(
+            slot_keys,
+            vec![
+                &b"\0App\\Base\0secret"[..],
+                &b"shared"[..],
+                &b"uninit"[..],
+                &b"\0App\\Child\0secret"[..],
+                &b"hooked"[..],
+                &b"traitCount"[..],
+                &b"\0App\\Child\0traitSecret"[..],
+            ],
+            "Child root-first mangled slot keys must match PHP runtime layout"
+        );
+        let method_names: Vec<&str> = child_layout.methods.iter().map(|m| &*m.name).collect();
+        assert!(method_names.contains(&"callpriv"), "{method_names:?}");
+        assert!(method_names.contains(&"collide"), "{method_names:?}");
+        assert!(method_names.contains(&"collideb"), "{method_names:?}");
+        assert!(
+            method_names.contains(&"readtraitsecret"),
+            "{method_names:?}"
+        );
+
+        // Verify `RETURN_PROVEN` is true for `exact_identity` and false for `coerce_float`.
+        let types_entry = image
+            .find_relative("src/types.php")
+            .expect("src/types.php in image");
+        let types_unit = image
+            .load_unit(types_entry.unit_cli.expect("cli unit"))
+            .expect("decode src/types.php");
+        let types_facts = types_unit.facts.as_deref().expect("unit facts");
+        let find_fn_facts = |name: &str| {
+            let pos = types_unit
+                .functions
+                .iter()
+                .position(|f| f.name.eq_ignore_ascii_case(name))
+                .unwrap_or_else(|| panic!("missing function {name}"));
+            &types_facts.functions[pos + 1]
+        };
+        assert!(
+            find_fn_facts("App\\exact_identity")
+                .flags
+                .contains(phera_bytecode::facts::FunctionFlags::RETURN_PROVEN),
+            "exact_identity should have RETURN_PROVEN"
+        );
+        assert!(
+            !find_fn_facts("App\\coerce_float")
+                .flags
+                .contains(phera_bytecode::facts::FunctionFlags::RETURN_PROVEN),
+            "coerce_float coerces int -> float and must NOT have RETURN_PROVEN"
+        );
+
+        // Execute the `.phb` image through the cold-path VM Soundness Oracle!
+        let rt = phera_runtime::Runtime::new()
+            .with_image(image)
+            .with_soundness_oracle(true);
+        let tokio_rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime");
+        let entry_path = root.join("index.php");
+        let run = tokio_rt
+            .block_on(rt.run_file(&entry_path, &[], None))
+            .expect("run under soundness oracle");
+        assert_eq!(
+            run.status,
+            0,
+            "mode={mode} output:\n{}",
+            String::from_utf8_lossy(&run.output)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&run.output),
+            expected_stdout,
+            "mode={mode} stdout mismatch"
+        );
+
+        let report = run.oracle_report.expect("soundness oracle report present");
+        assert!(
+            report.is_clean(),
+            "mode={mode} SOUNDNESS VIOLATIONS:\n{}",
+            report.violations.join("\n")
+        );
+        assert!(
+            report.stats.steps > 100,
+            "mode={mode} stats: {:?}",
+            report.stats
+        );
+        assert!(
+            report.stats.non_ref_local_checks > 0,
+            "mode={mode} stats: {:?}",
+            report.stats
+        );
+        assert!(
+            report.stats.block_type_checks > 0,
+            "mode={mode} stats: {:?}",
+            report.stats
+        );
+        assert!(
+            report.stats.return_checks > 0,
+            "mode={mode} stats: {:?}",
+            report.stats
+        );
+        assert!(
+            report.stats.call_checks > 0,
+            "mode={mode} stats: {:?}",
+            report.stats
+        );
+        if mode == "strict" {
+            assert!(
+                report.stats.args_exact_checks > 0,
+                "strict stats: {:?}",
+                report.stats
+            );
+            assert!(
+                report.stats.prop_checks > 0,
+                "strict stats: {:?}",
+                report.stats
+            );
+            assert!(
+                report.stats.class_layout_checks >= 2,
+                "strict stats: {:?}",
+                report.stats
+            );
+        }
+    }
+}

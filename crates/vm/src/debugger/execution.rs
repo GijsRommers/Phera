@@ -66,6 +66,9 @@ impl Vm {
             }
             debugger.last_exception = None;
             self.debugger = Some(debugger);
+            if self.soundness_oracle.is_some() {
+                self.verify_oracle_before_step(ip, instruction);
+            }
             if let Some(exit) = self.debug_instruction(instruction, stop, work)? {
                 return Ok(Some(exit));
             }

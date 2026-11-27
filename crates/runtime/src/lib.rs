@@ -56,7 +56,9 @@ pub use phera_aot::{AotImage, ImageTarget};
 pub use phera_ext_http::ResponseHead;
 pub use phera_extension_api::web_log::flush as flush_web_log;
 pub use phera_extension_api::websocket::{WebSocketEvent, WebSocketEventOutcome, WebSocketSink};
-pub use phera_vm::{DebugConfig, DebugTimeLimit, OutputSink};
+pub use phera_vm::{
+    DebugConfig, DebugTimeLimit, OutputSink, SoundnessOracleReport, SoundnessOracleStats,
+};
 pub use preload::PreloadSummary;
 pub use snapshots::{remembered as snapshot_remembered, requests_from_the_top};
 
@@ -104,6 +106,9 @@ pub struct Runtime {
     max_concurrent_requests_per_worker: Option<usize>,
     /// Optional pre-compiled `.phb` AOT image backing this runtime.
     image: Option<Arc<phera_aot::AotImage>>,
+    /// When true and an AOT image with `ProgramFacts` is attached, attach the
+    /// cold-path soundness oracle to verify every fact at runtime.
+    verify_image_facts: bool,
 }
 
 /// A web worker links the process's native definitions once on its own
@@ -229,6 +234,8 @@ pub struct RunResult {
     /// Set when the script called `Phera\Http\serve($router, ...)` on the CLI,
     /// asking the CLI binary to hand off to the unified `phera serve` engine.
     pub pending_serve: Option<PendingServe>,
+    /// Soundness oracle report when [`Runtime::with_soundness_oracle`] is enabled.
+    pub oracle_report: Option<SoundnessOracleReport>,
 }
 
 impl Default for Runtime {
@@ -269,6 +276,7 @@ impl Runtime {
             websocket_sink: None,
             max_concurrent_requests_per_worker: default_max_concurrent_requests_per_worker(),
             image: None,
+            verify_image_facts: false,
         }
     }
 
@@ -281,6 +289,13 @@ impl Runtime {
         self.cache = self.cache.with_image(image.clone());
         self.web_cache = self.web_cache.with_image(image.clone());
         self.image = Some(image);
+        self
+    }
+
+    /// Enables the cold-path VM soundness oracle for verifying `.phb` facts
+    /// against live PHP execution (zero overhead when disabled).
+    pub fn with_soundness_oracle(mut self, enabled: bool) -> Self {
+        self.verify_image_facts = enabled;
         self
     }
 
@@ -407,6 +422,7 @@ impl Runtime {
                     output: vm.output,
                     status: 255,
                     pending_serve: None,
+                    oracle_report: None,
                 });
             }
             Err(error) => return Err(error),
@@ -431,6 +447,7 @@ impl Runtime {
             self.connect_debugger(&mut vm, &unit.file, None).await;
         }
         let status = vm.run(unit).await;
+        let oracle_report = vm.soundness_oracle_report().cloned();
         let pending_serve = vm
             .state_mut()
             .take::<http_server::PendingServeSlot>()
@@ -440,6 +457,7 @@ impl Runtime {
             output: vm.output,
             status,
             pending_serve,
+            oracle_report,
         })
     }
 
@@ -833,6 +851,12 @@ impl Runtime {
                     forbid_eval: !image.allows_eval(),
                     forbid_class_alias: !image.allows_class_alias(),
                 };
+        }
+        if self.verify_image_facts
+            && let Some(image) = &self.image
+            && let Some(facts) = image.program_facts()
+        {
+            vm.set_soundness_oracle(Arc::clone(facts));
         }
         vm
     }

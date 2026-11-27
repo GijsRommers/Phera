@@ -178,6 +178,7 @@ mod scope_intrinsics;
 mod sensitive_parameters;
 mod serialization;
 mod snapshot;
+mod soundness_oracle;
 mod spl_autoload;
 mod static_places;
 mod static_variables;
@@ -199,6 +200,7 @@ mod websocket;
 mod worker_code;
 
 pub use debugger::{DebugConfig, DebugTimeLimit, Start as DebugStart};
+pub use soundness_oracle::{SoundnessOracleReport, SoundnessOracleStats};
 
 pub use include_lookup::{
     CodeLoadError, CodeLoader, IncludeCachePolicy, IncludeLoad, IncludeLookup, RelativeInclude,
@@ -296,6 +298,7 @@ pub struct Vm {
     /// What `Phera\snapshot()` does here, and the state it kept.
     snapshot: snapshot::SnapshotState,
     debugger: Option<Box<debugger::Session>>,
+    soundness_oracle: Option<Box<soundness_oracle::SoundnessOracle>>,
     debug_evaluating: bool,
     websocket_sink: Option<Arc<dyn phera_extension_api::websocket::WebSocketSink>>,
     websocket_resolver: Option<Value>,
@@ -352,6 +355,7 @@ impl Vm {
             suspended_fibers: Default::default(),
             snapshot: Default::default(),
             debugger: None,
+            soundness_oracle: None,
             debug_evaluating: false,
             websocket_sink: None,
             websocket_resolver: None,
