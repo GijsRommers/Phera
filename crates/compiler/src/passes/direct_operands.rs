@@ -11,9 +11,19 @@ use phera_bytecode::{Function, Instruction};
 
 use crate::passes::{integer_operands::dead_after, optimize::block_boundaries};
 
-/// Remove adjacent local snapshots whose temporary has no later reader.
+/// Remove adjacent local snapshots whose temporary has no later reader, and
+/// fold temporary-to-temporary moves immediately before `Return`.
 pub(crate) fn optimize(function: &mut Function) {
     let boundaries = block_boundaries(function);
+    let locals = function.locals.len();
+    let mut path_uses = vec![0u32; function.paths.len()];
+    for instruction in &function.instructions {
+        if let Some(path) = crate::passes::operand_regs::path_operand(*instruction)
+            && let Some(count) = path_uses.get_mut(path.index())
+        {
+            *count += 1;
+        }
+    }
     for index in 1..function.instructions.len() {
         if boundaries.contains(&index) {
             continue;
@@ -21,7 +31,7 @@ pub(crate) fn optimize(function: &mut Function) {
         let Instruction::Move { dst, src } = function.instructions[index - 1] else {
             continue;
         };
-        if dst.index() < function.locals.len() || src.index() >= function.locals.len() {
+        if dst.index() < locals {
             continue;
         }
         if matches!(function.instructions[index], Instruction::Return { src: value } if value == dst)
@@ -30,22 +40,68 @@ pub(crate) fn optimize(function: &mut Function) {
             function.instructions[index] = Instruction::Return { src };
             continue;
         }
-        if !dead_after(function, index, dst) {
+        if src.index() >= locals || !dead_after(function, index, dst) {
             continue;
         }
-        let replacement = match function.instructions[index] {
+        match function.instructions[index] {
             Instruction::AssignOp {
                 op,
                 local,
                 src: operand,
-            } if operand == dst => Instruction::AssignOp { op, local, src },
-            Instruction::AssignPath { path, src: operand } if operand == dst => {
-                Instruction::AssignPath { path, src }
+            } if operand == dst => {
+                function.instructions[index - 1] = Instruction::Nop;
+                function.instructions[index] = Instruction::AssignOp { op, local, src };
             }
-            _ => continue,
-        };
-        function.instructions[index - 1] = Instruction::Nop;
-        function.instructions[index] = replacement;
+            Instruction::AssignPath { path, src: operand } if operand == dst => {
+                function.instructions[index - 1] = Instruction::Nop;
+                function.instructions[index] = Instruction::AssignPath { path, src };
+            }
+            Instruction::FetchIndex {
+                dst: out,
+                base,
+                index: key_reg,
+                path,
+                mode,
+            } if key_reg == dst && path_uses.get(path.index()).copied() == Some(1) => {
+                if let Some(definition) = function.paths.get_mut(path.index())
+                    && let [phera_bytecode::Step::Index(step_reg)] = definition.steps.as_mut_slice()
+                    && *step_reg == dst
+                {
+                    *step_reg = src;
+                    function.instructions[index - 1] = Instruction::Nop;
+                    function.instructions[index] = Instruction::FetchIndex {
+                        dst: out,
+                        base,
+                        index: src,
+                        path,
+                        mode,
+                    };
+                }
+            }
+            Instruction::AssignPath { path, .. }
+            | Instruction::AssignOpPath { path, .. }
+            | Instruction::IncDecPath { path, .. }
+            | Instruction::UnsetPath { path }
+                if path_uses.get(path.index()).copied() == Some(1) =>
+            {
+                if let Some(definition) = function.paths.get_mut(path.index())
+                    && definition
+                        .steps
+                        .iter()
+                        .any(|step| matches!(step, phera_bytecode::Step::Index(reg) if *reg == dst))
+                {
+                    for step in &mut definition.steps {
+                        if let phera_bytecode::Step::Index(reg) = step
+                            && *reg == dst
+                        {
+                            *reg = src;
+                        }
+                    }
+                    function.instructions[index - 1] = Instruction::Nop;
+                }
+            }
+            _ => {}
+        }
     }
 }
 

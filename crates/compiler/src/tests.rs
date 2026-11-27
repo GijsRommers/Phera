@@ -228,11 +228,12 @@ fn null_conditions_reuse_the_null_jumps() {
         count(&code, |i| matches!(i, Instruction::JumpIfNotNull { .. })),
         1
     );
-    // The implicit return still loads null. The two conditions do not.
+    // The implicit return uses `ReturnNull` directly; neither condition loads null.
     assert_eq!(
         count(&code, |i| matches!(i, Instruction::LoadNull { .. })),
-        1
+        0
     );
+    assert_eq!(count(&code, |i| matches!(i, Instruction::ReturnNull)), 1);
     assert_eq!(count(&code, |i| matches!(i, Instruction::Binary { .. })), 0);
 }
 
@@ -279,7 +280,7 @@ fn plain_local_conditions_jump_on_the_local() {
     assert_eq!(count(&code, |i| matches!(i, Instruction::Unary { .. })), 0);
 }
 
-/// Loops compile their condition as one branch per round.
+/// Loops rotate their condition to the bottom and use one branch per round.
 #[test]
 fn loop_conditions_are_one_branch_per_round() {
     let while_code =
@@ -287,7 +288,7 @@ fn loop_conditions_are_one_branch_per_round() {
     assert_eq!(
         count(&while_code, |i| matches!(
             i,
-            Instruction::BinaryBranch {
+            Instruction::BinaryBranchIf {
                 op: BinaryOp::Less,
                 ..
             }
@@ -317,7 +318,7 @@ fn loop_conditions_are_one_branch_per_round() {
     assert_eq!(
         count(&for_code, |i| matches!(
             i,
-            Instruction::BinaryBranch {
+            Instruction::BinaryBranchIf {
                 op: BinaryOp::Less,
                 ..
             }
@@ -330,7 +331,7 @@ fn loop_conditions_are_one_branch_per_round() {
     assert_eq!(
         count(&literal_for, |i| matches!(
             i,
-            Instruction::BinaryIntBranch {
+            Instruction::BinaryIntBranchIf {
                 op: BinaryOp::Less,
                 rhs: 10,
                 ..

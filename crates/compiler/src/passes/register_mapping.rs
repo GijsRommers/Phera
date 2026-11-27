@@ -346,6 +346,7 @@ impl Instruction {
             | Instruction::GuardBuiltin { .. }
             | Instruction::Suppress(_)
             | Instruction::Declare(_)
+            | Instruction::ReturnNull
             | Instruction::ReturnMissing => {}
         }
     }

@@ -8,13 +8,12 @@
 //! `next_position`, `entry_at`) rather than holding an iterator, because the
 //! loop body may change the array it walks.
 
-use super::storage::{Entry, Storage};
+use super::storage::{Entry, Storage, list_key};
 use super::{ArrayKey, PhpArray};
 use crate::value::Value;
 
 impl Storage {
-    /// The slots of both shapes as two slices, one of them empty. Chaining
-    /// an iterator over each gives one iterator type for either shape.
+    /// The slots of both shapes as two slices, one of them empty.
     pub(super) fn parts(&self) -> (&[Option<Value>], &[Entry]) {
         match self {
             Self::List(values) => (values, &[]),
@@ -37,13 +36,14 @@ impl PhpArray {
 
     /// Walks live entries starting at a physical slot, in insertion order.
     pub fn iter_from(&self, start: usize) -> impl Iterator<Item = (ArrayKey, &Value)> {
+        let list_start = self.list_start;
         let (list, entries) = self.storage.parts();
         let list = list.get(start..).unwrap_or_default();
         let entries = entries.get(start..).unwrap_or_default();
         let list = list.iter().enumerate().filter_map(move |(offset, value)| {
             value
                 .as_ref()
-                .map(|value| (ArrayKey::Int((start + offset) as i64), value))
+                .map(|value| (ArrayKey::Int(list_key(list_start, start + offset)), value))
         });
         let map = entries
             .iter()
@@ -70,12 +70,16 @@ impl PhpArray {
 
     /// Values can change in place; keys and positions cannot.
     pub fn iter_mut(&mut self) -> impl Iterator<Item = (ArrayKey, &mut Value)> {
+        let list_start = self.list_start;
         let (list, entries) = self.storage.parts_mut();
-        let list = list.iter_mut().enumerate().filter_map(|(position, value)| {
-            value
-                .as_mut()
-                .map(|value| (ArrayKey::Int(position as i64), value))
-        });
+        let list = list
+            .iter_mut()
+            .enumerate()
+            .filter_map(move |(position, value)| {
+                value
+                    .as_mut()
+                    .map(|value| (ArrayKey::Int(list_key(list_start, position)), value))
+            });
         let map = entries
             .iter_mut()
             .filter_map(|entry| entry.value.as_mut().map(|value| (entry.key.clone(), value)));
@@ -161,7 +165,10 @@ impl PhpArray {
     #[inline(always)]
     pub fn entry_at(&self, pos: usize) -> Option<(ArrayKey, &Value)> {
         match &self.storage {
-            Storage::List(values) => Some((ArrayKey::Int(pos as i64), values.get(pos)?.as_ref()?)),
+            Storage::List(values) => Some((
+                ArrayKey::Int(list_key(self.list_start, pos)),
+                values.get(pos)?.as_ref()?,
+            )),
             Storage::Map(map) => {
                 let entry = map.entries.get(pos)?;
                 Some((entry.key.clone(), entry.value.as_ref()?))
@@ -173,10 +180,12 @@ impl PhpArray {
     /// copy, so the stored key cannot change.
     #[inline(always)]
     pub fn entry_at_mut(&mut self, pos: usize) -> Option<(ArrayKey, &mut Value)> {
+        let list_start = self.list_start;
         match &mut self.storage {
-            Storage::List(values) => {
-                Some((ArrayKey::Int(pos as i64), values.get_mut(pos)?.as_mut()?))
-            }
+            Storage::List(values) => Some((
+                ArrayKey::Int(list_key(list_start, pos)),
+                values.get_mut(pos)?.as_mut()?,
+            )),
             Storage::Map(map) => {
                 let entry = map.entries.get_mut(pos)?;
                 Some((entry.key.clone(), entry.value.as_mut()?))

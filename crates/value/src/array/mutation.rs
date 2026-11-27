@@ -12,7 +12,7 @@
 
 use super::key::numeric_string_key;
 use super::lookup::list_position;
-use super::storage::{Entry, Storage};
+use super::storage::{Entry, Storage, list_index, list_key};
 use super::{ArrayKey, PhpArray};
 use crate::error::OpError;
 use crate::intern::InternedStr;
@@ -72,7 +72,9 @@ impl PhpArray {
                 value: Some(value),
             });
         }
-        array.storage = Storage::from_entries(storage);
+        let (list_start, storage) = Storage::from_entries(storage);
+        array.list_start = list_start;
+        array.storage = storage;
         Ok(array)
     }
 
@@ -86,9 +88,12 @@ impl PhpArray {
             next_free: None,
         };
         fill(&mut entries);
+        let (list_start, storage) = Storage::from_entries(entries.storage);
         Self {
-            storage: Storage::from_entries(entries.storage),
-            next_free: entries.next_free,
+            storage,
+            next_free: entries.next_free.unwrap_or(0),
+            list_start,
+            has_next_free: entries.next_free.is_some(),
             ..Self::default()
         }
     }
@@ -97,22 +102,13 @@ impl PhpArray {
     /// at the end, even when the key was unset earlier. Returns the old value.
     pub fn insert(&mut self, key: ArrayKey, value: Value) -> Option<Value> {
         if let ArrayKey::Int(index) = key {
-            self.note_int_key(index);
+            return self.insert_int(index, value);
         }
+        let list_start = self.list_start;
         match &mut self.storage {
-            Storage::List(values) => {
-                if let Some(position) = list_position(&key) {
-                    if let Some(slot) = values.get_mut(position) {
-                        if let Some(existing) = slot.as_mut() {
-                            return Some(std::mem::replace(existing, value));
-                        }
-                    } else if position == values.len() {
-                        values.push(Some(value));
-                        self.maybe_compact();
-                        return None;
-                    }
-                }
-                self.storage.as_map().append(key, value);
+            Storage::List(_) => {
+                self.list_start = 0;
+                self.storage.as_map(list_start).append(key, value);
                 self.maybe_compact();
                 None
             }
@@ -130,15 +126,15 @@ impl PhpArray {
     /// `$a[]` uses -4.
     #[inline]
     fn note_int_key(&mut self, key: i64) {
-        if self.next_free.is_none_or(|next| key >= next) {
-            self.next_free = Some(key.saturating_add(1));
+        if !self.has_next_free || key >= self.next_free {
+            self.set_next_free(key.saturating_add(1));
         }
     }
 
     /// `array_multisort()` starts appending at the row count, even for arrays
     /// that retained string keys.
     pub fn set_next_append_index_to_len(&mut self) {
-        self.next_free = Some(self.len() as i64);
+        self.set_next_free(self.len() as i64);
     }
 
     /// Appends an entry whose key is not in the array. A list stays a list
@@ -146,11 +142,26 @@ impl PhpArray {
     /// skips ahead goes at the end in PHP, so the list becomes a map.
     #[inline]
     fn push_entry(&mut self, key: ArrayKey, value: Value) {
+        let list_start = self.list_start;
         match &mut self.storage {
-            Storage::List(values) if key == ArrayKey::Int(values.len() as i64) => {
+            Storage::List(values) if values.is_empty() => {
+                if let ArrayKey::Int(index) = key
+                    && let Ok(base) = i32::try_from(index)
+                {
+                    self.list_start = base;
+                    values.push(Some(value));
+                } else {
+                    self.list_start = 0;
+                    self.storage.as_map(list_start).append(key, value);
+                }
+            }
+            Storage::List(values) if key == ArrayKey::Int(list_key(list_start, values.len())) => {
                 values.push(Some(value));
             }
-            storage => storage.as_map().append(key, value),
+            storage => {
+                self.list_start = 0;
+                storage.as_map(list_start).append(key, value);
+            }
         }
         self.maybe_compact();
     }
@@ -160,13 +171,13 @@ impl PhpArray {
     /// when the entry `PHP_INT_MAX` exists.
     #[inline]
     pub fn push(&mut self, value: Value) -> Result<ArrayKey, OpError> {
-        let key = self.next_free.unwrap_or(0);
+        let key = self.next_free_index().unwrap_or(0);
         if key == i64::MAX && self.contains_key(&ArrayKey::Int(key)) {
             return Err(OpError::error(
                 "Cannot add element to the array as the next element is already occupied",
             ));
         }
-        self.next_free = Some(key.saturating_add(1));
+        self.set_next_free(key.saturating_add(1));
         self.push_entry(ArrayKey::Int(key), value);
         Ok(ArrayKey::Int(key))
     }
@@ -175,9 +186,16 @@ impl PhpArray {
     #[inline]
     pub fn insert_int(&mut self, index: i64, value: Value) -> Option<Value> {
         self.note_int_key(index);
+        let list_start = self.list_start;
         match &mut self.storage {
             Storage::List(values) => {
-                if let Ok(position) = usize::try_from(index) {
+                if values.is_empty() {
+                    if let Ok(base) = i32::try_from(index) {
+                        self.list_start = base;
+                        values.push(Some(value));
+                        return None;
+                    }
+                } else if let Some(position) = list_index(list_start, index) {
                     if let Some(slot) = values.get_mut(position) {
                         if let Some(existing) = slot.as_mut() {
                             return Some(std::mem::replace(existing, value));
@@ -188,7 +206,10 @@ impl PhpArray {
                         return None;
                     }
                 }
-                self.storage.as_map().append(ArrayKey::Int(index), value);
+                self.list_start = 0;
+                self.storage
+                    .as_map(list_start)
+                    .append(ArrayKey::Int(index), value);
                 self.maybe_compact();
                 None
             }
@@ -202,11 +223,71 @@ impl PhpArray {
         }
     }
 
+    /// Single-probe integer insert or update that refuses to overwrite a PHP
+    /// reference, returning `Err(value)` without mutating the array.
+    #[inline]
+    pub fn insert_int_if_not_ref(
+        &mut self,
+        index: i64,
+        value: Value,
+    ) -> Result<Option<Value>, Value> {
+        let list_start = self.list_start;
+        match &mut self.storage {
+            Storage::List(values) => {
+                if values.is_empty() {
+                    if let Ok(base) = i32::try_from(index) {
+                        self.list_start = base;
+                        values.push(Some(value));
+                        self.note_int_key(index);
+                        return Ok(None);
+                    }
+                    self.note_int_key(index);
+                    self.list_start = 0;
+                    self.storage
+                        .as_map(list_start)
+                        .append(ArrayKey::Int(index), value);
+                    return Ok(None);
+                }
+                if let Some(position) = list_index(list_start, index) {
+                    if let Some(slot) = values.get_mut(position) {
+                        if let Some(existing) = slot.as_mut() {
+                            if existing.is_reference() {
+                                return Err(value);
+                            }
+                            return Ok(Some(std::mem::replace(existing, value)));
+                        }
+                    } else if position == values.len() {
+                        values.push(Some(value));
+                        self.note_int_key(index);
+                        self.maybe_compact();
+                        return Ok(None);
+                    }
+                }
+                self.note_int_key(index);
+                self.list_start = 0;
+                self.storage
+                    .as_map(list_start)
+                    .append(ArrayKey::Int(index), value);
+                self.maybe_compact();
+                Ok(None)
+            }
+            Storage::Map(map) => {
+                let replaced = map.insert_int_if_not_ref(index, value)?;
+                self.note_int_key(index);
+                if replaced.is_none() {
+                    self.maybe_compact();
+                }
+                Ok(replaced)
+            }
+        }
+    }
+
     /// `unset($a[$key])`: leaves a hole, so later slots keep their positions.
     /// It never compacts, because a running foreach may hold one of them.
     pub fn remove(&mut self, key: &ArrayKey) -> Option<Value> {
+        let list_start = self.list_start;
         let value = match &mut self.storage {
-            Storage::List(values) => values.get_mut(list_position(key)?)?.take()?,
+            Storage::List(values) => values.get_mut(list_position(list_start, key)?)?.take()?,
             Storage::Map(map) => map.remove(key)?,
         };
         self.dead += 1;
@@ -216,8 +297,9 @@ impl PhpArray {
     /// `unset($a[$int_key])` without constructing an `ArrayKey`.
     #[inline]
     pub fn remove_int(&mut self, key: i64) -> Option<Value> {
+        let list_start = self.list_start;
         let value = match &mut self.storage {
-            Storage::List(values) => values.get_mut(usize::try_from(key).ok()?)?.take()?,
+            Storage::List(values) => values.get_mut(list_index(list_start, key)?)?.take()?,
             Storage::Map(map) => map.remove_int(key)?,
         };
         self.dead += 1;
@@ -259,13 +341,14 @@ impl PhpArray {
             return;
         }
         let pointer = self.pointer_after_compaction();
+        let list_start = self.list_start;
         let entries: Vec<Entry> = match std::mem::take(&mut self.storage) {
             Storage::List(values) => values
                 .into_iter()
                 .enumerate()
                 .filter_map(|(position, value)| {
                     Some(Entry {
-                        key: ArrayKey::Int(position as i64),
+                        key: ArrayKey::Int(list_key(list_start, position)),
                         value: Some(value?),
                     })
                 })
@@ -275,7 +358,9 @@ impl PhpArray {
                 map.entries
             }
         };
-        self.storage = Storage::from_entries(entries);
+        let (new_start, new_storage) = Storage::from_entries(entries);
+        self.list_start = new_start;
+        self.storage = new_storage;
         self.dead = 0;
         self.set_pointer(pointer);
     }
@@ -284,8 +369,12 @@ impl PhpArray {
     /// one when the popped key was the last one handed out.
     pub fn pop(&mut self) -> Option<Value> {
         let position = self.last_position()?;
+        let list_start = self.list_start;
         let (key, value) = match &mut self.storage {
-            Storage::List(values) => (ArrayKey::Int(position as i64), values[position].take()),
+            Storage::List(values) => (
+                ArrayKey::Int(list_key(list_start, position)),
+                values[position].take(),
+            ),
             Storage::Map(map) => map.remove_at(position),
         };
         // The slot goes, with the holes after it, so that the next `$a[]`
@@ -299,12 +388,15 @@ impl PhpArray {
         } else {
             let holes_after = self.storage.len() - position - 1;
             self.storage.truncate(position);
+            if self.storage.len() == 0 {
+                self.list_start = 0;
+            }
             self.dead -= holes_after as u32;
         }
         if let ArrayKey::Int(key) = key
-            && self.next_free == Some(key.saturating_add(1))
+            && self.next_free_index() == Some(key.saturating_add(1))
         {
-            self.next_free = Some(key);
+            self.set_next_free(key);
         }
         self.maybe_compact();
         value
@@ -316,11 +408,11 @@ impl PhpArray {
         let first = self.first_position()?;
         let value = self.storage.slot_mut(first)?.take();
         let mut next = 0;
-        self.storage = match std::mem::take(&mut self.storage) {
+        let (new_start, new_storage) = match std::mem::take(&mut self.storage) {
             Storage::List(mut values) => {
                 values.retain(Option::is_some);
                 next = values.len() as i64;
-                Storage::List(values)
+                (0, Storage::List(values))
             }
             Storage::Map(mut map) => {
                 map.entries.retain(|entry| entry.value.is_some());
@@ -333,8 +425,10 @@ impl PhpArray {
                 Storage::from_entries(map.entries)
             }
         };
+        self.list_start = new_start;
+        self.storage = new_storage;
         self.dead = 0;
-        self.next_free = Some(next);
+        self.set_next_free(next);
         self.reset();
         value
     }

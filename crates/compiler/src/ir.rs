@@ -377,6 +377,8 @@ pub enum Instruction {
     },
     /// Return a dereferenced value from this frame; emits Return.
     Return(Reg),
+    /// Return null without allocating a temporary register; emits ReturnNull.
+    ReturnNull,
     /// Return an alias cell from this frame; emits ReturnReference.
     ReturnReference(Reg),
     ReturnMissing,

@@ -46,14 +46,19 @@ pub(crate) use storage::hash_str_bytes;
 #[derive(Default)]
 pub struct PhpArray {
     storage: Storage,
-    /// The key `$a[]` uses next: one more than the largest integer key ever
-    /// inserted, `None` before the first. It stops at `i64::MAX`.
-    next_free: Option<i64>,
+    /// The key `$a[]` uses next when `has_next_free` is true: one more than the
+    /// largest integer key ever inserted, stopping at `i64::MAX`.
+    next_free: i64,
     /// Number of holes in `storage`.
     dead: u32,
     /// The internal pointer of `current()` and `next()`: a slot position;
     /// see `pointer.rs`.
     pos: u32,
+    /// Starting integer key of `Storage::List` (0 when empty or map). Kept
+    /// beside `has_next_free` so `size_of::<PhpArray>()` stays 56 bytes.
+    list_start: i32,
+    /// Whether any integer key has been inserted (so `next_free` is set).
+    has_next_free: bool,
 }
 
 impl PhpArray {
@@ -72,10 +77,12 @@ impl PhpArray {
     pub fn from_values(values: impl IntoIterator<Item = Value>, capacity: usize) -> Self {
         let mut slots = Vec::with_capacity(capacity);
         slots.extend(values.into_iter().map(Some));
-        let next_free = (!slots.is_empty()).then_some(slots.len() as i64);
+        let has_next_free = !slots.is_empty();
+        let next_free = slots.len() as i64;
         Self {
             storage: Storage::List(slots),
             next_free,
+            has_next_free,
             ..Self::default()
         }
     }
@@ -99,6 +106,17 @@ impl PhpArray {
                     "Cannot add element to the array as the next element is already occupied",
                 )
             })?;
+        if let Ok(base) = i32::try_from(start) {
+            let mut slots = Vec::with_capacity(count);
+            slots.extend(values.map(Some));
+            return Ok(Self {
+                storage: Storage::List(slots),
+                next_free: last.saturating_add(1),
+                list_start: base,
+                has_next_free: true,
+                ..Self::default()
+            });
+        }
         let entries = values
             .enumerate()
             .map(|(offset, value)| Entry {
@@ -108,7 +126,8 @@ impl PhpArray {
             .collect();
         Ok(Self {
             storage: Storage::Map(OrderedMap::new(entries)),
-            next_free: Some(last.saturating_add(1)),
+            next_free: last.saturating_add(1),
+            has_next_free: true,
             ..Self::default()
         })
     }
@@ -123,7 +142,7 @@ impl PhpArray {
     pub fn heap_bytes(&self) -> usize {
         use std::mem::size_of;
         match &self.storage {
-            storage::Storage::List(slots) => slots.capacity() * size_of::<Option<Value>>(),
+            storage::Storage::List(values) => values.capacity() * size_of::<Option<Value>>(),
             storage::Storage::Map(map) => {
                 map.entries.capacity() * size_of::<storage::Entry>()
                     + map.index.as_ref().map_or(0, |index| {
@@ -138,15 +157,24 @@ impl PhpArray {
     }
 
     /// The key `$a[]` would use next; see the field `next_free`.
+    #[inline(always)]
     pub fn next_free_index(&self) -> Option<i64> {
-        self.next_free
+        self.has_next_free.then_some(self.next_free)
+    }
+
+    #[inline(always)]
+    pub(super) fn set_next_free(&mut self, value: i64) {
+        self.next_free = value;
+        self.has_next_free = true;
     }
 
     /// `array_is_list`: keys 0, 1, 2, ... in order. A list with holes is not
     /// one, and a map can be one: `$a = ['x' => 1, 0 => 2]; unset($a['x']);`
     pub fn is_list(&self) -> bool {
-        if matches!(self.storage, Storage::List(_)) && self.dead == 0 {
-            return true;
+        if self.dead == 0
+            && let Storage::List(values) = &self.storage
+        {
+            return self.list_start == 0 || values.is_empty();
         }
         self.keys()
             .enumerate()

@@ -493,7 +493,9 @@ fn transfer(function: &Function, constants: &[Constant], facts: &mut [Fact], ins
     let binary = |op, left: Fact, right: Fact| {
         use BinaryOp::*;
         match op {
-            Identical | NotIdentical | LogicalXor => Scalar,
+            Identical | NotIdentical | LogicalXor | Equal | NotEqual | Less | LessEqual
+            | Greater | GreaterEqual | Spaceship | Subtract | Multiply | Divide | Modulo
+            | ShiftLeft | ShiftRight => Scalar,
             Concat => NonObject,
             Coalesce => Unknown,
             _ if left > NonObject || right > NonObject => Unknown,

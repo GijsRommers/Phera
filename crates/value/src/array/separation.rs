@@ -37,6 +37,8 @@ impl Clone for PhpArray {
             next_free: self.next_free,
             dead: self.dead,
             pos: self.pos,
+            list_start: self.list_start,
+            has_next_free: self.has_next_free,
         }
     }
 }
@@ -99,6 +101,8 @@ impl PhpArray {
             next_free: self.next_free,
             dead: self.dead,
             pos: self.pos,
+            list_start: self.list_start,
+            has_next_free: self.has_next_free,
         }
     }
 }

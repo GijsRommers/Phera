@@ -70,8 +70,12 @@ impl Machine<'_> {
         let scalar = match scalar_step::<true, _>(&instruction, slots, &mut ip) {
             ScalarStep::Fallback => match instruction {
                 Instruction::FetchIndex {
-                    dst, base, index, ..
-                } => array_index_step::<true, _>(dst, base, index, slots),
+                    dst,
+                    base,
+                    index,
+                    mode,
+                    ..
+                } => array_index_step::<true, _>(dst, base, index, mode, slots),
                 _ => ScalarStep::Fallback,
             },
             complete => complete,

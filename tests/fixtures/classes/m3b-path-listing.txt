@@ -1,5 +1,4 @@
 file class-paths.php
-  const#0 = Null
   symbol#0 = self
 
 function {main} (1 registers, dynamic scope)
@@ -23,5 +22,4 @@ function Counter::tick (2 registers)
   0002  line 1    Clear { reg: r0 }
   0003  line 1    IncDecPath { mode: PostIncrement, dst: r1, path: path#1 }
   0004  line 1    Clear { reg: r0 }
-  0005  line 1    LoadNull { dst: r0 }
-  0006  line 1    Return { src: r0 }
+  0005  line 1    ReturnNull

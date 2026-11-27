@@ -155,6 +155,8 @@ impl<'ast> Compiler<'ast> {
                 .is_some_and(|(_, method)| method.eq_ignore_ascii_case("__toString"))
         {
             Instruction::ReturnMissing
+        } else if !declaration.is_generator && !declaration.by_reference {
+            Instruction::ReturnNull
         } else {
             let register = builder.literal(Constant::Null, line)?;
             if declaration.by_reference && !declaration.is_generator {
