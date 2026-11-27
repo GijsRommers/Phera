@@ -160,24 +160,43 @@ impl Compiler<'_> {
         body: &[ast::Statement],
         line: usize,
     ) -> Result<(), CompileError> {
-        let start = self.position();
-        let mark = self.temporaries_start();
-        let ends = self.compile_condition(condition, false, line)?;
-        let condition = self.temporaries_since(mark);
-        self.clear_condition_temporaries(&condition, line);
+        // Bottom-tested rotated loop: one Jump before entry instead of per iteration.
+        let jump_to_cond = self.emit(Instruction::Jump(Target(0)), line);
+        let body_start = self.position();
         self.loops.push(Loop {
-            start: self.position(),
+            start: body_start,
             cleanup: None,
             breaks: vec![],
             continues: vec![],
         });
         self.block(body, DeclarationTiming::AtExecution)?;
-        self.emit(Instruction::Jump(Target(start)), line);
-        for end in &ends {
-            self.patch(*end, self.position());
+        let cond_start = self.position();
+        self.patch(jump_to_cond, cond_start);
+        self.fresh_temporaries();
+        let mark = self.temporaries_start();
+        let back = self.compile_condition(condition, true, line)?;
+        let temporaries = self.temporaries_since(mark);
+        let owning = self.condition_owning_temporaries(&temporaries);
+        if owning.is_empty() {
+            for patch in &back {
+                self.patch(*patch, body_start);
+            }
+        } else {
+            for &register in &owning {
+                self.emit(Instruction::Clear { register }, line);
+            }
+            let exit_jump = self.emit(Instruction::Jump(Target(0)), line);
+            let taken_clear = self.position();
+            for patch in &back {
+                self.patch(*patch, taken_clear);
+            }
+            for &register in &owning {
+                self.emit(Instruction::Clear { register }, line);
+            }
+            self.emit(Instruction::Jump(Target(body_start)), line);
+            self.patch(exit_jump, self.position());
         }
-        self.clear_condition_temporaries(&condition, line);
-        self.loop_end(start);
+        self.loop_end(cond_start);
 
         Ok(())
     }

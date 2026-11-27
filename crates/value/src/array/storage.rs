@@ -57,9 +57,27 @@ pub(super) struct Entry {
 
 #[derive(Clone)]
 pub(super) enum Storage {
-    /// Keys 0, 1, 2, ... are the positions and are not stored.
+    /// Consecutive integer keys `list_start, list_start + 1, ...` stored without keys.
+    /// Keeping `List` at 24 bytes lets the enum tag sit in `OrderedMap`'s niche so
+    /// `size_of::<Storage>() == 32` and `size_of::<PhpArray>() == 56`.
     List(Vec<Option<Value>>),
     Map(OrderedMap),
+}
+
+/// Maps an integer key to its slot position in a `Storage::List` starting at `start`.
+#[inline(always)]
+pub(super) fn list_index(start: i32, key: i64) -> Option<usize> {
+    let base = i64::from(start);
+    if key < base {
+        return None;
+    }
+    usize::try_from(key.abs_diff(base)).ok()
+}
+
+/// Maps a slot position in a `Storage::List` starting at `start` to its integer key.
+#[inline(always)]
+pub(super) fn list_key(start: i32, position: usize) -> i64 {
+    i64::from(start) + position as i64
 }
 
 impl Default for Storage {
@@ -123,12 +141,12 @@ impl Storage {
 
     /// The storage as a map, converting a list first. Holes stay holes, so
     /// every position is unchanged.
-    pub fn as_map(&mut self) -> &mut OrderedMap {
+    pub fn as_map(&mut self, list_start: i32) -> &mut OrderedMap {
         if let Self::List(values) = self {
             let mut entries = Vec::with_capacity(values.capacity());
             entries.extend(std::mem::take(values).into_iter().enumerate().map(
                 |(position, value)| Entry {
-                    key: ArrayKey::Int(position as i64),
+                    key: ArrayKey::Int(list_key(list_start, position)),
                     value,
                 },
             ));
@@ -141,17 +159,25 @@ impl Storage {
     }
 
     /// Storage for entries that have no holes: a list when their keys are
-    /// 0, 1, 2, ... in order, else a map. Compaction and shift use this to
-    /// turn a map back into a list.
-    pub fn from_entries(entries: Vec<Entry>) -> Self {
-        let sequential = entries
-            .iter()
-            .enumerate()
-            .all(|(position, entry)| entry.key == ArrayKey::Int(position as i64));
-        if sequential {
-            Self::List(entries.into_iter().map(|entry| entry.value).collect())
+    /// consecutive integers starting from an `i32` offset, else a map.
+    /// Compaction and shift use this to turn a map back into a list.
+    pub fn from_entries(entries: Vec<Entry>) -> (i32, Self) {
+        let Some(first) = entries.first() else {
+            return (0, Self::List(Vec::new()));
+        };
+        if let ArrayKey::Int(base) = first.key
+            && let Ok(start) = i32::try_from(base)
+            && entries
+                .iter()
+                .enumerate()
+                .all(|(position, entry)| entry.key == ArrayKey::Int(list_key(start, position)))
+        {
+            (
+                start,
+                Self::List(entries.into_iter().map(|entry| entry.value).collect()),
+            )
         } else {
-            Self::Map(OrderedMap::new(entries))
+            (0, Self::Map(OrderedMap::new(entries)))
         }
     }
 }
@@ -214,6 +240,69 @@ impl OrderedMap {
                     }
             }),
             Some(index) => index.find_str_bytes(&self.entries, bytes),
+        }
+    }
+
+    /// Single-probe integer insert or update that refuses to overwrite a PHP
+    /// reference, returning `Err(value)` untouched when the slot is a reference.
+    pub fn insert_int_if_not_ref(
+        &mut self,
+        index: i64,
+        value: Value,
+    ) -> Result<Option<Value>, Value> {
+        let key = ArrayKey::Int(index);
+        match &mut self.index {
+            None => {
+                if let Some(entry) = self
+                    .entries
+                    .iter_mut()
+                    .find(|entry| entry.value.is_some() && entry.key == key)
+                {
+                    if entry.value.as_ref().is_some_and(Value::is_reference) {
+                        return Err(value);
+                    }
+                    return Ok(entry.value.replace(value));
+                }
+                self.entries.push(Entry {
+                    key,
+                    value: Some(value),
+                });
+                if self.entries.len() > SCAN_LIMIT {
+                    self.index = Index::build(&self.entries);
+                }
+                Ok(None)
+            }
+            Some(table) => {
+                let hash = hash_int_key(index);
+                let entries = &mut self.entries;
+                match table.positions.entry(
+                    hash,
+                    |&position| entries[position as usize].key == key,
+                    |&other| hash_array_key(&entries[other as usize].key),
+                ) {
+                    HashEntry::Occupied(occupied) => {
+                        let position = *occupied.get() as usize;
+                        if entries[position]
+                            .value
+                            .as_ref()
+                            .is_some_and(Value::is_reference)
+                        {
+                            return Err(value);
+                        }
+                        Ok(entries[position].value.replace(value))
+                    }
+                    HashEntry::Vacant(vacant) => {
+                        let position =
+                            u32::try_from(entries.len()).expect("array position fits u32");
+                        entries.push(Entry {
+                            key,
+                            value: Some(value),
+                        });
+                        vacant.insert(position);
+                        Ok(None)
+                    }
+                }
+            }
         }
     }
 

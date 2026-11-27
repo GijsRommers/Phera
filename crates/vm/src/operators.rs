@@ -290,6 +290,37 @@ pub(crate) fn fast_numeric_binary(
         NotEqual, NotIdentical, Subtract,
     };
     match (left, right) {
+        (Value::Int(left), Value::Int(right)) => Some(match operator {
+            Add => left
+                .checked_add(*right)
+                .map(Value::Int)
+                .unwrap_or_else(|| overflow_value(OverflowOperation::Add, *left, *right)),
+            Subtract => left
+                .checked_sub(*right)
+                .map(Value::Int)
+                .unwrap_or_else(|| overflow_value(OverflowOperation::Subtract, *left, *right)),
+            Multiply => left
+                .checked_mul(*right)
+                .map(Value::Int)
+                .unwrap_or_else(|| overflow_value(OverflowOperation::Multiply, *left, *right)),
+            Divide if *right != 0 => {
+                if *left == i64::MIN && *right == -1 {
+                    Value::Float(-(*left as f64))
+                } else if *left % *right == 0 {
+                    Value::Int(*left / *right)
+                } else {
+                    Value::Float(*left as f64 / *right as f64)
+                }
+            }
+            Modulo if *right != 0 => Value::Int(if *right == -1 { 0 } else { left % right }),
+            Less => Value::Bool(left < right),
+            LessEqual => Value::Bool(left <= right),
+            Greater => Value::Bool(left > right),
+            GreaterEqual => Value::Bool(left >= right),
+            Equal | Identical => Value::Bool(left == right),
+            NotEqual | NotIdentical => Value::Bool(left != right),
+            _ => return None,
+        }),
         (Value::Float(left), Value::Float(right)) => Some(match operator {
             Add => Value::Float(left + right),
             Subtract => Value::Float(left - right),
@@ -339,37 +370,6 @@ pub(crate) fn fast_numeric_binary(
                 _ => return None,
             })
         }
-        (Value::Int(left), Value::Int(right)) => Some(match operator {
-            Add => left
-                .checked_add(*right)
-                .map(Value::Int)
-                .unwrap_or_else(|| overflow_value(OverflowOperation::Add, *left, *right)),
-            Subtract => left
-                .checked_sub(*right)
-                .map(Value::Int)
-                .unwrap_or_else(|| overflow_value(OverflowOperation::Subtract, *left, *right)),
-            Multiply => left
-                .checked_mul(*right)
-                .map(Value::Int)
-                .unwrap_or_else(|| overflow_value(OverflowOperation::Multiply, *left, *right)),
-            Divide if *right != 0 => {
-                if *left == i64::MIN && *right == -1 {
-                    Value::Float(-(*left as f64))
-                } else if *left % *right == 0 {
-                    Value::Int(*left / *right)
-                } else {
-                    Value::Float(*left as f64 / *right as f64)
-                }
-            }
-            Modulo if *right != 0 => Value::Int(if *right == -1 { 0 } else { left % right }),
-            Less => Value::Bool(left < right),
-            LessEqual => Value::Bool(left <= right),
-            Greater => Value::Bool(left > right),
-            GreaterEqual => Value::Bool(left >= right),
-            Equal | Identical => Value::Bool(left == right),
-            NotEqual | NotIdentical => Value::Bool(left != right),
-            _ => return None,
-        }),
         _ => None,
     }
 }

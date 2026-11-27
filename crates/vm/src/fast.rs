@@ -699,6 +699,7 @@ pub(crate) fn array_index_step<const GUARDED: bool, S: crate::calls::registers::
     destination: Reg,
     base: Reg,
     index: Reg,
+    mode: phera_bytecode::FetchMode,
     slots: &mut S,
 ) -> ScalarStep {
     let Some(Some(Value::Array(array))) = slots.slot(base) else {
@@ -708,8 +709,20 @@ pub(crate) fn array_index_step<const GUARDED: bool, S: crate::calls::registers::
         return ScalarStep::Fallback;
     };
     let Some(value) = crate::array_slots::read_integer(array, *index) else {
-        return ScalarStep::Fallback;
+        return if matches!(
+            mode,
+            phera_bytecode::FetchMode::Quiet
+                | phera_bytecode::FetchMode::Isset
+                | phera_bytecode::FetchMode::Empty
+        ) {
+            store::<GUARDED, _>(slots, destination, Value::Null)
+        } else {
+            ScalarStep::Fallback
+        };
     };
+    if let Value::Int(integer) = value {
+        return store_integer::<GUARDED, _>(slots, destination, *integer);
+    }
     let value = duplicate(&value.deref());
     let Some(target) = slots.slot_mut(destination) else {
         return ScalarStep::Fallback;

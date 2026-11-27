@@ -27,7 +27,7 @@ impl Machine<'_> {
     /// push a frame. Anything unusual (too few arguments, an argument that
     /// fails its type's bit test, the frame limit) takes the general path.
     #[inline(always)]
-    pub(super) fn enter_direct(
+    pub(super) fn enter_direct<const GUARDED: bool>(
         &mut self,
         caller: Position,
         declared: FunctionId,
@@ -72,6 +72,26 @@ impl Machine<'_> {
                 return Step::Slow;
             }
             typed >>= 1;
+        }
+        // Empty-body plain function (`[ReturnNull]`): arguments already passed
+        // type and frame-limit checks, and the body has no side effects or
+        // observable stack frame. Skip pushing/popping a frame entirely.
+        if !GUARDED
+            && facts
+                .return_mask
+                .is_none_or(|mask| return_fits(mask, &Value::Null))
+            && self.code.instructions(function) == [Instruction::ReturnNull]
+        {
+            for index in 0..count {
+                let _ = self.registers.take_defined(from + index);
+            }
+            self.registers
+                .put(caller.frame.base() + destination.index(), Value::Null);
+            if self.spend_work() {
+                self.publish(caller.ip);
+                return Step::Yield;
+            }
+            return Step::Done(caller.ip);
         }
         self.registers.grow_to(base + size);
         for index in 0..count {

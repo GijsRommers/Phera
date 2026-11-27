@@ -105,7 +105,7 @@ fn shift_demotes_maps_without_changing_live_order() {
         let mut array = PhpArray::from_iter(entries);
         assert!(matches!(array.storage, Storage::Map(_)));
         assert_eq!(array.shift(), Some(vi(1)));
-        assert!(matches!(array.storage, Storage::List(_)));
+        assert!(matches!(array.storage, Storage::List(_)) && array.list_start == 0);
         assert_eq!(
             array.iter().collect::<Vec<_>>(),
             vec![(k(0), &vi(2)), (k(1), &vi(3))]
@@ -154,4 +154,30 @@ fn distinct_entries_build_the_array_as_pushed() {
     assert_eq!(list.next_free_index(), Some(2));
 
     assert!(PhpArray::build_distinct(4, |_| {}).is_empty());
+}
+
+/// 1-indexed, 2-indexed, and negative-offset sequential arrays stay packed
+/// with zero `PhpArray` size increase and accurate `array_is_list()` semantics.
+#[test]
+fn offset_lists_stay_packed_without_hashing() {
+    let mut one_based = PhpArray::new();
+    for i in 1..=200 {
+        assert_eq!(one_based.insert_int(i, vi(i * 10)), None);
+    }
+    assert_eq!(lookup_name(&one_based), "packed");
+    assert!(!one_based.is_list());
+    assert_eq!(one_based.get_int(0), None);
+    assert_eq!(one_based.get_int(1), Some(&vi(10)));
+    assert_eq!(one_based.get_int(200), Some(&vi(2000)));
+    assert_eq!(one_based.push(vi(2010)).unwrap(), k(201));
+    assert_eq!(lookup_name(&one_based), "packed");
+    assert_eq!(one_based.pop(), Some(vi(2010)));
+    assert_eq!(one_based.next_free_index(), Some(201));
+
+    let neg = PhpArray::from_indexed_values(-3, [0, 1, 2, 3, 4].into_iter().map(vi)).unwrap();
+    assert_eq!(lookup_name(&neg), "packed");
+    assert!(!neg.is_list());
+    assert_eq!(neg.get_int(-3), Some(&vi(0)));
+    assert_eq!(neg.get_int(1), Some(&vi(4)));
+    assert_eq!(neg.next_free_index(), Some(2));
 }

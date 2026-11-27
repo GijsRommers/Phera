@@ -1,5 +1,4 @@
 file golden.php
-  const#0 = Null
   symbol#0 = identity
 
 function {main} (5 registers, dynamic scope)
@@ -12,8 +11,7 @@ function {main} (5 registers, dynamic scope)
   0005  line 1    LoadInt { dst: r2, value: 1 }
   0006  line 1    Return { src: r2 }
 
-function identity (2 registers)
+function identity (1 registers)
   r0 = $value
   0000  line 1    Return { src: r0 }
-  0001  line 1    LoadNull { dst: r1 }
-  0002  line 1    Return { src: r1 }
+  0001  line 1    ReturnNull

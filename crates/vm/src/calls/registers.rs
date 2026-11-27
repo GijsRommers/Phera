@@ -154,7 +154,9 @@ impl Registers {
     pub(crate) fn truncate(&mut self, base: usize) {
         if base < self.top {
             for slot in &mut self.slots[base..self.top] {
-                *slot = None;
+                if slot.is_some() {
+                    *slot = None;
+                }
             }
             self.top = base;
         }

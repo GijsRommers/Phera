@@ -52,20 +52,62 @@ impl Compiler<'_> {
             let temporaries = self.temporaries_since(mark);
             self.clear_owning_temporaries(&temporaries, line);
         }
-        let start = self.position();
-        let mark = self.temporaries_start();
-        // Only the last condition controls the loop; earlier ones still run.
-        for expression in condition.iter().take(condition.len().saturating_sub(1)) {
-            self.compile_expression(expression)?;
+        if let Some(last_condition) = condition.last() {
+            // Bottom-tested rotated loop: pay one Jump before entry instead of
+            // an unconditional Jump on every iteration.
+            let jump_to_cond = self.emit(Instruction::Jump(Target(0)), line);
+            let body_start = self.position();
+            self.loops.push(Loop {
+                start: body_start,
+                cleanup: None,
+                breaks: vec![],
+                continues: vec![],
+            });
+            self.block(body, DeclarationTiming::AtExecution)?;
+            let continue_at = self.position();
+            self.fresh_temporaries();
+            for expression in step {
+                let mark = self.temporaries_start();
+                self.compile_expression(expression)?;
+                let temporaries = self.temporaries_since(mark);
+                self.clear_owning_temporaries(&temporaries, line);
+            }
+            let cond_start = self.position();
+            self.patch(jump_to_cond, cond_start);
+            self.fresh_temporaries();
+            let mark = self.temporaries_start();
+            // Only the last condition controls the loop; earlier ones still run.
+            for expression in condition.iter().take(condition.len().saturating_sub(1)) {
+                self.compile_expression(expression)?;
+            }
+            let back = self.compile_condition(last_condition, true, line)?;
+            let conditions = self.temporaries_since(mark);
+            let owning = self.condition_owning_temporaries(&conditions);
+            if owning.is_empty() {
+                for patch in &back {
+                    self.patch(*patch, body_start);
+                }
+            } else {
+                for &register in &owning {
+                    self.emit(Instruction::Clear { register }, line);
+                }
+                let exit_jump = self.emit(Instruction::Jump(Target(0)), line);
+                let taken_clear = self.position();
+                for patch in &back {
+                    self.patch(*patch, taken_clear);
+                }
+                for &register in &owning {
+                    self.emit(Instruction::Clear { register }, line);
+                }
+                self.emit(Instruction::Jump(Target(body_start)), line);
+                self.patch(exit_jump, self.position());
+            }
+            self.loop_end(continue_at);
+            return Ok(());
         }
-        let end = condition
-            .last()
-            .map(|expression| self.compile_condition(expression, false, line))
-            .transpose()?;
-        let conditions = self.temporaries_since(mark);
-        self.clear_condition_temporaries(&conditions, line);
+        let start = self.position();
         self.loops.push(Loop {
-            start: self.position(),
+            start,
             cleanup: None,
             breaks: vec![],
             continues: vec![],
@@ -80,12 +122,6 @@ impl Compiler<'_> {
             self.clear_owning_temporaries(&temporaries, line);
         }
         self.emit(Instruction::Jump(Target(start)), line);
-        if let Some(end) = end {
-            for patch in &end {
-                self.patch(*patch, self.position());
-            }
-            self.clear_condition_temporaries(&conditions, line);
-        }
         self.loop_end(continue_at);
 
         Ok(())
@@ -203,6 +239,47 @@ impl Compiler<'_> {
                 };
                 return Err(self.error(message, line));
             }
+        }
+        if expression.is_none()
+            && !returns_reference
+            && !self.function.is_generator
+            && self.finalies.is_empty()
+        {
+            self.emit_control_exits(
+                super::exits::ExitDepth {
+                    loops: self.loops.len(),
+                    finally_blocks: 0,
+                },
+                phera_bytecode::FinallyEntry::Return,
+                line,
+                |_, _| {},
+            );
+            self.emit(Instruction::ReturnNull, line);
+            return Ok(());
+        }
+        if !returns_reference
+            && !self.function.is_generator
+            && self.finalies.is_empty()
+            && let Some(ast::Expression {
+                kind:
+                    ast::ExpressionKind::Ternary {
+                        condition,
+                        then: Some(then_expression),
+                        otherwise,
+                    },
+                ..
+            }) = expression
+        {
+            let mark = self.temporaries_start();
+            let jumps = self.compile_condition(condition, false, line)?;
+            let temporaries = self.temporaries_since(mark);
+            self.clear_condition_temporaries(&temporaries, line);
+            self.compile_return(Some(then_expression), line)?;
+            for jump in &jumps {
+                self.patch(*jump, self.position());
+            }
+            self.clear_condition_temporaries(&temporaries, line);
+            return self.compile_return(Some(otherwise), line);
         }
         let source = if let Some(expression) = expression {
             if !returns_reference

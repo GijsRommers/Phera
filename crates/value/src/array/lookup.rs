@@ -1,17 +1,17 @@
 //! Reading by key: `$a[5]`, `$a['name']`, `isset($a['name'])`.
 
 use super::key::numeric_string_key;
-use super::storage::Storage;
+use super::storage::{Storage, list_index};
 use super::{ArrayKey, PhpArray};
 use crate::intern::InternedStr;
 use crate::string::PhpString;
 use crate::value::Value;
 
-/// The list position a key names: only a non-negative integer can name one.
-#[inline]
-pub(super) fn list_position(key: &ArrayKey) -> Option<usize> {
+/// The list position a key names inside a `Storage::List` starting at `start`.
+#[inline(always)]
+pub(super) fn list_position(start: i32, key: &ArrayKey) -> Option<usize> {
     match key {
-        ArrayKey::Int(index) => usize::try_from(*index).ok(),
+        ArrayKey::Int(index) => list_index(start, *index),
         ArrayKey::Interned(_) | ArrayKey::String(_) => None,
     }
 }
@@ -21,7 +21,7 @@ impl PhpArray {
     #[inline]
     pub(super) fn find_pos(&self, key: &ArrayKey) -> Option<usize> {
         match &self.storage {
-            Storage::List(values) => list_position(key)
+            Storage::List(values) => list_position(self.list_start, key)
                 .filter(|&position| values.get(position).is_some_and(Option::is_some)),
             Storage::Map(map) => map.find(key),
         }
@@ -30,7 +30,7 @@ impl PhpArray {
     #[inline]
     pub fn get(&self, key: &ArrayKey) -> Option<&Value> {
         match &self.storage {
-            Storage::List(values) => values.get(list_position(key)?)?.as_ref(),
+            Storage::List(values) => values.get(list_position(self.list_start, key)?)?.as_ref(),
             Storage::Map(map) => map.entries[map.find(key)?].value.as_ref(),
         }
     }
@@ -38,7 +38,7 @@ impl PhpArray {
     #[inline]
     pub fn get_int(&self, key: i64) -> Option<&Value> {
         match &self.storage {
-            Storage::List(values) => values.get(usize::try_from(key).ok()?)?.as_ref(),
+            Storage::List(values) => values.get(list_index(self.list_start, key)?)?.as_ref(),
             Storage::Map(map) => map.entries[map.find_int(key)?].value.as_ref(),
         }
     }
@@ -76,8 +76,9 @@ impl PhpArray {
 
     #[inline]
     pub fn get_mut(&mut self, key: &ArrayKey) -> Option<&mut Value> {
+        let list_start = self.list_start;
         match &mut self.storage {
-            Storage::List(values) => values.get_mut(list_position(key)?)?.as_mut(),
+            Storage::List(values) => values.get_mut(list_position(list_start, key)?)?.as_mut(),
             Storage::Map(map) => {
                 let position = map.find(key)?;
                 map.entries[position].value.as_mut()
@@ -87,8 +88,9 @@ impl PhpArray {
 
     #[inline]
     pub fn get_mut_int(&mut self, key: i64) -> Option<&mut Value> {
+        let list_start = self.list_start;
         match &mut self.storage {
-            Storage::List(values) => values.get_mut(usize::try_from(key).ok()?)?.as_mut(),
+            Storage::List(values) => values.get_mut(list_index(list_start, key)?)?.as_mut(),
             Storage::Map(map) => {
                 let position = map.find_int(key)?;
                 map.entries[position].value.as_mut()

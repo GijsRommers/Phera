@@ -144,6 +144,10 @@ impl Compiler<'_> {
         }
     }
 
+    pub(crate) fn condition_owning_temporaries(&self, temporaries: &Temporaries) -> Vec<Reg> {
+        self.owning(temporaries, None, true)
+    }
+
     /// `clean_start`: the registers own nothing when the expression begins.
     fn owning(&self, temporaries: &Temporaries, keep: Option<Reg>, clean_start: bool) -> Vec<Reg> {
         let code = self

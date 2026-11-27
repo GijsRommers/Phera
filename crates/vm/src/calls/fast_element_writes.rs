@@ -225,10 +225,9 @@ fn write_single_index(
     if Rc::strong_count(array) == 1 {
         let target = Rc::make_mut(array);
         return match key {
-            IndexKey::Int(i) => match target.get_mut_int(i) {
-                Some(slot) if slot.is_reference() => (false, None),
-                Some(slot) => (true, Some(std::mem::replace(slot, value))),
-                None => (true, target.insert_int(i, value)),
+            IndexKey::Int(i) => match target.insert_int_if_not_ref(i, value) {
+                Ok(old) => (true, old),
+                Err(_) => (false, None),
             },
             IndexKey::Interned(s) => match target.get_mut_interned(s) {
                 Some(slot) if slot.is_reference() => (false, None),

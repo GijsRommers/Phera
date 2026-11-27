@@ -350,9 +350,12 @@ impl Machine<'_> {
                     if GUARDED && self.ids.has_doomed() {
                         return destructors_due();
                     }
+                    let same_function = next.frame.function == position.frame.function;
                     position = next;
-                    instructions = self.code.instructions(next.frame.function);
-                    windowed = self.windowed(next.frame);
+                    if !same_function {
+                        instructions = self.code.instructions(next.frame.function);
+                        windowed = self.windowed(next.frame);
+                    }
                 }
                 Step::Slow => {
                     self.publish(position.ip);
@@ -403,8 +406,12 @@ impl Machine<'_> {
             let step = match scalar_step::<GUARDED, _>(instruction, slots, &mut ip) {
                 ScalarStep::Fallback => match *instruction {
                     Instruction::FetchIndex {
-                        dst, base, index, ..
-                    } => array_index_step::<GUARDED, _>(dst, base, index, slots),
+                        dst,
+                        base,
+                        index,
+                        mode,
+                        ..
+                    } => array_index_step::<GUARDED, _>(dst, base, index, mode, slots),
                     _ => ScalarStep::Fallback,
                 },
                 complete => complete,
@@ -579,7 +586,7 @@ impl Machine<'_> {
                 count,
                 dst,
                 ..
-            } => self.enter_direct(position, function, (args, count), dst),
+            } => self.enter_direct::<GUARDED>(position, function, (args, count), dst),
             Instruction::InitMethodCall { receiver, method } => {
                 self.prepare_method(position, receiver, method)
             }
