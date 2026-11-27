@@ -76,15 +76,21 @@ final class Response
 
     public static function empty(int $status = 204, array $headers = []): static {}
 
+    /** A response with exactly `$headers`: no default `Content-Type`. */
+    public static function make(string $body = '', int $status = 200, array $headers = []): static {}
+
     public function withStatus(int $status): static {}
 
     public function withHeader(string $name, string $value): static {}
 
     public function status(): int {}
 
-    public function header(string $name): ?string {}
+    public function header(string $name, ?string $default = null): ?string {}
 
     public function headers(): array {}
 
     public function body(): string {}
+
+    /** `json_decode($body, $associative, 512, JSON_THROW_ON_ERROR)`; `null` for an empty body. */
+    public function decodeJson(bool $associative = true): mixed {}
 }

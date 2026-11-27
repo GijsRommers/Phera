@@ -421,6 +421,32 @@ return $router; // run with: phera serve app.php
 - `benchmarks/bench-phera-http.php` has the `/plaintext`, `/json` and
   `/users/{id}` benchmark routes.
 
+### HTTP client and structured logging (`Phera\Http\Client`, `Phera\Log\Logger`)
+
+```php
+use Phera\Http\Client;
+use Phera\Log\Logger;
+
+$api = new Client(['base_uri' => 'https://api.example.com/', 'timeout' => 5.0]);
+$user = $api->get('users/7', ['query' => ['fields' => 'name']])->decodeJson();
+$api->post('users', ['json' => ['name' => 'Ada']]);
+['a' => $a, 'b' => $b] = $api->pool(['a' => ['uri' => 'slow/1'], 'b' => ['uri' => 'slow/2']]); // at once
+
+$log = new Logger('api', 'info', 'json', '/var/log/api.log');
+$log->info('User {id} signed in', ['id' => 7]); // {"ts":"…","level":"info","channel":"api","message":"User 7 signed in","context":{"id":7}}
+$log->debug('dropped before the message is looked at');
+```
+
+- The client speaks HTTP/1.1 and HTTP/2 (ALPN, or `http2_prior_knowledge`),
+  keeps connections open per worker thread, follows redirects
+  (`max_redirects`), and throws `Phera\Http\ClientException` when no response
+  arrives. It returns the router's `Phera\Http\Response`.
+- The logger writes NDJSON or text to `stderr`, `stdout`, a file (through a
+  writer thread) or `memory` (`Logger::memory()->records()` for tests).
+- Both work when made before `Phera\snapshot()` or at the top of a router
+  script. [`packages/phera-psr`](packages/phera-psr/README.md) wraps them, and
+  the router, as PSR-3, PSR-7, PSR-15, PSR-17 and PSR-18.
+
 ## 🧩 Extensions
 
 Built in, each checked call by call against real PHP: core, standard, ctype,

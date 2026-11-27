@@ -16,10 +16,12 @@ mod error;
 #[cfg(test)]
 mod extension_introspection_tests;
 mod http;
+mod http_client;
 mod http_server;
 pub mod image;
 #[cfg(test)]
 mod ini_tests;
+mod log;
 #[cfg(test)]
 mod native_parameter_tests;
 mod native_registry;

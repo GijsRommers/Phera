@@ -60,7 +60,10 @@ pub fn decode(
 
 /// The `JSON_*` flag values, for callers of [`encode_plain`] and [`decode`].
 pub mod flag {
-    pub use crate::flags::{THROW_ON_ERROR, UNESCAPED_SLASHES, UNESCAPED_UNICODE};
+    pub use crate::flags::{
+        INVALID_UTF8_SUBSTITUTE, PARTIAL_OUTPUT_ON_ERROR, THROW_ON_ERROR, UNESCAPED_SLASHES,
+        UNESCAPED_UNICODE,
+    };
 }
 
 pub struct Json;

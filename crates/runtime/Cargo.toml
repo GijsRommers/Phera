@@ -56,6 +56,17 @@ phera-ext-process.workspace = true
 phera-value.workspace = true
 phera-vm.workspace = true
 smallvec.workspace = true
+chrono.workspace = true
+bytes.workspace = true
+futures-util.workspace = true
+http.workspace = true
+http-body-util.workspace = true
+hyper = { workspace = true, features = ["client", "http1", "http2"] }
+hyper-util = { workspace = true, features = ["client-legacy", "http1", "http2", "tokio"] }
+rustls.workspace = true
+tokio-rustls.workspace = true
+tower-service.workspace = true
+url.workspace = true
 tokio.workspace = true
 tempfile.workspace = true
 memchr.workspace = true

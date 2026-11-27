@@ -7,7 +7,11 @@
 //! return 'Hello';               // 200, text/plain
 //! return ['ok' => true];        // 200, application/json
 //! return null;                  // 204, no body
+//! return Response::make($body, 200, ['Content-Type' => 'image/png']); // no default type
 //! ```
+//!
+//! `Phera\Http\Client` returns the same class, read with `status()`,
+//! `header()`, `headers()`, `body()` and `decodeJson()`.
 //!
 //! A response is plain Rust data inside the object: a status, header lines
 //! and the body bytes. `header()` and output buffers have no part in it.
@@ -108,7 +112,19 @@ pub(super) fn register(registry: &mut Registry) {
         Param::new("name", ParamType::String),
         Param::new("value", ParamType::String),
     ];
-    const NAME: &[Param] = &[Param::new("name", ParamType::String)];
+    const MAKE: &[Param] = &[
+        Param::new("body", ParamType::String).with_default(ConstantValue::String("")),
+        STATUS_DEFAULT,
+        HEADERS_DEFAULT,
+    ];
+    const NAME: &[Param] = &[
+        Param::new("name", ParamType::String),
+        Param::new("default", ParamType::String)
+            .nullable()
+            .with_default(ConstantValue::Null),
+    ];
+    const DECODE: &[Param] =
+        &[Param::new("associative", ParamType::Bool).with_default(ConstantValue::Bool(true))];
     const METHODS: &[MethodEntry] = &[
         MethodEntry::public("__construct", &[], private_construct)
             .with_visibility(Visibility::Private),
@@ -127,12 +143,16 @@ pub(super) fn register(registry: &mut Registry) {
         MethodEntry::public("empty", EMPTY, empty)
             .static_()
             .returning("static"),
+        MethodEntry::public("make", MAKE, make)
+            .static_()
+            .returning("static"),
         MethodEntry::public("withStatus", STATUS, with_status).returning("static"),
         MethodEntry::public("withHeader", HEADER, with_header).returning("static"),
         MethodEntry::public("status", &[], status).returning("int"),
         MethodEntry::public("header", NAME, header).returning("?string"),
         MethodEntry::public("headers", &[], headers).returning("array"),
         MethodEntry::public("body", &[], body).returning("string"),
+        MethodEntry::public("decodeJson", DECODE, decode_json).returning("mixed"),
     ];
     registry.class(ClassEntry {
         kind: ClassKind::FinalClass,
@@ -230,6 +250,32 @@ fn empty(context: &mut dyn Context, _: Option<&Rc<Object>>, arguments: &[Value])
     build(context, "empty", PhpString::new(), None, &arguments, 0)
 }
 
+/// A response with exactly the headers given: no default `Content-Type`.
+fn make(context: &mut dyn Context, _: Option<&Rc<Object>>, arguments: &[Value]) -> NativeResult {
+    let body = if args::given(arguments, 0) {
+        string_argument(arguments, 0)
+    } else {
+        PhpString::new()
+    };
+    build(context, "make", body, None, arguments, 1)
+}
+
+/// A `Response` for what `Phera\Http\Client` received: header names
+/// lower-case, one entry per line.
+pub(crate) fn received(
+    context: &mut dyn Context,
+    status: u16,
+    headers: impl IntoIterator<Item = (String, PhpString)>,
+    body: PhpString,
+) -> NativeResult {
+    let data = ResponseData {
+        status,
+        headers: headers.into_iter().collect(),
+        body,
+    };
+    new_object(context, data)
+}
+
 fn json(
     context: &mut dyn Context,
     _: Option<Rc<Object>>,
@@ -250,7 +296,10 @@ fn json(
 
 /// `json_encode($data, JSON_FLAGS)`: in Rust for plain values, through
 /// `json_encode` for values that may run PHP (`JsonSerializable`).
-async fn encode_json(context: &mut dyn Context, data: &Value) -> Result<Vec<u8>, NativeError> {
+pub(crate) async fn encode_json(
+    context: &mut dyn Context,
+    data: &Value,
+) -> Result<Vec<u8>, NativeError> {
     let encoded = match phera_ext_json::encode_plain(context, data, JSON_FLAGS) {
         Some(encoded) => encoded?,
         None => {
@@ -296,7 +345,8 @@ fn status(_: &mut dyn Context, this: Option<&Rc<Object>>, _: &[Value]) -> Native
     with_response(this, |data| Value::Int(i64::from(data.status)))
 }
 
-/// One header's lines joined by `", "`, as PSR-7's `getHeaderLine()`.
+/// One header's lines joined by `", "`, as PSR-7's `getHeaderLine()`;
+/// `$default` when there is none.
 fn header(_: &mut dyn Context, this: Option<&Rc<Object>>, arguments: &[Value]) -> NativeResult {
     let name = String::from_utf8_lossy(args::bytes(arguments, 0)).to_ascii_lowercase();
     with_response(this, |data| {
@@ -306,7 +356,10 @@ fn header(_: &mut dyn Context, this: Option<&Rc<Object>>, arguments: &[Value]) -
             .filter(|(candidate, _)| *candidate == name)
             .map(|(_, value)| value.as_bytes());
         let Some(first) = lines.next() else {
-            return Value::Null;
+            return match args::value(arguments, 1) {
+                default @ (Value::String(_) | Value::InternedStr(_)) => default.clone(),
+                _ => Value::Null,
+            };
         };
         let mut joined = first.to_vec();
         for line in lines {
@@ -336,6 +389,27 @@ fn headers(_: &mut dyn Context, this: Option<&Rc<Object>>, _: &[Value]) -> Nativ
 
 fn body(_: &mut dyn Context, this: Option<&Rc<Object>>, _: &[Value]) -> NativeResult {
     with_response(this, |data| Value::String(data.body.clone()))
+}
+
+/// The body as JSON, as `json_decode($body, $associative, 512,
+/// JSON_THROW_ON_ERROR)`; `null` for an empty body. (`json()` is taken by
+/// the static constructor.)
+fn decode_json(
+    context: &mut dyn Context,
+    this: Option<&Rc<Object>>,
+    arguments: &[Value],
+) -> NativeResult {
+    let associative = args::bool(arguments, 0).unwrap_or(true);
+    let body = with_response(this, |data| data.body.clone())?;
+    if body.is_empty() {
+        return Ok(Value::Null);
+    }
+    phera_ext_json::decode(
+        context,
+        body.as_bytes(),
+        associative,
+        phera_ext_json::flag::THROW_ON_ERROR,
+    )
 }
 
 /// Applies a `['Name' => 'value']` array: each name replaces the lines of

@@ -1,0 +1,30 @@
+{
+    "name": "phera/psr",
+    "description": "PSR-3, PSR-7, PSR-15, PSR-17 and PSR-18 adapters for Phera's native Phera\\Http and Phera\\Log classes",
+    "type": "library",
+    "license": "MIT OR Apache-2.0",
+    "keywords": ["phera", "psr-3", "psr-7", "psr-15", "psr-17", "psr-18", "http", "log"],
+    "require": {
+        "php": "^8.5",
+        "psr/http-client": "^1.0",
+        "psr/http-factory": "^1.1",
+        "psr/http-message": "^2.0",
+        "psr/http-server-handler": "^1.0",
+        "psr/http-server-middleware": "^1.0",
+        "psr/log": "^3.0"
+    },
+    "provide": {
+        "psr/http-client-implementation": "1.0",
+        "psr/http-factory-implementation": "1.0",
+        "psr/http-message-implementation": "2.0",
+        "psr/log-implementation": "3.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Phera\\Psr\\": "src/"
+        }
+    },
+    "scripts": {
+        "test": "phera tests/unit.php"
+    }
+}
