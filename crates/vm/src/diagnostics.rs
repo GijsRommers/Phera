@@ -151,6 +151,7 @@ mod tests {
             Intrinsic::FunctionExists,
             vec![Value::from("unknown")],
             crate::calls::callback_binding::ArgumentOrigin::Php,
+            false,
         )
         .await
         .unwrap();

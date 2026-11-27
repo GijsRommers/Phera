@@ -30,6 +30,7 @@ impl Vm {
         &mut self,
         function: ArgumentFunction,
         mut arguments: Vec<Value>,
+        dynamic: bool,
     ) -> NativeResult {
         const POSITION: &[Param] = &[Param::new("position", ParamType::Int)];
         let parameters = if matches!(function, ArgumentFunction::One) {
@@ -39,7 +40,7 @@ impl Vm {
         };
         let result = self
             .prepare_call_with_trace(function.name(), parameters, &mut arguments)
-            .and_then(|()| self.frame_arguments_result(function, &arguments));
+            .and_then(|()| self.frame_arguments_result(function, &arguments, dynamic));
         if result.is_err() {
             self.failed_native = Some(crate::error_traces::NativeTrace::new(
                 function.name(),
@@ -54,6 +55,7 @@ impl Vm {
         &self,
         function: ArgumentFunction,
         arguments: &[Value],
+        dynamic: bool,
     ) -> NativeResult {
         let position = if let Some(Value::Int(position)) = arguments.first() {
             *position
@@ -81,6 +83,12 @@ impl Vm {
                     }
                 })
             })?;
+        if dynamic {
+            return Err(NativeError::error(format!(
+                "Cannot call {}() dynamically",
+                function.name()
+            )));
+        }
         match function {
             ArgumentFunction::Count => Ok(Value::Int(frame.argument_count() as i64)),
             ArgumentFunction::All => self.argument_array(frame, 0),

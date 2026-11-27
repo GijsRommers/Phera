@@ -154,3 +154,159 @@ echo "end";
     assert_eq!(status, 0);
     assert_eq!(output, b"Plain Counted 300000 end");
 }
+
+/// Scope- and frame-inspecting intrinsics cannot be invoked dynamically in PHP 8.5,
+/// preserving static soundness of local reference and by-name analysis.
+#[tokio::test(flavor = "current_thread")]
+async fn dynamic_scope_intrinsics_match_php_8_5() {
+    let source = r#"<?php
+function run_case(string $label, callable $fn): void {
+    try {
+        $fn();
+        echo "$label:OK\n";
+    } catch (Throwable $e) {
+        echo "$label:" . get_class($e) . ":" . $e->getMessage() . "\n";
+    }
+}
+
+// Global scope checks: arg errors happen before dynamic error; func_* global checks precede dynamic error.
+run_case("g-ext-bad", function() { });
+$f = "extract";
+try { $f(123); } catch (Throwable $e) { echo "g-ext-123:" . get_class($e) . ":" . $e->getMessage() . "\n"; }
+try { $f(["a" => 1]); } catch (Throwable $e) { echo "g-ext-ok:" . get_class($e) . ":" . $e->getMessage() . "\n"; }
+$f = "compact";
+try { $f(); } catch (Throwable $e) { echo "g-cmp-0:" . get_class($e) . ":" . $e->getMessage() . "\n"; }
+try { $f("x"); } catch (Throwable $e) { echo "g-cmp-ok:" . get_class($e) . ":" . $e->getMessage() . "\n"; }
+$f = "get_defined_vars";
+try { $f(1); } catch (Throwable $e) { echo "g-gdv-1:" . get_class($e) . ":" . $e->getMessage() . "\n"; }
+try { $f(); } catch (Throwable $e) { echo "g-gdv-ok:" . get_class($e) . ":" . $e->getMessage() . "\n"; }
+$f = "func_num_args";
+try { $f(); } catch (Throwable $e) { echo "g-fna:" . get_class($e) . ":" . $e->getMessage() . "\n"; }
+$f = "func_get_arg";
+try { $f(-1); } catch (Throwable $e) { echo "g-fga-neg:" . get_class($e) . ":" . $e->getMessage() . "\n"; }
+try { $f(0); } catch (Throwable $e) { echo "g-fga-0:" . get_class($e) . ":" . $e->getMessage() . "\n"; }
+
+function inside($x): void {
+    foreach (["extract", "compact", "get_defined_vars", "func_num_args", "func_get_args", "func_get_arg"] as $fn) {
+        foreach (["var", "cuf", "cufa", "fcc", "inv", "cfc"] as $mode) {
+            try {
+                if ($mode === "var") {
+                    $f = $fn;
+                    if ($fn === "extract") $f(["k" => 1]);
+                    elseif ($fn === "compact") $f("x");
+                    elseif ($fn === "func_get_arg") $f(0);
+                    else $f();
+                } elseif ($mode === "cuf") {
+                    if ($fn === "extract") call_user_func($fn, ["k" => 1]);
+                    elseif ($fn === "compact") call_user_func($fn, "x");
+                    elseif ($fn === "func_get_arg") call_user_func($fn, 0);
+                    else call_user_func($fn);
+                } elseif ($mode === "cufa") {
+                    if ($fn === "extract") call_user_func_array($fn, [["k" => 1]]);
+                    elseif ($fn === "compact") call_user_func_array($fn, ["x"]);
+                    elseif ($fn === "func_get_arg") call_user_func_array($fn, [0]);
+                    else call_user_func_array($fn, []);
+                } elseif ($mode === "fcc") {
+                    $c = $fn(...);
+                    if ($fn === "extract") $c(["k" => 1]);
+                    elseif ($fn === "compact") $c("x");
+                    elseif ($fn === "func_get_arg") $c(0);
+                    else $c();
+                } elseif ($mode === "inv") {
+                    $c = $fn(...);
+                    if ($fn === "extract") $c->__invoke(["k" => 1]);
+                    elseif ($fn === "compact") $c->__invoke("x");
+                    elseif ($fn === "func_get_arg") $c->__invoke(0);
+                    else $c->__invoke();
+                } else {
+                    $c = Closure::fromCallable($fn);
+                    if ($fn === "extract") $c(["k" => 1]);
+                    elseif ($fn === "compact") $c("x");
+                    elseif ($fn === "func_get_arg") $c(0);
+                    else $c();
+                }
+                echo "$fn-$mode:OK\n";
+            } catch (Throwable $e) {
+                echo "$fn-$mode:" . get_class($e) . ":" . $e->getMessage() . "\n";
+            }
+        }
+    }
+    // Direct calls still work normally, including EXTR_REFS.
+    $src = ["extracted" => 7];
+    $n = extract($src, EXTR_REFS);
+    $extracted = 42;
+    $c = compact("x", "extracted");
+    $d = get_defined_vars();
+    echo "direct:$n:" . $src["extracted"] . ":" . $c["x"] . ":" . $d["extracted"] . ":" . func_num_args() . ":" . func_get_arg(0) . ":" . func_get_args()[0] . "\n";
+}
+inside(99);
+"#;
+    let (status, output) = {
+        use phera_extension_api::Extension;
+        let mut registry = Registry::new();
+        phera_ext_core::Core.register(&mut registry);
+        let unit = Arc::new(phera_compiler::compile(source, "test.php").expect("valid PHP"));
+        let mut vm = Vm::new(Arc::new(registry));
+        vm.frame_limit = 20;
+        let status = vm.run(unit).await;
+        (status, vm.output)
+    };
+    assert_eq!(
+        status,
+        0,
+        "stderr/out: {}",
+        String::from_utf8_lossy(&output)
+    );
+    let out = String::from_utf8(output).expect("utf-8 output");
+    assert!(
+        out.contains(
+            "g-ext-123:TypeError:extract(): Argument #1 ($array) must be of type array, int given\n"
+        ),
+        "{out}"
+    );
+    assert!(
+        out.contains("g-ext-ok:Error:Cannot call extract() dynamically\n"),
+        "{out}"
+    );
+    assert!(
+        out.contains("g-cmp-0:ArgumentCountError:compact() expects at least 1 argument, 0 given\n"),
+        "{out}"
+    );
+    assert!(
+        out.contains("g-cmp-ok:Error:Cannot call compact() dynamically\n"),
+        "{out}"
+    );
+    assert!(
+        out.contains(
+            "g-gdv-1:ArgumentCountError:get_defined_vars() expects exactly 0 arguments, 1 given\n"
+        ),
+        "{out}"
+    );
+    assert!(
+        out.contains("g-gdv-ok:Error:Cannot call get_defined_vars() dynamically\n"),
+        "{out}"
+    );
+    assert!(
+        out.contains("g-fna:Error:func_num_args() must be called from a function context\n"),
+        "{out}"
+    );
+    assert!(out.contains("g-fga-neg:ValueError:func_get_arg(): Argument #1 ($position) must be greater than or equal to 0\n"), "{out}");
+    assert!(
+        out.contains("g-fga-0:Error:func_get_arg() cannot be called from the global scope\n"),
+        "{out}"
+    );
+    for fn_name in [
+        "extract",
+        "compact",
+        "get_defined_vars",
+        "func_num_args",
+        "func_get_args",
+        "func_get_arg",
+    ] {
+        for mode in ["var", "cuf", "cufa", "fcc", "inv", "cfc"] {
+            let expected = format!("{fn_name}-{mode}:Error:Cannot call {fn_name}() dynamically\n");
+            assert!(out.contains(&expected), "missing {expected:?} in:\n{out}");
+        }
+    }
+    assert!(out.contains("direct:1:42:99:42:1:99:99\n"), "{out}");
+}

@@ -1,7 +1,7 @@
 //! PHP extract modes choose names before copying or binding source array cells.
 
 use crate::Vm;
-use phera_extension_api::{NativeError, NativeResult};
+use phera_extension_api::{NativeError, NativeResult, Param, ParamType};
 use phera_value::{ArrayKey, PhpArray, Value};
 use std::{cell::RefCell, rc::Rc};
 
@@ -107,7 +107,32 @@ impl Vm {
     }
 
     /// EXTR_REFS promotes each selected source element and binds the extracted local to it.
-    pub(crate) fn extract_variables(&mut self, arguments: Vec<Value>) -> NativeResult {
+    pub(crate) fn extract_variables(
+        &mut self,
+        mut arguments: Vec<Value>,
+        dynamic: bool,
+    ) -> NativeResult {
+        const PARAMETERS: &[Param] = &[
+            Param::new("array", ParamType::Array).prefer_ref(),
+            Param::new("flags", ParamType::Int).optional(),
+            Param::new("prefix", ParamType::String).optional(),
+        ];
+        if let Err(error) = self.prepare_call_with_trace("extract", PARAMETERS, &mut arguments) {
+            self.failed_native = Some(crate::error_traces::NativeTrace::new("extract", &arguments));
+            return Err(error);
+        }
+        let settings = match ExtractSettings::parse(&arguments) {
+            Ok(settings) => settings,
+            Err(error) => {
+                self.failed_native =
+                    Some(crate::error_traces::NativeTrace::new("extract", &arguments));
+                return Err(error);
+            }
+        };
+        if dynamic {
+            self.failed_native = Some(crate::error_traces::NativeTrace::new("extract", &arguments));
+            return Err(NativeError::error("Cannot call extract() dynamically"));
+        }
         let argument = arguments.first().cloned().unwrap_or_default();
         let mut array = match &*argument.deref() {
             Value::Array(array) => array.clone(),
@@ -117,7 +142,6 @@ impl Vm {
                 ));
             }
         };
-        let settings = ExtractSettings::parse(&arguments)?;
         let entries: Vec<_> = array
             .iter()
             .map(|(key, value)| ExtractEntry {

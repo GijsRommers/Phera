@@ -2,14 +2,34 @@
 
 use std::rc::Rc;
 
-use phera_extension_api::NativeResult;
+use phera_extension_api::{NativeError, NativeResult};
 use phera_value::{ArrayKey, PhpArray, Value};
 
 use crate::Vm;
 
 impl Vm {
     /// Copy defined locals and dynamic variables without exporting their reference cells.
-    pub(crate) fn defined_variables(&mut self) -> NativeResult {
+    pub(crate) fn defined_variables(
+        &mut self,
+        mut arguments: Vec<Value>,
+        dynamic: bool,
+    ) -> NativeResult {
+        if let Err(error) = self.prepare_call_with_trace("get_defined_vars", &[], &mut arguments) {
+            self.failed_native = Some(crate::error_traces::NativeTrace::new(
+                "get_defined_vars",
+                &arguments,
+            ));
+            return Err(error);
+        }
+        if dynamic {
+            self.failed_native = Some(crate::error_traces::NativeTrace::new(
+                "get_defined_vars",
+                &arguments,
+            ));
+            return Err(NativeError::error(
+                "Cannot call get_defined_vars() dynamically",
+            ));
+        }
         let mut array = PhpArray::new();
         if self.in_global_scope() {
             for (name, value) in self.globals.iter() {
@@ -27,7 +47,21 @@ impl Vm {
     }
 
     /// Walk compact names iteratively so nested arrays do not consume the Rust stack.
-    pub(crate) fn compact_variables(&mut self, arguments: Vec<Value>) -> NativeResult {
+    pub(crate) fn compact_variables(
+        &mut self,
+        arguments: Vec<Value>,
+        dynamic: bool,
+    ) -> NativeResult {
+        if arguments.is_empty() {
+            self.failed_native = Some(crate::error_traces::NativeTrace::new("compact", &arguments));
+            return Err(NativeError::argument_count_error(
+                "compact() expects at least 1 argument, 0 given",
+            ));
+        }
+        if dynamic {
+            self.failed_native = Some(crate::error_traces::NativeTrace::new("compact", &arguments));
+            return Err(NativeError::error("Cannot call compact() dynamically"));
+        }
         let mut names: Vec<_> = arguments.into_iter().rev().collect();
         let mut array = PhpArray::new();
         while let Some(value) = names.pop() {

@@ -162,6 +162,8 @@ impl Vm {
                         .finish_native_future(result, NativeFrame::Function(&callee.name), retained)
                         .map(Some);
                 }
+                let dynamic = callee.argument_binding.is_dynamic()
+                    || origin == crate::calls::callback_binding::ArgumentOrigin::Callback;
                 // Boxed: an intrinsic such as `eval` runs code, and its future
                 // must not make the future of every ordinary native call larger.
                 if !callee.argument_binding.has_native_frame()
@@ -171,12 +173,13 @@ impl Vm {
                             | crate::intrinsics::Intrinsic::ParentProperty(_)
                     )
                 {
-                    return Box::pin(self.intrinsic_origin(*intrinsic, arguments, origin))
+                    return Box::pin(self.intrinsic_origin(*intrinsic, arguments, origin, dynamic))
                         .await
                         .map(Some);
                 }
                 let retained = self.retain_native_arguments(&arguments);
-                let result = Box::pin(self.intrinsic_origin(*intrinsic, arguments, origin)).await;
+                let result =
+                    Box::pin(self.intrinsic_origin(*intrinsic, arguments, origin, dynamic)).await;
                 self.finish_native_future(result, NativeFrame::Function(&callee.name), retained)
                     .map(Some)
             }

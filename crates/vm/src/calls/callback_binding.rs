@@ -18,6 +18,9 @@ pub(crate) enum ArgumentOrigin {
 pub(crate) enum ArgumentBinding {
     #[default]
     Caller,
+    /// Dynamic invocation (`$fn()`, first-class callable): preserves caller
+    /// strictness while forbidding scope- and frame-inspecting intrinsics.
+    Dynamic,
     /// Zend compiled an operator such as `strlen($text)`, without a call frame.
     Frameless,
     Internal,
@@ -27,13 +30,17 @@ impl ArgumentBinding {
     /// Closure wrappers apply internal binding even when entered from PHP.
     pub(crate) fn origin(self, caller: ArgumentOrigin) -> ArgumentOrigin {
         match self {
-            Self::Caller | Self::Frameless => caller,
+            Self::Caller | Self::Dynamic | Self::Frameless => caller,
             Self::Internal => ArgumentOrigin::Callback,
         }
     }
 
     pub(crate) fn has_native_frame(self) -> bool {
         !matches!(self, Self::Frameless)
+    }
+
+    pub(crate) fn is_dynamic(self) -> bool {
+        matches!(self, Self::Dynamic | Self::Internal)
     }
 }
 

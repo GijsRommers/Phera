@@ -12,11 +12,12 @@ impl Vm {
         intrinsic: Intrinsic,
         arguments: Vec<Value>,
         origin: ArgumentOrigin,
+        dynamic: bool,
     ) -> phera_extension_api::LocalFuture<'_, NativeResult> {
         if matches!(intrinsic, Intrinsic::ArrayMap) {
             Box::pin(self.map_arrays(arguments))
         } else {
-            Box::pin(self.request_intrinsic(intrinsic, arguments, origin))
+            Box::pin(self.request_intrinsic(intrinsic, arguments, origin, dynamic))
         }
     }
 
@@ -26,6 +27,7 @@ impl Vm {
         intrinsic: Intrinsic,
         arguments: Vec<Value>,
         origin: ArgumentOrigin,
+        dynamic: bool,
     ) -> NativeResult {
         let argument = arguments.first().cloned().unwrap_or_default();
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
@@ -108,9 +110,9 @@ impl Vm {
                     .call_user_func_array(argument, arguments)
                     .await
             }
-            Intrinsic::GetDefinedVars => diagnostics.vm.defined_variables(),
-            Intrinsic::Compact => diagnostics.vm.compact_variables(arguments),
-            Intrinsic::Extract => diagnostics.vm.extract_variables(arguments),
+            Intrinsic::GetDefinedVars => diagnostics.vm.defined_variables(arguments, dynamic),
+            Intrinsic::Compact => diagnostics.vm.compact_variables(arguments, dynamic),
+            Intrinsic::Extract => diagnostics.vm.extract_variables(arguments, dynamic),
             Intrinsic::Define => {
                 diagnostics
                     .vm
@@ -123,14 +125,17 @@ impl Vm {
             Intrinsic::FuncNumArgs => diagnostics.vm.argument_intrinsic(
                 crate::calls::argument_errors::ArgumentFunction::Count,
                 arguments,
+                dynamic,
             ),
             Intrinsic::FuncGetArgs => diagnostics.vm.argument_intrinsic(
                 crate::calls::argument_errors::ArgumentFunction::All,
                 arguments,
+                dynamic,
             ),
             Intrinsic::FuncGetArg => diagnostics.vm.argument_intrinsic(
                 crate::calls::argument_errors::ArgumentFunction::One,
                 arguments,
+                dynamic,
             ),
             Intrinsic::ErrorReporting => diagnostics.vm.error_reporting_intrinsic(arguments),
         }

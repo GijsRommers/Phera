@@ -101,14 +101,15 @@ impl<'a> CallView<'a> {
         }
     }
 
-    /// Whether the callee is `extract()`, whose first argument is taken by
-    /// reference when it is a variable.
+    /// Whether the callee is a direct `extract()` call, whose first argument is
+    /// taken by reference when it is a variable.
     pub(crate) fn is_extract(&self) -> bool {
         self.callee().is_some_and(|callee| {
-            matches!(
-                callee.target,
-                CallTarget::Intrinsic(crate::intrinsics::Intrinsic::Extract)
-            )
+            !callee.argument_binding.is_dynamic()
+                && matches!(
+                    callee.target,
+                    CallTarget::Intrinsic(crate::intrinsics::Intrinsic::Extract)
+                )
         })
     }
 
