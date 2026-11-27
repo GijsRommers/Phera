@@ -1650,6 +1650,8 @@ pub(crate) fn run_fast(
             .expect("256-bit window");
         let heap = &mut fast_stack.heap;
         let free_heap = &mut fast_stack.free_heap;
+        let list_buf_i64 = &mut fast_stack.list_buf_i64;
+        let list_buf_f64 = &mut fast_stack.list_buf_f64;
 
         loop {
             let Some(&op) = cur_ops.get(ip) else {
@@ -1699,9 +1701,15 @@ pub(crate) fn run_fast(
                 Op::EnterListLoop => {
                     let ll = &cur_fn.list_loops[op.imm as usize];
                     let budget = YIELD_AFTER_STEPS.saturating_sub(work).max(1);
-                    if let Some(exit) =
-                        crate::fast_tier::list_loop::try_run_list_loop(ll, t, v, heap, budget)
-                    {
+                    if let Some(exit) = crate::fast_tier::list_loop::try_run_list_loop(
+                        ll,
+                        t,
+                        v,
+                        heap,
+                        list_buf_i64,
+                        list_buf_f64,
+                        budget,
+                    ) {
                         match exit {
                             crate::fast_tier::list_loop::ListExit::Exit {
                                 next_fast_ip,
@@ -3525,6 +3533,23 @@ pub(crate) fn run_fast(
                 Op::CallSelf1 => {
                     let arg_r = op.b as usize;
                     let at = t[arg_r];
+                    if at == TAG_INT
+                        && t[op.a as usize] != TAG_HEAP
+                        && let Some(ref int_rec) = cur_fn.int_rec
+                        && let Some((ret, spent)) = crate::fast_tier::int_rec::try_eval_int_rec_1(
+                            int_rec,
+                            v[arg_r] as i64,
+                            max_fast_frames.saturating_sub(fast_stack.frames.len()),
+                            YIELD_AFTER_STEPS.saturating_sub(work).max(1),
+                        )
+                    {
+                        t[arg_r] = TAG_UNINIT;
+                        t[op.a as usize] = TAG_INT;
+                        v[op.a as usize] = ret as u64;
+                        work += spent;
+                        ip += 1;
+                        continue;
+                    }
                     if at != TAG_UNINIT
                         && at != TAG_HEAP
                         && fast_stack.frames.len() < max_fast_frames
@@ -3602,6 +3627,26 @@ pub(crate) fn run_fast(
                     let a0 = op.b as usize;
                     let a1 = op.c as usize;
                     let (t0, t1) = (t[a0], t[a1]);
+                    if t0 == TAG_INT
+                        && t1 == TAG_INT
+                        && t[op.a as usize] != TAG_HEAP
+                        && let Some(ref int_rec) = cur_fn.int_rec
+                        && let Some((ret, spent)) = crate::fast_tier::int_rec::try_eval_int_rec_2(
+                            int_rec,
+                            v[a0] as i64,
+                            v[a1] as i64,
+                            max_fast_frames.saturating_sub(fast_stack.frames.len()),
+                            YIELD_AFTER_STEPS.saturating_sub(work).max(1),
+                        )
+                    {
+                        t[a0] = TAG_UNINIT;
+                        t[a1] = TAG_UNINIT;
+                        t[op.a as usize] = TAG_INT;
+                        v[op.a as usize] = ret as u64;
+                        work += spent;
+                        ip += 1;
+                        continue;
+                    }
                     if t0 != TAG_UNINIT
                         && t0 != TAG_HEAP
                         && t1 != TAG_UNINIT

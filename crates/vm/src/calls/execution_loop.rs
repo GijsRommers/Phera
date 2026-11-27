@@ -315,9 +315,9 @@ impl Machine<'_> {
     }
 
     /// The loop when this script contains Tier-2 `fast_candidate` functions.
-    /// Kept out of line so non-numeric HTTP/OOP code running `run::<false, false>()`
-    /// compiles with zero Tier-2 branches, cache lookups, or register spills.
-    #[cold]
+    /// Kept out of line (and HOT — never `#[cold]`) so non-numeric HTTP/OOP
+    /// code running `run::<false, false>()` compiles with zero Tier-2 branches
+    /// while scripts with Tier-2 candidates keep full `-O3` codegen!
     #[inline(never)]
     fn run_fast_tier(&mut self) -> LoopExit {
         self.run::<false, true>()
@@ -500,42 +500,11 @@ impl Machine<'_> {
                 value,
                 end,
             } if position.frame.has_extras() => {
-                // Fast path for `foreach ($src as $k => $v) { $dst[$k] += $v; }`:
-                // check on loop start (`ip` is right after `IterNextKeyed`).
                 if !GUARDED
-                    && let Some((dst_arr, expr_dst, clear_dst)) =
-                        self.match_keyed_add_loop(position, key, value)
+                    && let Some(step) =
+                        self.try_keyed_add_loop(iter, (key, value), end, position, &mut ip)
                 {
-                    let budget = YIELD_AFTER_STEPS.saturating_sub(self.work).max(1);
-                    if let Some(extras) = self.stack.current_extras_present() {
-                        let iterators = &mut extras.iterators;
-                        let slots = self.registers.tail_mut(base);
-                        match crate::iteration::keyed_add_loop_step(
-                            iter,
-                            (key, value),
-                            end,
-                            dst_arr,
-                            expr_dst,
-                            clear_dst,
-                            ip - 1,
-                            iterators,
-                            slots,
-                            &mut ip,
-                            budget,
-                        ) {
-                            crate::iteration::KeyedAddStep::Done(spent) => {
-                                self.work += spent;
-                                self.executed += (spent * 3) as u64;
-                                return Step::Done(ip);
-                            }
-                            crate::iteration::KeyedAddStep::Yield => {
-                                self.work = 0;
-                                self.publish(ip);
-                                return Step::Yield;
-                            }
-                            crate::iteration::KeyedAddStep::Fallback => {}
-                        }
-                    }
+                    return step;
                 }
                 let Some(extras) = self.stack.current_extras_present() else {
                     return Step::Slow;
@@ -817,52 +786,49 @@ impl Machine<'_> {
         }
     }
 
-    /// Match `IterNextKeyed(iter, k, v, end)` followed immediately by
-    /// `AssignOpPath(Add, dst, dst_arr[k], v)`, optional `Clear(dst)`, and
-    /// `Jump(iter_next_ip)`.
-    #[inline]
-    fn match_keyed_add_loop(
-        &self,
+    /// Out-of-line fast path for `foreach ($src as $k => $v) { $dst[$k] += $v; }`
+    /// so `cold_step` stays compact.
+    #[inline(never)]
+    fn try_keyed_add_loop(
+        &mut self,
+        iter: phera_bytecode::IterId,
+        (key, value): (Reg, Reg),
+        end: Target,
         position: Position,
-        key: Reg,
-        value: Reg,
-    ) -> Option<(Reg, Reg, bool)> {
-        let iter_ip = position.ip.checked_sub(1)?;
+        ip: &mut usize,
+    ) -> Option<Step> {
+        let iter_ip = (*ip).checked_sub(1)?;
         let func = self.code.function(position.frame.function);
-        let insts = &func.instructions;
-        let Instruction::AssignOpPath {
-            op: BinaryOp::Add,
-            dst,
-            path,
-            src,
-        } = *insts.get(position.ip)?
-        else {
-            return None;
-        };
-        if src != value {
-            return None;
+        let (dst_arr, expr_dst, clear_dst) = match_keyed_add_loop_fn(func, iter_ip, key, value)?;
+        let budget = YIELD_AFTER_STEPS.saturating_sub(self.work).max(1);
+        let extras = self.stack.current_extras_present()?;
+        let iterators = &mut extras.iterators;
+        let slots = self.registers.tail_mut(position.frame.base());
+        match crate::iteration::keyed_add_loop_step(
+            iter,
+            (key, value),
+            end,
+            dst_arr,
+            expr_dst,
+            clear_dst,
+            iter_ip,
+            iterators,
+            slots,
+            ip,
+            budget,
+        ) {
+            crate::iteration::KeyedAddStep::Done(spent) => {
+                self.work += spent;
+                self.executed += (spent * 3) as u64;
+                Some(Step::Done(*ip))
+            }
+            crate::iteration::KeyedAddStep::Yield => {
+                self.work = 0;
+                self.publish(*ip);
+                Some(Step::Yield)
+            }
+            crate::iteration::KeyedAddStep::Fallback => None,
         }
-        let (clear_dst, jump_ip) = match insts.get(position.ip + 1) {
-            Some(&Instruction::Clear { reg }) if reg == dst => (true, position.ip + 2),
-            _ => (false, position.ip + 1),
-        };
-        let Some(&Instruction::Jump { target }) = insts.get(jump_ip) else {
-            return None;
-        };
-        if target.index() != iter_ip {
-            return None;
-        }
-        let path_def = func.paths.get(path.index())?;
-        let phera_bytecode::PathBase::Register(dst_arr) = path_def.base else {
-            return None;
-        };
-        let [phera_bytecode::Step::Index(idx_reg)] = path_def.steps.as_slice() else {
-            return None;
-        };
-        if *idx_reg != key {
-            return None;
-        }
-        Some((dst_arr, dst, clear_dst))
     }
 
     /// Count a loop round or a call; `true` when it is time to hand over.
@@ -895,6 +861,78 @@ pub(super) enum Step {
     Slow,
     /// A call spent the rest of the budget and published the next frame.
     Yield,
+}
+
+/// Match `IterNextKeyed(iter, k, v, end)` at `iter_ip` followed by optional
+/// `Move(temp, reg)` copies, `AssignOpPath(Add, dst, dst_arr[k], v)`, optional
+/// `Clear(temp)*`, and `Jump(iter_ip)`.
+pub(crate) fn match_keyed_add_loop_fn(
+    func: &phera_bytecode::Function,
+    iter_ip: usize,
+    key: Reg,
+    value: Reg,
+) -> Option<(Reg, Reg, bool)> {
+    let insts = &func.instructions;
+    let locals = func.locals.len();
+    let mut p = iter_ip + 1;
+    let mut alias_k: Option<Reg> = None;
+    let mut alias_v: Option<Reg> = None;
+    // Allow up to 4 leading `Move(temp, key|value)` copies emitted by compiler.
+    for _ in 0..4 {
+        match insts.get(p) {
+            Some(&Instruction::Move { dst, src }) if dst.index() >= locals => {
+                if src == key {
+                    alias_k = Some(dst);
+                } else if src == value {
+                    alias_v = Some(dst);
+                } else {
+                    break;
+                }
+                p += 1;
+            }
+            _ => break,
+        }
+    }
+    let Instruction::AssignOpPath {
+        op: BinaryOp::Add,
+        dst,
+        path,
+        src,
+    } = *insts.get(p)?
+    else {
+        return None;
+    };
+    if src != value && Some(src) != alias_v {
+        return None;
+    }
+    p += 1;
+    let mut clear_dst = false;
+    while let Some(&Instruction::Clear { reg }) = insts.get(p) {
+        if reg.index() < locals {
+            return None;
+        }
+        if reg == dst {
+            clear_dst = true;
+        }
+        p += 1;
+    }
+    let Some(&Instruction::Jump { target }) = insts.get(p) else {
+        return None;
+    };
+    if target.index() != iter_ip {
+        return None;
+    }
+    let path_def = func.paths.get(path.index())?;
+    let phera_bytecode::PathBase::Register(dst_arr) = path_def.base else {
+        return None;
+    };
+    let [phera_bytecode::Step::Index(idx_reg)] = path_def.steps.as_slice() else {
+        return None;
+    };
+    if *idx_reg != key && Some(*idx_reg) != alias_k {
+        return None;
+    }
+    Some((dst_arr, dst, clear_dst))
 }
 
 /// Leaves the loop for due destructors; out of line, since it is rare.

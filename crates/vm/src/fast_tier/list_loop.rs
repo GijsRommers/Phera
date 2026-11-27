@@ -29,12 +29,14 @@ pub(crate) const MAX_LIST_ELEM_SLOTS: usize = 16;
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum LOp {
-    // Hoisted slice access on the single borrowed `(start, slots)` slice
-    ListGet,      // ev[a] = slots[iv[b] - start]
-    ListGetPlus1, // ev[a] = slots[iv[b] + 1 - start]
-    ListSet,      // slots[iv[a] - start] = ev[b]
-    ListCopy,     // slots[iv[a] - start] = slots[iv[b] - start]
-    FillStep,     // for k = iv[a]; k <= lim; k += iv[b] { slots[k - start] = E::from_i32(val) }
+    // Hoisted slice access on the single borrowed unboxed `(start, buf: &mut [E])` slice
+    ListGet,           // ev[a] = buf[iv[b] - start]
+    ListGetPlus1,      // ev[a] = buf[iv[b] + 1 - start]
+    ListSet,           // buf[iv[a] - start] = ev[b]
+    ListCopy,          // buf[iv[a] - start] = buf[iv[b] - start]
+    ListCmpAdjBranch,  // if cmp(buf[iv[b]-start], buf[iv[b]+1-start]) == when { goto imm }
+    ListCmpElemBranch, // if cmp(ev[b], buf[iv[c]-start]) == when { goto imm }
+    FillStep,          // for k = iv[a]; k <= lim; k += iv[b] { buf[k - start] = E::from_i32(val) }
 
     // Element-typed moves / constants / comparisons
     MovElem,
@@ -211,14 +213,17 @@ impl ListElem for f64 {
     }
 }
 
-/// Entry guard, array borrow (direct or via `Value::Reference`), monomorphized
-/// execution, and dirty-only write-back for `Op::EnterListLoop`.
+/// Entry guard, array borrow (direct or via `Value::Reference`), unboxed flat
+/// scratch copy, monomorphized execution, and write-back for `Op::EnterListLoop`.
 #[inline(never)]
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn try_run_list_loop(
     ll: &ListLoop,
     t: &mut [u8; 256],
     v: &mut [u64; 256],
     heap: &mut [Option<Value>],
+    buf_i64: &mut Vec<i64>,
+    buf_f64: &mut Vec<f64>,
     budget: usize,
 ) -> Option<ListExit> {
     let arr_r = ll.arr_reg as usize;
@@ -244,11 +249,11 @@ pub(crate) fn try_run_list_loop(
 
     let heap_slot = v[arr_r] as usize;
     match heap.get_mut(heap_slot) {
-        Some(Some(Value::Array(rc))) => run_on_array_rc(ll, rc, t, v, budget),
+        Some(Some(Value::Array(rc))) => run_on_array_rc(ll, rc, t, v, buf_i64, buf_f64, budget),
         Some(Some(Value::Reference(cell))) => {
             let mut guard = cell.try_borrow_mut().ok()?;
             match &mut *guard {
-                Value::Array(rc) => run_on_array_rc(ll, rc, t, v, budget),
+                Value::Array(rc) => run_on_array_rc(ll, rc, t, v, buf_i64, buf_f64, budget),
                 _ => None,
             }
         }
@@ -261,20 +266,22 @@ fn run_on_array_rc(
     rc: &mut Rc<PhpArray>,
     t: &mut [u8; 256],
     v: &mut [u64; 256],
+    buf_i64: &mut Vec<i64>,
+    buf_f64: &mut Vec<f64>,
     budget: usize,
 ) -> Option<ListExit> {
     let arr = Rc::make_mut(rc);
     let (start, slots) = arr.list_slots_mut()?;
-    // Detect element type from first present slot (or first live-in elem).
+    // Detect element type from first present slot.
     let is_float = match slots.iter().find_map(Option::as_ref) {
         Some(Value::Float(_)) => true,
         Some(Value::Int(_)) => false,
         _ => return None,
     };
     if is_float {
-        run_list_loop_typed::<f64>(ll, start, slots, t, v, budget)
+        run_list_loop_typed::<f64>(ll, start, slots, t, v, buf_f64, budget)
     } else {
-        run_list_loop_typed::<i64>(ll, start, slots, t, v, budget)
+        run_list_loop_typed::<i64>(ll, start, slots, t, v, buf_i64, budget)
     }
 }
 
@@ -285,12 +292,24 @@ fn run_list_loop_typed<E: ListElem>(
     slots: &mut [Option<Value>],
     t: &mut [u8; 256],
     v: &mut [u64; 256],
+    buf: &mut Vec<E>,
     budget_start: usize,
 ) -> Option<ListExit> {
     for &slot in ll.live_in_elems.iter() {
         if t[ll.elem_regs[slot as usize] as usize] != E::TAG {
             return None;
         }
+    }
+
+    // Unbox `slots: [Option<Value>]` (24B/elem) ONCE into a dense raw `[E]`
+    // scratch slice (8B/elem — 3x smaller in L2 cache, zero enum checks or
+    // `is_reference()` checks in the hot loop!). Bail cleanly BEFORE mutating
+    // anything if any slot is a hole, reference, or wrong type.
+    buf.clear();
+    buf.reserve(slots.len());
+    for slot in slots.iter() {
+        let val = slot.as_ref().and_then(E::from_value)?;
+        buf.push(val);
     }
 
     let mut iv = [0i64; MAX_LIST_INT_SLOTS];
@@ -311,13 +330,18 @@ fn run_list_loop_typed<E: ListElem>(
         &ll.fast_ips,
         ll.fallthrough_fast_ip as usize,
         start,
-        slots,
+        buf.as_mut_slice(),
         &mut iv,
         &mut ev,
         &mut dirty_int,
         &mut dirty_elem,
         budget_start,
     );
+
+    // Commit unboxed slice back to `slots` ONCE on exit/yield/fallback.
+    for (slot, &val) in slots.iter_mut().zip(buf.iter()) {
+        *slot = Some(val.to_value());
+    }
 
     // Write back ONLY registers actually written during this invocation.
     for &slot in ll.written_ints.iter() {
@@ -360,7 +384,7 @@ fn exec_list_ops<E: ListElem>(
     fast_ips: &[u16],
     fallthrough_fast_ip: usize,
     start: i64,
-    slots: &mut [Option<Value>],
+    buf: &mut [E],
     iv: &mut [i64; MAX_LIST_INT_SLOTS],
     ev: &mut [E; MAX_LIST_ELEM_SLOTS],
     dirty_int: &mut u32,
@@ -370,7 +394,7 @@ fn exec_list_ops<E: ListElem>(
     let mut ip: usize = 0;
     let mut budget = budget_start.max(1);
     let len = ops.len();
-    let slots_len = slots.len();
+    let slots_len = buf.len();
 
     while ip < len {
         let op = ops[ip];
@@ -383,14 +407,8 @@ fn exec_list_ops<E: ListElem>(
                         spent: budget_start.saturating_sub(budget),
                     };
                 }
-                let Some(val) = slots[off as usize].as_ref().and_then(E::from_value) else {
-                    return ListExit::Fallback {
-                        fallback_fast_ip: fast_ips[ip] as usize,
-                        spent: budget_start.saturating_sub(budget),
-                    };
-                };
                 let dst = (op.a & 15) as usize;
-                ev[dst] = val;
+                ev[dst] = buf[off as usize];
                 *dirty_elem |= 1u32 << dst;
                 ip += 1;
             }
@@ -408,14 +426,8 @@ fn exec_list_ops<E: ListElem>(
                         spent: budget_start.saturating_sub(budget),
                     };
                 }
-                let Some(val) = slots[off as usize].as_ref().and_then(E::from_value) else {
-                    return ListExit::Fallback {
-                        fallback_fast_ip: fast_ips[ip] as usize,
-                        spent: budget_start.saturating_sub(budget),
-                    };
-                };
                 let dst = (op.a & 15) as usize;
-                ev[dst] = val;
+                ev[dst] = buf[off as usize];
                 *dirty_elem |= 1u32 << dst;
                 ip += 1;
             }
@@ -427,17 +439,7 @@ fn exec_list_ops<E: ListElem>(
                         spent: budget_start.saturating_sub(budget),
                     };
                 }
-                match &mut slots[off as usize] {
-                    Some(existing) if !existing.is_reference() => {
-                        *existing = ev[(op.b & 15) as usize].to_value();
-                    }
-                    _ => {
-                        return ListExit::Fallback {
-                            fallback_fast_ip: fast_ips[ip] as usize,
-                            spent: budget_start.saturating_sub(budget),
-                        };
-                    }
-                }
+                buf[off as usize] = ev[(op.b & 15) as usize];
                 ip += 1;
             }
             LOp::ListCopy => {
@@ -453,30 +455,77 @@ fn exec_list_ops<E: ListElem>(
                         spent: budget_start.saturating_sub(budget),
                     };
                 }
-                let Some(val) = slots[src_off as usize].as_ref().and_then(E::from_value) else {
+                buf[dst_off as usize] = buf[src_off as usize];
+                ip += 1;
+            }
+            LOp::ListCmpAdjBranch => {
+                let off = iv[(op.b & 31) as usize].wrapping_sub(start);
+                if off < 0 || (off as usize) + 1 >= slots_len {
                     return ListExit::Fallback {
                         fallback_fast_ip: fast_ips[ip] as usize,
                         spent: budget_start.saturating_sub(budget),
                     };
-                };
-                match &mut slots[dst_off as usize] {
-                    Some(existing) if !existing.is_reference() => {
-                        *existing = val.to_value();
-                    }
-                    _ => {
-                        return ListExit::Fallback {
-                            fallback_fast_ip: fast_ips[ip] as usize,
+                }
+                let idx = off as usize;
+                let cmp = op.a & 0x0f;
+                let when = (op.a & 0x10) != 0;
+                if E::cmp(cmp, buf[idx], buf[idx + 1]) == when {
+                    let target = op.imm as usize;
+                    if (op.a & 0x80) != 0 {
+                        return ListExit::Exit {
+                            next_fast_ip: target,
                             spent: budget_start.saturating_sub(budget),
                         };
                     }
+                    if target <= ip {
+                        budget -= 1;
+                        if budget == 0 {
+                            return ListExit::Yield {
+                                resume_fast_ip: fast_ips[target] as usize,
+                            };
+                        }
+                    }
+                    ip = target;
+                } else {
+                    ip += 1;
                 }
-                ip += 1;
+            }
+            LOp::ListCmpElemBranch => {
+                let off = iv[(op.c & 31) as usize].wrapping_sub(start);
+                if off < 0 || (off as usize) >= slots_len {
+                    return ListExit::Fallback {
+                        fallback_fast_ip: fast_ips[ip] as usize,
+                        spent: budget_start.saturating_sub(budget),
+                    };
+                }
+                let cmp = op.a & 0x0f;
+                let when = (op.a & 0x10) != 0;
+                if E::cmp(cmp, ev[(op.b & 15) as usize], buf[off as usize]) == when {
+                    let target = op.imm as usize;
+                    if (op.a & 0x80) != 0 {
+                        return ListExit::Exit {
+                            next_fast_ip: target,
+                            spent: budget_start.saturating_sub(budget),
+                        };
+                    }
+                    if target <= ip {
+                        budget -= 1;
+                        if budget == 0 {
+                            return ListExit::Yield {
+                                resume_fast_ip: fast_ips[target] as usize,
+                            };
+                        }
+                    }
+                    ip = target;
+                } else {
+                    ip += 1;
+                }
             }
             LOp::FillStep => {
                 let k_slot = (op.a & 31) as usize;
                 let step_slot = (op.b & 31) as usize;
                 let lim = i64::from(op.imm & 0x003f_ffff);
-                let fill_val = E::from_i32(i32::from(((op.imm >> 24) & 0xff) as i8)).to_value();
+                let fill_val = E::from_i32(i32::from(((op.imm >> 24) & 0xff) as i8));
                 let step = iv[step_slot];
                 let mut k = iv[k_slot];
                 loop {
@@ -489,19 +538,7 @@ fn exec_list_ops<E: ListElem>(
                             spent: budget_start.saturating_sub(budget),
                         };
                     }
-                    match &mut slots[off as usize] {
-                        Some(existing) if !existing.is_reference() => {
-                            *existing = fill_val.clone();
-                        }
-                        _ => {
-                            iv[k_slot] = k;
-                            *dirty_int |= 1u32 << k_slot;
-                            return ListExit::Fallback {
-                                fallback_fast_ip: fast_ips[ip] as usize,
-                                spent: budget_start.saturating_sub(budget),
-                            };
-                        }
-                    }
+                    buf[off as usize] = fill_val;
                     let Some(next_k) = k.checked_add(step) else {
                         iv[k_slot] = k;
                         *dirty_int |= 1u32 << k_slot;
@@ -1002,12 +1039,16 @@ pub(crate) fn try_compile_list_loop(
     let arr_reg = arr_reg?;
 
     // 1b. Identify internal branch targets and pre-fuse adjacent single-use temp
-    //     array idioms (`AddImm(t, idx, 1) + ArrGetInt(dst, arr, t)` -> `ListGetPlus1`,
-    //     `ArrGetInt(t, arr, src_idx) + ArrSetInt(arr, dst_idx, t)` -> `ListCopy`)
-    //     so reused temp registers never cause false Int/Elem conflicts!
+    //     array idioms:
+    //     - `ArrGetInt(t1, arr, idx) + AddImm(ti, idx, 1) + ArrGetInt(t2, arr, ti) + BranchCmp(t1, t2)` -> `ListCmpAdjBranch`
+    //     - `ArrGetInt(t1, arr, idx) + BranchCmp(lhs_elem, t1)` -> `ListCmpElemBranch`
+    //     - `AddImm(t, idx, 1) + ArrGetInt(dst, arr, t)` -> `ListGetPlus1`
+    //     - `ArrGetInt(t, arr, src_idx) + ArrSetInt(arr, dst_idx, t)` -> `ListCopy`
     #[derive(Clone, Copy, PartialEq, Eq)]
     enum Fused {
         None,
+        CmpAdj,
+        CmpElem,
         GetPlus1,
         Copy,
         Consumed,
@@ -1024,9 +1065,60 @@ pub(crate) fn try_compile_list_loop(
     let mut fused = [Fused::None; 130];
     let mut fk = 0usize;
     while fk + 1 < n {
+        if fk + 3 < n
+            && !is_local_target[fk + 1]
+            && !is_local_target[fk + 2]
+            && !is_local_target[fk + 3]
+        {
+            let g1 = body[fk];
+            let add1 = body[fk + 1];
+            let g2 = body[fk + 2];
+            let br = body[fk + 3];
+            if g1.op == Op::ArrGetInt
+                && g1.imm == 0
+                && g1.b == arr_reg
+                && g1.a >= local_count
+                && add1.op == Op::AddImm
+                && add1.imm == 1
+                && add1.b == g1.c
+                && add1.a >= local_count
+                && g2.op == Op::ArrGetInt
+                && g2.imm == 0
+                && g2.b == arr_reg
+                && g2.c == add1.a
+                && g2.a >= local_count
+                && br.op == Op::BranchCmp
+                && br.b == g1.a
+                && br.c == g2.a
+                && temp_dead_in_list_body(body, fk + 3, g1.a)
+                && temp_dead_in_list_body(body, fk + 3, add1.a)
+                && temp_dead_in_list_body(body, fk + 3, g2.a)
+            {
+                fused[fk] = Fused::CmpAdj;
+                fused[fk + 1] = Fused::Consumed;
+                fused[fk + 2] = Fused::Consumed;
+                fused[fk + 3] = Fused::Consumed;
+                fk += 4;
+                continue;
+            }
+        }
         if !is_local_target[fk + 1] {
             let a = body[fk];
             let b = body[fk + 1];
+            if a.op == Op::ArrGetInt
+                && a.imm == 0
+                && a.b == arr_reg
+                && a.a >= local_count
+                && b.op == Op::BranchCmp
+                && b.c == a.a
+                && b.b != a.a
+                && temp_dead_in_list_body(body, fk + 1, a.a)
+            {
+                fused[fk] = Fused::CmpElem;
+                fused[fk + 1] = Fused::Consumed;
+                fk += 2;
+                continue;
+            }
             if a.op == Op::AddImm
                 && a.imm == 1
                 && a.a >= local_count
@@ -1078,6 +1170,19 @@ pub(crate) fn try_compile_list_loop(
         for (idx, &op) in body.iter().enumerate() {
             match fused[idx] {
                 Fused::Consumed => continue,
+                Fused::CmpAdj => {
+                    set_k(&mut kinds, op.c, LKind::Int, &mut changed);
+                    read_any[op.c as usize] = true;
+                    continue;
+                }
+                Fused::CmpElem => {
+                    let br = body[idx + 1];
+                    set_k(&mut kinds, op.c, LKind::Int, &mut changed);
+                    set_k(&mut kinds, br.b, LKind::Elem, &mut changed);
+                    read_any[op.c as usize] = true;
+                    read_any[br.b as usize] = true;
+                    continue;
+                }
                 Fused::GetPlus1 => {
                     let b = body[idx + 1];
                     if b.a == arr_reg {
@@ -1340,6 +1445,34 @@ pub(crate) fn try_compile_list_loop(
             continue;
         }
         let fip = (body_start + k) as u16;
+        if fused[k] == Fused::CmpAdj {
+            let br = body[k + 3];
+            let (t, ext) = map_target(br.imm as usize)?;
+            let flags = br.a | if ext { 0x80 } else { 0 };
+            lops.push(ListOp::new(
+                LOp::ListCmpAdjBranch,
+                flags,
+                int_slot[op.c as usize],
+                0,
+                t as i32,
+            ));
+            fast_ips.push(fip);
+            continue;
+        }
+        if fused[k] == Fused::CmpElem {
+            let br = body[k + 1];
+            let (t, ext) = map_target(br.imm as usize)?;
+            let flags = br.a | if ext { 0x80 } else { 0 };
+            lops.push(ListOp::new(
+                LOp::ListCmpElemBranch,
+                flags,
+                elem_slot[br.b as usize],
+                int_slot[op.c as usize],
+                t as i32,
+            ));
+            fast_ips.push(fip);
+            continue;
+        }
         if fused[k] == Fused::GetPlus1 {
             let b = body[k + 1];
             lops.push(ListOp::new(

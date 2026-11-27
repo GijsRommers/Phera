@@ -2813,5 +2813,38 @@ mod tests {
             "Zend heapsort_r should extract ListLoop; ops={:?}",
             zend_heapsort.ops
         );
+
+        let hash2_unit = phera_compiler::compile(
+            r#"<?php
+            function hash2($n) {
+                for ($i = 0; $i < 10000; $i++) {
+                    $hash1["foo_$i"] = $i;
+                }
+                for ($i = $n; $i > 0; $i--) {
+                    foreach ($hash1 as $key => $value) $hash2[$key] += $value;
+                }
+            }
+            "#,
+            "h2.php",
+        )
+        .expect("compile hash2");
+        let hash2_fn = hash2_unit
+            .functions
+            .iter()
+            .find(|f| f.name == "hash2")
+            .expect("hash2 fn");
+        let matched_hash2 = hash2_fn.instructions.iter().enumerate().any(|(ip, inst)| {
+            if let phera_bytecode::Instruction::IterNextKeyed { key, value, .. } = *inst {
+                crate::calls::execution_loop::match_keyed_add_loop_fn(hash2_fn, ip, key, value)
+                    .is_some()
+            } else {
+                false
+            }
+        });
+        assert!(
+            matched_hash2,
+            "Zend hash2 should match match_keyed_add_loop_fn; insts={:?}",
+            hash2_fn.instructions
+        );
     }
 }

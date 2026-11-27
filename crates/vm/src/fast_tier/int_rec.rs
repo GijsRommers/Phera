@@ -974,7 +974,10 @@ fn run_unary_binop(
     let mut st_phase = [0u8; 256];
     let mut sp: usize = 0;
     let mut n = entry_n;
-    let mut budget = budget_start.max(1);
+    // Each zero-dispatch iterative step is ~8-10x faster than a Tier-1 bytecode
+    // step; scale internal step budget by 8x (~1 ms per yield) and charge `spent / 8`.
+    let step_budget_start = budget_start.max(1).saturating_mul(8);
+    let mut budget = step_budget_start;
     let mut yield_now = false;
 
     let pause = 'run: loop {
@@ -1005,9 +1008,10 @@ fn run_unary_binop(
 
         loop {
             if sp == 0 {
-                let spent = budget_start.saturating_sub(budget);
+                let raw_spent = step_budget_start.saturating_sub(budget);
+                let spent = raw_spent >> 3;
                 *work_io = (*work_io).saturating_add(spent);
-                *executed_io += spent.max(1) as u64;
+                *executed_io += raw_spent.max(1) as u64;
                 stack.pop_for_return();
                 registers.truncate(entry_frame.start());
                 registers.put(caller_vm.base() + destination.index(), Value::Int(ret));
@@ -1109,10 +1113,142 @@ fn run_unary_binop(
         cur_base,
         cur_ip,
         yield_now,
-        budget_start.saturating_sub(budget),
+        step_budget_start.saturating_sub(budget) >> 3,
         work_io,
         executed_io,
     )
+}
+
+/// Pure inline subtree evaluator for `Op::CallSelf1` inside `FastVm` so
+/// post-yield sibling calls still execute inside the zero-dispatch kernel!
+/// Returns `Some((result, work_spent))` when completed within budget/depth,
+/// or `None` with zero side effects if it would overflow/yield/hit depth.
+#[inline(never)]
+pub(crate) fn try_eval_int_rec_1(
+    rec: &IntRecFunc,
+    entry_n: i64,
+    max_frames: usize,
+    budget_work: usize,
+) -> Option<(i64, usize)> {
+    let RecKernel::UnaryBinOp {
+        cmp,
+        lim,
+        base_is_param,
+        base_val,
+        step1,
+        step2,
+        combine,
+        ..
+    } = rec.kernel
+    else {
+        return None;
+    };
+    let max_d = max_frames.min(255);
+    let mut st_n = [0i64; 256];
+    let mut st_acc = [0i64; 256];
+    let mut st_phase = [0u8; 256];
+    let mut sp: usize = 0;
+    let mut n = entry_n;
+    let step_budget_start = budget_work.max(1).saturating_mul(8);
+    let mut budget = step_budget_start;
+
+    loop {
+        let is_base = if cmp == CMP_LT { n < lim } else { n <= lim };
+        let mut ret = if is_base {
+            if base_is_param { n } else { base_val }
+        } else {
+            if sp >= max_d {
+                return None;
+            }
+            let arg1 = n.checked_sub(step1)?;
+            st_n[sp] = n;
+            st_phase[sp] = 0;
+            sp += 1;
+            n = arg1;
+            budget -= 1;
+            if budget == 0 {
+                return None;
+            }
+            continue;
+        };
+        loop {
+            if sp == 0 {
+                let spent = step_budget_start.saturating_sub(budget) >> 3;
+                return Some((ret, spent));
+            }
+            let top = sp - 1;
+            if st_phase[top] == 0 {
+                let arg2 = st_n[top].checked_sub(step2)?;
+                st_acc[top] = ret;
+                st_phase[top] = 1;
+                n = arg2;
+                budget -= 1;
+                if budget == 0 {
+                    return None;
+                }
+                break;
+            }
+            let lhs = st_acc[top];
+            ret = match combine {
+                ROp::AddI64 => lhs.checked_add(ret)?,
+                ROp::SubI64 => lhs.checked_sub(ret)?,
+                ROp::MulI64 => lhs.checked_mul(ret)?,
+                _ => return None,
+            };
+            sp = top;
+        }
+    }
+}
+
+/// Pure inline subtree evaluator for `Op::CallSelf2` inside `FastVm` so
+/// post-yield sibling calls still execute inside the zero-dispatch kernel!
+#[inline(never)]
+pub(crate) fn try_eval_int_rec_2(
+    rec: &IntRecFunc,
+    entry_m: i64,
+    entry_n: i64,
+    max_frames: usize,
+    budget_work: usize,
+) -> Option<(i64, usize)> {
+    let RecKernel::BinaryNested { c0, c1, s0, s1, .. } = rec.kernel else {
+        return None;
+    };
+    let max_d = max_frames.min(2047);
+    let mut st_m = [0i64; 2048];
+    let mut sp: usize = 0;
+    let mut m = entry_m;
+    let mut n = entry_n;
+    let step_budget_start = budget_work.max(1).saturating_mul(8);
+    let mut budget = step_budget_start;
+
+    loop {
+        if m == 0 {
+            let res = n.checked_add(c0)?;
+            if sp == 0 {
+                let spent = step_budget_start.saturating_sub(budget) >> 3;
+                return Some((res, spent));
+            }
+            sp -= 1;
+            m = st_m[sp];
+            n = res;
+        } else if n == 0 {
+            m = m.checked_sub(s0)?;
+            n = c1;
+        } else {
+            if sp >= max_d {
+                return None;
+            }
+            let outer_m = m.checked_sub(s0)?;
+            let inner_n = n.checked_sub(s1)?;
+            st_m[sp] = outer_m;
+            sp += 1;
+            n = inner_n;
+        }
+        budget -= 1;
+        if budget == 0 {
+            return None;
+        }
+    }
 }
 
 #[inline(never)]
@@ -1146,7 +1282,8 @@ fn run_binary_nested(
     let mut sp: usize = 0;
     let mut m = entry_m;
     let mut n = entry_n;
-    let mut budget = budget_start.max(1);
+    let step_budget_start = budget_start.max(1).saturating_mul(8);
+    let mut budget = step_budget_start;
     let mut yield_now = false;
 
     loop {
@@ -1155,9 +1292,10 @@ fn run_binary_nested(
                 break;
             };
             if sp == 0 {
-                let spent = budget_start.saturating_sub(budget);
+                let raw_spent = step_budget_start.saturating_sub(budget);
+                let spent = raw_spent >> 3;
                 *work_io = (*work_io).saturating_add(spent);
-                *executed_io += spent.max(1) as u64;
+                *executed_io += raw_spent.max(1) as u64;
                 stack.pop_for_return();
                 registers.truncate(entry_frame.start());
                 registers.put(caller_vm.base() + destination.index(), Value::Int(res));
@@ -1229,7 +1367,7 @@ fn run_binary_nested(
         cur_base,
         0,
         yield_now,
-        budget_start.saturating_sub(budget),
+        step_budget_start.saturating_sub(budget) >> 3,
         work_io,
         executed_io,
     )

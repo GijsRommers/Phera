@@ -33,6 +33,10 @@ pub(crate) struct FastStack {
     pub(crate) rec_regs: Vec<i64>,
     /// Reusable compact 8-byte call frames for `int_rec::run_int_rec`.
     pub(crate) rec_frames: Vec<RecFrame>,
+    /// Reusable unboxed `i64` scratch slice for `list_loop::try_run_list_loop`.
+    pub(crate) list_buf_i64: Vec<i64>,
+    /// Reusable unboxed `f64` scratch slice for `list_loop::try_run_list_loop`.
+    pub(crate) list_buf_f64: Vec<f64>,
 }
 
 impl FastStack {
@@ -45,6 +49,8 @@ impl FastStack {
             frames: Vec::new(),
             rec_regs: Vec::new(),
             rec_frames: Vec::new(),
+            list_buf_i64: Vec::new(),
+            list_buf_f64: Vec::new(),
         }
     }
 
