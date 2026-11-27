@@ -1,4 +1,10 @@
-//! Lazy bytecode -> Tier-2 [`FastFunction`] lowerer with general peephole fusions.
+//! Lazy bytecode -> Tier-2 [`FastFunction`] lowerer with:
+//! - Static clean-loop / self-recursion eligibility check (eliminates deopt
+//!   thrashing on OOP, native, and HTTP workloads)
+//! - Float-type-hint propagation (emits float-first `AddF64`/`SubF64`/`MulF64`
+//!   ops for float-dominated loops like `mandel`/`mandel2`/`heapsort`)
+//! - General peephole fusions (`IncLoop*`, `DecLoop*`, `RetIntImm`,
+//!   `ArrAddFromArr`, `CallSelf1`, `CallSelf2`, `CallNoop`, producer+`Assign`)
 
 use std::sync::Arc;
 
@@ -10,17 +16,20 @@ use phera_bytecode::{
 use crate::code_table::{CodeTable, FunctionIndex, FunctionShape};
 use crate::fast_tier::{
     CMP_EQ, CMP_GE, CMP_GT, CMP_IDENT, CMP_LE, CMP_LT, CMP_NE, CMP_NOT_IDENT, FastFunction, FastOp,
-    Op,
+    Op, box_f64,
 };
 
 const MAX_FAST_REGS: usize = 255;
 const MAX_FAST_OPS: usize = 4096;
 
-/// Check whether a function is worth lowering into Tier 2.
+/// Fast static check run once at `CodeTable::load` time (zero runtime cost!).
 ///
-/// Cold one-shot functions (no loops and no direct calls) stay on Tier 1 so
-/// framework bootstrap / route dispatch pays zero compilation overhead.
-pub(crate) fn is_eligible(function: &Function, require_hot: bool) -> bool {
+/// A function is a Tier-2 candidate only if it contains:
+/// 1. At least one **Tier-2-clean loop** (a backward branch `target..=ip` where
+///    every instruction inside the loop body is natively handled by Tier 2,
+///    preventing deopt thrashing on OOP/native/foreach loops), OR
+/// 2. Direct self-recursion (`CallDirect` to itself) with no unhandled ops.
+pub(crate) fn is_fast_candidate(function: &Function, self_local: Option<u32>) -> bool {
     if (function.registers as usize) > MAX_FAST_REGS
         || function.instructions.is_empty()
         || function.instructions.len() > MAX_FAST_OPS
@@ -31,40 +40,140 @@ pub(crate) fn is_eligible(function: &Function, require_hot: bool) -> bool {
     {
         return false;
     }
-    if !require_hot {
-        return true;
+
+    let insts = &function.instructions;
+
+    // 1. Check for any Tier-2-clean loop body `target..=ip`.
+    for (ip, &inst) in insts.iter().enumerate() {
+        if let Some(target) = jump_target(inst) {
+            let start = target.index();
+            if start <= ip
+                && insts[start..=ip]
+                    .iter()
+                    .all(|&op| is_supported_in_loop(function, op))
+            {
+                return true;
+            }
+        }
     }
-    // Lower functions that contain a backward branch (loop) or a direct call.
-    for (ip, inst) in function.instructions.iter().enumerate() {
-        if matches!(inst, I::CallDirect { .. }) {
+
+    // 2. Check for self-recursive plain functions (e.g. `fibo_r`, `Ack`).
+    if let Some(local_id) = self_local {
+        let mut calls_self = false;
+        let mut has_unsupported = false;
+        for &inst in insts.iter() {
+            if let I::CallDirect {
+                function: declared,
+                count,
+                ..
+            } = inst
+                && declared.0 == local_id
+                && count <= 16
+            {
+                calls_self = true;
+            }
+            if !is_supported_in_loop(function, inst) {
+                has_unsupported = true;
+                break;
+            }
+        }
+        if calls_self && !has_unsupported {
             return true;
         }
-        if let Some(target) = jump_target(*inst)
-            && target.index() <= ip
-        {
-            return true;
-        }
     }
+
     false
 }
 
-/// Lower `function_idx` (and transitively any `CallDirect` callees in the same
-/// unit) into [`FastFunction`]s.
+/// Whether `inst` executes natively inside Tier 2 without deopting.
+fn is_supported_in_loop(function: &Function, inst: I) -> bool {
+    match inst {
+        I::Nop
+        | I::LoadInt { .. }
+        | I::LoadBool { .. }
+        | I::LoadNull { .. }
+        | I::LoadConst { .. }
+        | I::AssignConst { .. }
+        | I::NewArray { .. }
+        | I::Move { .. }
+        | I::Assign { .. }
+        | I::AssignTake { .. }
+        | I::Clear { .. }
+        | I::IncDecLocal { .. }
+        | I::Jump { .. }
+        | I::JumpIf { .. }
+        | I::JumpIfNot { .. }
+        | I::JumpIfNull { .. }
+        | I::JumpIfNotNull { .. }
+        | I::AppendLocal { .. }
+        | I::Return { .. }
+        | I::ReturnNull => true,
+        I::Binary { op, .. } => lower_binary(op, 0, 0, 0, false).is_some(),
+        I::BinaryInt { op, .. } => lower_binary_int(op, 0, 0, 0, false).is_some(),
+        I::AssignOp { op, local, src } => {
+            matches!(op, BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply)
+                || (op == BinaryOp::Concat && local != src)
+        }
+        I::Unary { op, .. } => matches!(op, UnaryOp::Negate | UnaryOp::Not | UnaryOp::BitwiseNot),
+        I::Cast { to, .. } => matches!(to, CastKind::Int | CastKind::Float | CastKind::Bool),
+        I::BuiltinUnary {
+            op: BuiltinUnary::Strlen,
+            ..
+        } => true,
+        I::BinaryBranch { op, .. } | I::BinaryBranchIf { op, .. } => cmp_code(op).is_some(),
+        I::BinaryIntBranch { op, .. } | I::BinaryIntBranchIf { op, .. } => {
+            branch_imm_op(op).is_some()
+        }
+        I::FetchIndex { mode, .. } => mode != FetchMode::Destructure,
+        I::Fetch { path, mode, .. } => lower_fetch_2d(function, 0, path, mode).is_some(),
+        I::AssignPath { path, .. } | I::UnsetPath { path } => {
+            function.paths.get(path.index()).is_some_and(|def| {
+                matches!(def.base, PathBase::Register(_))
+                    && matches!(def.steps.as_slice(), [Step::Index(_)])
+            })
+        }
+        I::AssignOpPath {
+            op: BinaryOp::Add,
+            path,
+            ..
+        } => function.paths.get(path.index()).is_some_and(|def| {
+            matches!(def.base, PathBase::Register(_))
+                && matches!(def.steps.as_slice(), [Step::Index(_)])
+        }),
+        I::CallDirect { count, .. } => count <= 16,
+        _ => false,
+    }
+}
+
+/// Lower `function_idx` into a [`FastFunction`], returning any `CallDirect`
+/// callees to transitively compile.
 pub(crate) fn lower_function(
     code: &CodeTable,
     function_idx: FunctionIndex,
-    require_hot: bool,
+    require_candidate: bool,
 ) -> Option<(Arc<FastFunction>, Vec<FunctionIndex>)> {
     let (function, _cache, facts) = code.function_parts(function_idx);
-    if !is_eligible(function, require_hot) {
+    if require_candidate && !facts.fast_candidate {
+        return None;
+    }
+    if (function.registers as usize) > MAX_FAST_REGS
+        || function.instructions.is_empty()
+        || function.instructions.len() > MAX_FAST_OPS
+        || !function.handlers.is_empty()
+        || function.is_generator
+        || function.returns_reference
+        || function.observes_arguments
+    {
         return None;
     }
     let unit = code.unit(function_idx);
-    let (fast, direct_callees) = lower_body(function, unit, facts)?;
+    let (fast, direct_callees) = lower_body(code, function_idx, function, unit, facts)?;
     Some((Arc::new(fast), direct_callees))
 }
 
 fn lower_body(
+    code: &CodeTable,
+    self_idx: FunctionIndex,
     function: &Function,
     unit: &CompiledUnit,
     facts: &crate::function_facts::FunctionFacts,
@@ -89,12 +198,21 @@ fn lower_body(
         count_reads(function, *inst, &mut reads);
     }
 
+    // Simple 2-pass float-hint propagation so float-dominated loops (`mandel`,
+    // `mandel2`, `heapsort`) emit float-first `AddF64`/`SubF64`/`MulF64` ops!
+    let float_regs = infer_float_hints(function, unit);
+
     let mut ops: Vec<FastOp> = Vec::with_capacity(len);
     let mut bc_ip: Vec<u32> = Vec::with_capacity(len);
     let mut bc_to_fast: Vec<u16> = vec![u16::MAX; len];
-    let mut f64_consts: Vec<f64> = Vec::new();
+    let mut f64_consts: Vec<u64> = Vec::new();
     let mut direct_callees: Vec<FunctionIndex> = Vec::new();
     let mut patch_jumps: Vec<(usize, usize, JumpPatch)> = Vec::new();
+
+    let self_fast_recursive = facts.shape == FunctionShape::Plain
+        && facts.takes_values_only()
+        && facts.typed_parameters() == 0
+        && facts.return_mask.is_none();
 
     let mut i = 0usize;
     while i < len {
@@ -117,7 +235,45 @@ fn lower_body(
             continue;
         }
 
-        // --- Fusion 2: Rotated loop latch `IncDecLocal(dead dst) + Binary*BranchIf` ---
+        // --- Fusion 2: `FetchIndex(t, X, j) + AssignOpPath(Add, dead, Y[j], t)` -> `ArrAddFromArr` ---
+        if let (
+            I::FetchIndex {
+                dst: fetch_dst,
+                base: src_arr,
+                index: src_idx,
+                mode: FetchMode::Read,
+                ..
+            },
+            Some(I::AssignOpPath {
+                op: BinaryOp::Add,
+                dst: assign_dst,
+                path,
+                src,
+            }),
+        ) = (inst, next)
+            && fetch_dst == src
+            && fetch_dst.index() >= locals
+            && reads[fetch_dst.index()] == 1
+            && assign_dst.index() >= locals
+            && reads[assign_dst.index()] == 0
+            && let Some(def) = function.paths.get(path.index())
+            && let PathBase::Register(dst_arr) = def.base
+            && let [Step::Index(dst_idx)] = def.steps.as_slice()
+            && *dst_idx == src_idx
+        {
+            ops.push(FastOp::new(
+                Op::ArrAddFromArr,
+                dst_arr.0 as u8,
+                src_arr.0 as u8,
+                src_idx.0 as u8,
+                0,
+            ));
+            bc_ip.push(i as u32);
+            i += 2;
+            continue;
+        }
+
+        // --- Fusion 3: Rotated loop latch `IncDecLocal(dead dst) + Binary*BranchIf` ---
         if let I::IncDecLocal { mode, dst, local } = inst
             && dst.index() >= locals
             && reads[dst.index()] == 0
@@ -170,7 +326,6 @@ fn lower_body(
                 }
                 _ => {}
             }
-            // Standalone dead-dst IncDecLocal -> IncLocalFast / DecLocalFast.
             let fast_op = if is_inc {
                 Op::IncLocalFast
             } else {
@@ -182,7 +337,7 @@ fn lower_body(
             continue;
         }
 
-        // --- Fusion 3: Single-use temp producer + `Assign` / `AssignTake` -> write directly into local ---
+        // --- Fusion 4: Single-use temp producer + `Assign` / `AssignTake` ---
         let fused_assign_dst = match next {
             Some(I::Assign { local, src } | I::AssignTake { local, src })
                 if src.index() >= locals && reads[src.index()] == 1 =>
@@ -199,6 +354,7 @@ fn lower_body(
                 assign_local,
                 function,
                 unit,
+                &float_regs,
                 &mut f64_consts,
             )
         {
@@ -211,7 +367,6 @@ fn lower_body(
         // --- Standard single-instruction lowering ---
         match inst {
             I::Nop => {
-                // Skip Nop (patch target falls through to next emitted op).
                 bc_to_fast[i] = ops.len() as u16;
             }
             I::LoadInt { dst, value } => {
@@ -256,7 +411,7 @@ fn lower_body(
                     dst.0 as u8,
                     0,
                     0,
-                    capacity as i32,
+                    i32::from(capacity),
                 ));
                 bc_ip.push(i as u32);
             }
@@ -283,7 +438,8 @@ fn lower_body(
                 bc_ip.push(i as u32);
             }
             I::Binary { op, dst, lhs, rhs } => {
-                if let Some(fast) = lower_binary(op, dst.0 as u8, lhs.0 as u8, rhs.0 as u8) {
+                let flt = float_regs[lhs.index()] || float_regs[rhs.index()];
+                if let Some(fast) = lower_binary(op, dst.0 as u8, lhs.0 as u8, rhs.0 as u8, flt) {
                     ops.push(fast);
                 } else {
                     ops.push(FastOp::new(Op::Deopt, 0, 0, 0, 0));
@@ -291,7 +447,8 @@ fn lower_body(
                 bc_ip.push(i as u32);
             }
             I::BinaryInt { op, dst, lhs, rhs } => {
-                if let Some(fast) = lower_binary_int(op, dst.0 as u8, lhs.0 as u8, rhs) {
+                let flt = float_regs[lhs.index()];
+                if let Some(fast) = lower_binary_int(op, dst.0 as u8, lhs.0 as u8, rhs, flt) {
                     ops.push(fast);
                 } else {
                     ops.push(FastOp::new(Op::Deopt, 0, 0, 0, 0));
@@ -548,16 +705,56 @@ fn lower_body(
                 ..
             } if count <= 16 => {
                 let callee_idx = FunctionIndex(facts.unit_first.0 + 1 + declared.0);
-                if !direct_callees.contains(&callee_idx) {
-                    direct_callees.push(callee_idx);
+                // Specialize self-recursive 1-arg and 2-arg untyped plain calls (`fibo_r`, `Ack`).
+                if callee_idx == self_idx
+                    && self_fast_recursive
+                    && count == facts.parameters
+                    && (count == 1 || count == 2)
+                {
+                    let op = if count == 1 {
+                        Op::CallSelf1
+                    } else {
+                        Op::CallSelf2
+                    };
+                    ops.push(FastOp::new(
+                        op,
+                        dst.0 as u8,
+                        args.0 as u8,
+                        (args.0 + 1) as u8,
+                        0,
+                    ));
+                } else if let Some((_, callee_facts)) =
+                    code.declared_facts(facts.unit_first, declared.index())
+                    && callee_facts.shape == FunctionShape::Plain
+                    && callee_facts.takes_values_only()
+                    && callee_facts.typed_parameters() == 0
+                    && count == callee_facts.parameters
+                    && callee_facts.return_mask.is_none_or(|m| {
+                        m.intersects(phera_bytecode::TypeMask::NULL)
+                            || m.intersects(phera_bytecode::TypeMask::VOID)
+                    })
+                    && callee_facts.instructions.as_ref() == [I::ReturnNull]
+                {
+                    // Empty-body `[ReturnNull]` untyped plain function -> single-op CallNoop!
+                    ops.push(FastOp::new(
+                        Op::CallNoop,
+                        dst.0 as u8,
+                        args.0 as u8,
+                        count as u8,
+                        0,
+                    ));
+                } else {
+                    if !direct_callees.contains(&callee_idx) {
+                        direct_callees.push(callee_idx);
+                    }
+                    ops.push(FastOp::new(
+                        Op::CallFast,
+                        dst.0 as u8,
+                        args.0 as u8,
+                        count as u8,
+                        callee_idx.0 as i32,
+                    ));
                 }
-                ops.push(FastOp::new(
-                    Op::CallFast,
-                    dst.0 as u8,
-                    args.0 as u8,
-                    count as u8,
-                    callee_idx.0 as i32,
-                ));
                 bc_ip.push(i as u32);
             }
             I::Return { src } => {
@@ -623,6 +820,82 @@ fn lower_body(
     ))
 }
 
+/// Propagate float-type hints across two linear passes so float arithmetic
+/// (`mandel`, `mandel2`, `heapsort`) uses float-first `AddF64`/`SubF64`/`MulF64`.
+/// Soundness never depends on this hint: every float-first op still handles
+/// ints and mixed operands via its out-of-line slow helper!
+fn infer_float_hints(function: &Function, unit: &CompiledUnit) -> Vec<bool> {
+    let mut is_float = vec![false; function.registers as usize];
+    for _ in 0..3 {
+        let mut changed = false;
+        for &inst in function.instructions.iter() {
+            let mark = |is_float: &mut [bool], dst: Reg, val: bool, changed: &mut bool| {
+                if val
+                    && let Some(slot) = is_float.get_mut(dst.index())
+                    && !*slot
+                {
+                    *slot = true;
+                    *changed = true;
+                }
+            };
+            match inst {
+                I::LoadConst { dst, constant }
+                | I::AssignConst {
+                    local: dst,
+                    constant,
+                } => {
+                    if matches!(
+                        unit.constants.get(constant.index()),
+                        Some(Constant::Float(_))
+                    ) {
+                        mark(&mut is_float, dst, true, &mut changed);
+                    }
+                }
+                I::Cast {
+                    to: CastKind::Float,
+                    dst,
+                    ..
+                } => mark(&mut is_float, dst, true, &mut changed),
+                I::Move { dst, src }
+                | I::Assign { local: dst, src }
+                | I::AssignTake { local: dst, src }
+                | I::Unary {
+                    op: UnaryOp::Negate,
+                    dst,
+                    src,
+                } => {
+                    let f = is_float.get(src.index()).copied().unwrap_or(false);
+                    mark(&mut is_float, dst, f, &mut changed);
+                }
+                I::Binary { op, dst, lhs, rhs } => {
+                    let lf = is_float.get(lhs.index()).copied().unwrap_or(false);
+                    let rf = is_float.get(rhs.index()).copied().unwrap_or(false);
+                    if op == BinaryOp::Divide
+                        || (matches!(op, BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply)
+                            && (lf || rf))
+                    {
+                        mark(&mut is_float, dst, true, &mut changed);
+                    }
+                }
+                I::BinaryInt { op, dst, lhs, .. } => {
+                    let lf = is_float.get(lhs.index()).copied().unwrap_or(false);
+                    if op == BinaryOp::Divide
+                        || (matches!(op, BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply)
+                            && lf)
+                    {
+                        mark(&mut is_float, dst, true, &mut changed);
+                    }
+                }
+                _ => {}
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    is_float
+}
+
 #[derive(Clone, Copy)]
 enum JumpPatch {
     Imm,
@@ -636,7 +909,8 @@ fn try_lower_producer(
     target_local: Reg,
     function: &Function,
     unit: &CompiledUnit,
-    f64_consts: &mut Vec<f64>,
+    float_regs: &[bool],
+    f64_consts: &mut Vec<u64>,
 ) -> Option<FastOp> {
     let dst_u8 = target_local.0 as u8;
     match inst {
@@ -653,10 +927,12 @@ fn try_lower_producer(
             Some(lower_load_const(dst_u8, constant.0, unit, f64_consts))
         }
         I::Binary { op, dst, lhs, rhs } if dst == expected_dst => {
-            lower_binary(op, dst_u8, lhs.0 as u8, rhs.0 as u8)
+            let flt = float_regs[lhs.index()] || float_regs[rhs.index()];
+            lower_binary(op, dst_u8, lhs.0 as u8, rhs.0 as u8, flt)
         }
         I::BinaryInt { op, dst, lhs, rhs } if dst == expected_dst => {
-            lower_binary_int(op, dst_u8, lhs.0 as u8, rhs)
+            let flt = float_regs[lhs.index()];
+            lower_binary_int(op, dst_u8, lhs.0 as u8, rhs, flt)
         }
         I::Unary {
             op: UnaryOp::Negate,
@@ -696,7 +972,7 @@ fn lower_load_const(
     dst: u8,
     const_id: u32,
     unit: &CompiledUnit,
-    f64_consts: &mut Vec<f64>,
+    f64_consts: &mut Vec<u64>,
 ) -> FastOp {
     match unit.constants.get(const_id as usize) {
         Some(Constant::Null) => FastOp::new(Op::LoadNull, dst, 0, 0, 0),
@@ -705,21 +981,21 @@ fn lower_load_const(
             if let Ok(i) = i32::try_from(*v) {
                 FastOp::new(Op::LoadInt, dst, 0, 0, i)
             } else {
-                FastOp::new(Op::LoadConstVal, dst, 0, 0, const_id as i32)
+                FastOp::new(Op::LoadConstRef, dst, 0, 0, const_id as i32)
             }
         }
         Some(Constant::Float(f)) => {
-            let idx = if let Some(pos) = f64_consts.iter().position(|x| x.to_bits() == f.to_bits())
-            {
+            let bits = box_f64(*f);
+            let idx = if let Some(pos) = f64_consts.iter().position(|&x| x == bits) {
                 pos
             } else {
                 let pos = f64_consts.len();
-                f64_consts.push(*f);
+                f64_consts.push(bits);
                 pos
             };
             FastOp::new(Op::LoadF64, dst, 0, 0, idx as i32)
         }
-        Some(_) => FastOp::new(Op::LoadConstVal, dst, 0, 0, const_id as i32),
+        Some(_) => FastOp::new(Op::LoadConstRef, dst, 0, 0, const_id as i32),
         None => FastOp::new(Op::Deopt, 0, 0, 0, 0),
     }
 }
@@ -751,12 +1027,36 @@ fn lower_fetch_2d(
     ))
 }
 
-fn lower_binary(op: BinaryOp, dst: u8, lhs: u8, rhs: u8) -> Option<FastOp> {
+fn lower_binary(op: BinaryOp, dst: u8, lhs: u8, rhs: u8, float_hint: bool) -> Option<FastOp> {
     let fast_op = match op {
-        BinaryOp::Add => Op::AddNum,
-        BinaryOp::Subtract => Op::SubNum,
-        BinaryOp::Multiply => Op::MulNum,
-        BinaryOp::Divide => Op::DivNum,
+        BinaryOp::Add => {
+            if float_hint {
+                Op::AddF64
+            } else {
+                Op::AddNum
+            }
+        }
+        BinaryOp::Subtract => {
+            if float_hint {
+                Op::SubF64
+            } else {
+                Op::SubNum
+            }
+        }
+        BinaryOp::Multiply => {
+            if float_hint {
+                Op::MulF64
+            } else {
+                Op::MulNum
+            }
+        }
+        BinaryOp::Divide => {
+            if float_hint {
+                Op::DivF64
+            } else {
+                Op::DivNum
+            }
+        }
         BinaryOp::Modulo => Op::ModInt,
         BinaryOp::BitwiseAnd => Op::BitAnd,
         BinaryOp::BitwiseOr => Op::BitOr,
@@ -771,11 +1071,29 @@ fn lower_binary(op: BinaryOp, dst: u8, lhs: u8, rhs: u8) -> Option<FastOp> {
     Some(FastOp::new(fast_op, dst, lhs, rhs, 0))
 }
 
-fn lower_binary_int(op: BinaryOp, dst: u8, lhs: u8, rhs: i32) -> Option<FastOp> {
+fn lower_binary_int(op: BinaryOp, dst: u8, lhs: u8, rhs: i32, float_hint: bool) -> Option<FastOp> {
     let fast_op = match op {
-        BinaryOp::Add => Op::AddImm,
-        BinaryOp::Subtract => Op::SubImm,
-        BinaryOp::Multiply => Op::MulImm,
+        BinaryOp::Add => {
+            if float_hint {
+                Op::AddF64Imm
+            } else {
+                Op::AddImm
+            }
+        }
+        BinaryOp::Subtract => {
+            if float_hint {
+                Op::SubF64Imm
+            } else {
+                Op::SubImm
+            }
+        }
+        BinaryOp::Multiply => {
+            if float_hint {
+                Op::MulF64Imm
+            } else {
+                Op::MulImm
+            }
+        }
         BinaryOp::Modulo => Op::ModImm,
         BinaryOp::BitwiseAnd => Op::BitAndImm,
         BinaryOp::BitwiseOr => Op::BitOrImm,

@@ -328,9 +328,11 @@ impl Machine<'_> {
         // `registers::WINDOW`): decided when the frame is entered, not per
         // instruction.
         let mut windowed = self.windowed(frame);
+        let mut fast_candidate = !GUARDED && self.code.facts(frame.function).fast_candidate;
         let mut skip_fast_at: Option<(crate::code_table::FunctionIndex, usize)> = None;
         loop {
             if !GUARDED
+                && fast_candidate
                 && skip_fast_at != Some((position.frame.function, position.ip))
                 && let Some(exit) = self.try_run_fast(position)
             {
@@ -342,6 +344,7 @@ impl Machine<'_> {
                         if !same_function {
                             instructions = self.code.instructions(next.frame.function);
                             windowed = self.windowed(next.frame);
+                            fast_candidate = self.code.facts(next.frame.function).fast_candidate;
                         }
                         continue;
                     }
@@ -354,6 +357,7 @@ impl Machine<'_> {
                         if !same_function {
                             instructions = self.code.instructions(next.frame.function);
                             windowed = self.windowed(next.frame);
+                            fast_candidate = self.code.facts(next.frame.function).fast_candidate;
                         }
                         if yield_now {
                             return LoopExit::Yield;
@@ -390,6 +394,8 @@ impl Machine<'_> {
                     if !same_function {
                         instructions = self.code.instructions(next.frame.function);
                         windowed = self.windowed(next.frame);
+                        fast_candidate =
+                            !GUARDED && self.code.facts(next.frame.function).fast_candidate;
                     }
                 }
                 Step::Slow => {

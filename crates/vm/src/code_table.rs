@@ -295,10 +295,15 @@ impl CodeTable {
             facts.extend(metadata.functions.iter().cloned().enumerate().map(
                 |(offset, signature)| {
                     let local = offset.checked_sub(1).map(|local| local as u32);
-                    let instructions = body(unit, local.map(|local| local as usize))
-                        .instructions
-                        .clone();
-                    FunctionFacts::bind((index, first, local), signature, instructions)
+                    let fn_body = body(unit, local.map(|local| local as usize));
+                    let mut entry = FunctionFacts::bind(
+                        (index, first, local),
+                        signature,
+                        fn_body.instructions.clone(),
+                    );
+                    entry.fast_candidate =
+                        crate::fast_tier::lower::is_fast_candidate(fn_body, local);
+                    entry
                 },
             ));
             (
@@ -311,11 +316,13 @@ impl CodeTable {
             let bodies = std::iter::once(&unit.main).chain(&unit.functions);
             facts.extend(bodies.enumerate().map(|(offset, body)| {
                 let local = offset.checked_sub(1).map(|local| local as u32);
-                FunctionFacts::bind(
+                let mut entry = FunctionFacts::bind(
                     (index, first, local),
                     FunctionSignature::new(body, &unit.types),
                     body.instructions.clone(),
-                )
+                );
+                entry.fast_candidate = crate::fast_tier::lower::is_fast_candidate(body, local);
+                entry
             }));
             let names: Vec<String> = unit
                 .names

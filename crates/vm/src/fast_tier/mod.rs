@@ -1,9 +1,11 @@
 //! Tier-2 compact register VM (`FastVm`) in 100% safe Rust.
 //!
-//! Hot PHP functions (loops and direct-call recursion) are lazily lowered from
-//! 16-byte general bytecode into 8-byte `Copy` [`FastOp`] instructions running
-//! on a zero-drop parallel `(tags: [u8], bits: [u64])` scalar register stack
-//! with an out-of-line `heap` table for arrays, strings, and references.
+//! Hot PHP functions (functions with a Tier-2-clean loop or clean direct
+//! recursion) are lazily lowered from 16-byte general bytecode into 8-byte
+//! `Copy` [`FastOp`] instructions running on a zero-drop 8-byte NaN-boxed
+//! `u64` register stack (`&mut [u64; 256]` fixed windows — zero bounds checks
+//! by type!) with an out-of-line `heap` table only for mutable arrays,
+//! non-const strings, and references.
 //!
 //! Any unsupported operation, overflow, division by zero, reference write, or
 //! type mismatch deoptimizes cleanly before mutating observable state,
@@ -22,13 +24,76 @@ use crate::calls::execution_loop::Position;
 
 pub(crate) use stack::FastStack;
 
-/// Register value tag in [`FastStack::tags`].
-pub(crate) const TAG_UNINIT: u8 = 0;
-pub(crate) const TAG_NULL: u8 = 1;
-pub(crate) const TAG_BOOL: u8 = 2;
-pub(crate) const TAG_INT: u8 = 3;
-pub(crate) const TAG_FLOAT: u8 = 4;
-pub(crate) const TAG_HEAP: u8 = 5;
+// =============================================================================
+// 100% Safe-Rust 8-Byte NaN-Boxing Representation (`u64`)
+// =============================================================================
+// Any `w < TAG_BASE` is an IEEE-754 `f64` (including ±Inf and canonical NaN
+// `0x7ff8_0000_0000_0000`). Bit patterns `>= TAG_BASE` carry a 16-bit tag in
+// bits 48..64 and a 48-bit payload in bits 0..48.
+pub(crate) const CANON_NAN: u64 = 0x7ff8_0000_0000_0000;
+pub(crate) const TAG_BASE: u64 = 0xfff9_0000_0000_0000;
+pub(crate) const TAG_MASK: u64 = 0xffff_0000_0000_0000;
+pub(crate) const PAYLOAD_MASK: u64 = 0x0000_ffff_ffff_ffff;
+
+/// 48-bit signed integer (`[-140_737_488_355_328, +140_737_488_355_327]`).
+/// Integers outside 48 bits are stored in `TAG_HEAP` (`Value::Int(i64)`).
+pub(crate) const TAG_INT: u64 = 0xfff9_0000_0000_0000;
+/// PHP `null`.
+pub(crate) const TAG_NULL: u64 = 0xfffa_0000_0000_0000;
+/// PHP `bool` (payload bit 0 is `0` or `1`).
+pub(crate) const TAG_BOOL: u64 = 0xfffb_0000_0000_0000;
+/// Immutable unit constant by `(unit_cache_const_id: u32)` — zero alloc/drop!
+pub(crate) const TAG_CONST: u64 = 0xfffc_0000_0000_0000;
+/// Unassigned / undefined slot.
+pub(crate) const TAG_UNINIT: u64 = 0xfffd_0000_0000_0000;
+/// Heap slot index (`u32`) into `FastStack::heap` — ONLY tag that may own
+/// memory or hold a PHP reference!
+pub(crate) const TAG_HEAP: u64 = 0xfffe_0000_0000_0000;
+
+#[inline(always)]
+pub(crate) fn box_f64(f: f64) -> u64 {
+    let b = f.to_bits();
+    if b >= TAG_BASE { CANON_NAN } else { b }
+}
+
+#[inline(always)]
+pub(crate) fn is_f64(w: u64) -> bool {
+    w < TAG_BASE
+}
+
+#[inline(always)]
+pub(crate) fn unbox_f64(w: u64) -> f64 {
+    f64::from_bits(w)
+}
+
+#[inline(always)]
+pub(crate) fn is_int(w: u64) -> bool {
+    (w & TAG_MASK) == TAG_INT
+}
+
+#[inline(always)]
+pub(crate) fn unbox_int(w: u64) -> i64 {
+    ((w as i64) << 16) >> 16
+}
+
+#[inline(always)]
+pub(crate) fn box_int_checked(x: i64) -> Option<u64> {
+    if ((x << 16) >> 16) == x {
+        Some(TAG_INT | ((x as u64) & PAYLOAD_MASK))
+    } else {
+        None
+    }
+}
+
+#[inline(always)]
+pub(crate) fn box_i32(x: i32) -> u64 {
+    TAG_INT | ((i64::from(x) as u64) & PAYLOAD_MASK)
+}
+
+#[inline(always)]
+pub(crate) fn box_bool(b: bool) -> u64 {
+    TAG_BOOL | u64::from(b)
+}
 
 /// Comparison sub-opcodes encoded in `FastOp::a` (low 4 bits) or `FastOp::imm`.
 pub(crate) const CMP_EQ: u8 = 0;
@@ -64,19 +129,26 @@ impl FastOp {
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Op {
-    // Constants, moves, clears
-    LoadInt,
-    LoadF64,
-    LoadBool,
-    LoadNull,
-    LoadConstVal,
-    NewArray,
-    Move,
-    Assign,
-    AssignTake,
-    Clear,
+    // Fused rotated-loop latches
+    IncLoopLtImm,
+    IncLoopLeImm,
+    DecLoopGeImm,
+    DecLoopGtImm,
+    IncLoopLtReg,
+    IncLoopLeReg,
+    DecLoopGeReg,
+    DecLoopGtReg,
 
-    // Numeric & bitwise binary (Int, Float, mixed Int/Float)
+    // Float-first arithmetic (for float-typed expressions like mandel/mandel2/heapsort)
+    AddF64,
+    SubF64,
+    MulF64,
+    DivF64,
+    MulF64Imm,
+    AddF64Imm,
+    SubF64Imm,
+
+    // Int-first arithmetic (with out-of-line float/overflow fallback)
     AddNum,
     SubNum,
     MulNum,
@@ -88,7 +160,7 @@ pub(crate) enum Op {
     Shl,
     Shr,
 
-    // Immediate numeric & bitwise binary
+    // Immediate integer arithmetic (with out-of-line float/overflow fallback)
     AddImm,
     SubImm,
     MulImm,
@@ -104,6 +176,18 @@ pub(crate) enum Op {
     SubAssign,
     MulAssign,
     StrAppend,
+
+    // Constants, moves, clears
+    LoadInt,
+    LoadF64,
+    LoadBool,
+    LoadNull,
+    LoadConstRef,
+    NewArray,
+    Move,
+    Assign,
+    AssignTake,
+    Clear,
 
     // Unary, casts, builtins
     NegNum,
@@ -136,25 +220,19 @@ pub(crate) enum Op {
     BranchIdentImm,
     BranchNotIdentImm,
 
-    // Fused rotated-loop latches
-    IncLoopLtImm,
-    IncLoopLeImm,
-    DecLoopGeImm,
-    DecLoopGtImm,
-    IncLoopLtReg,
-    IncLoopLeReg,
-    DecLoopGeReg,
-    DecLoopGtReg,
-
-    // In-loop array operations (COW & reference-aware)
+    // In-loop array operations (COW & reference-aware, out-of-line helpers)
     ArrGetInt,
     Arr2DGetInt,
     ArrSetInt,
     ArrAddAssignInt,
+    ArrAddFromArr,
     ArrPush,
     ArrUnsetInt,
 
-    // In-loop calls & returns
+    // In-loop direct calls & returns
+    CallSelf1,
+    CallSelf2,
+    CallNoop,
     CallFast,
     ReturnReg,
     RetIntImm,
@@ -172,7 +250,7 @@ pub(crate) struct FastFunction {
     /// Original bytecode IP -> `FastOp` index (`u16::MAX` when fused/invalid).
     pub(crate) bc_to_fast: Box<[u16]>,
     /// Flat float constant pool indexed by `Op::LoadF64::imm`.
-    pub(crate) f64_consts: Box<[f64]>,
+    pub(crate) f64_consts: Box<[u64]>,
     pub(crate) reg_count: u8,
     pub(crate) local_count: u8,
     pub(crate) param_count: u8,

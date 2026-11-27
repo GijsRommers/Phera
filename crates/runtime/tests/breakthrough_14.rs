@@ -229,3 +229,63 @@ echo typed_caller() . "\n";
 "#);
     assert_eq!(out, "ffff\n18,18\ndiv0\n20:te\n");
 }
+
+#[test]
+fn nan_box_int48_const_str_and_arr_add_parity() {
+    let out = run(r#"<?php
+function hallo($a) {}
+function const_and_noop_loop(): string {
+    $len = 0;
+    $str = "";
+    for ($i = 0; $i < 20; $i++) {
+        hallo("hallo");
+        $len += strlen("hallo");
+        $str .= "ab";
+    }
+    return $len . ":" . strlen($str) . ":" . substr($str, 0, 6);
+}
+
+function int48_boundary(): string {
+    $edge = (1 << 47) - 1;
+    $a = $edge;
+    for ($i = 0; $i < 3; $i++) {
+        $a = $a + 1;
+    }
+    $neg = -(1 << 47);
+    $b = $neg;
+    for ($i = 0; $i < 3; $i++) {
+        $b = $b - 1;
+    }
+    $c = 1 << 46;
+    $d = $c * 4;
+    return "$a,$b,$d";
+}
+
+function arr_add_alias(): string {
+    $y = [1, 2, 3, 4];
+    for ($k = 0; $k < 3; $k++) {
+        for ($j = 3; $j >= 0; $j--) {
+            $y[$j] += $y[$j];
+        }
+    }
+    return implode(",", $y);
+}
+
+function rec_with_heap_arg($arr) {
+    if (count($arr) <= 1) {
+        return $arr[0];
+    }
+    $first = array_shift($arr);
+    return $first + rec_with_heap_arg($arr);
+}
+
+echo const_and_noop_loop() . "\n";
+echo int48_boundary() . "\n";
+echo arr_add_alias() . "\n";
+echo rec_with_heap_arg([10, 20, 30, 40]) . "\n";
+"#);
+    assert_eq!(
+        out,
+        "100:40:ababab\n140737488355330,-140737488355331,281474976710656\n8,16,24,32\n100\n"
+    );
+}
