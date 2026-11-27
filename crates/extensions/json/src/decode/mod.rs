@@ -17,9 +17,26 @@ use phera_extension_api::{Context, NativeError, NativeResult, PhpArray, Value, a
 
 /// `$associative`, when given, overrides `JSON_OBJECT_AS_ARRAY`.
 pub(crate) fn json_decode(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let bytes = args::bytes(arguments, 0);
-    let mut flags = DecodeFlags::from_bits(args::int(arguments, 3).unwrap_or(0));
-    if let Some(associative) = args::bool(arguments, 1) {
+    decode_bytes(
+        context,
+        args::bytes(arguments, 0),
+        args::bool(arguments, 1),
+        args::int(arguments, 2).unwrap_or(512),
+        args::int(arguments, 3).unwrap_or(0),
+    )
+}
+
+/// `json_decode($json, $associative, $depth, $flags)` on bytes the caller
+/// already holds, such as a request body.
+pub(crate) fn decode_bytes(
+    context: &mut dyn Context,
+    bytes: &[u8],
+    associative: Option<bool>,
+    depth_argument: i64,
+    flag_bits: i64,
+) -> NativeResult {
+    let mut flags = DecodeFlags::from_bits(flag_bits);
+    if let Some(associative) = associative {
         flags.associative = associative;
     }
     if !flags.throw_on_error {
@@ -28,7 +45,7 @@ pub(crate) fn json_decode(context: &mut dyn Context, arguments: &[Value]) -> Nat
     if bytes.is_empty() {
         return error::finish(context, Error::Syntax, flags.throw_on_error, Value::Null);
     }
-    let depth = depth(args::int(arguments, 2).unwrap_or(512), "json_decode", 3)?;
+    let depth = depth(depth_argument, "json_decode", 3)?;
     // A JSON object becomes a stdClass, which only the VM can create. A
     // context without classes gets arrays instead. create_object takes the
     // properties even when it fails, so the first object asks with none.

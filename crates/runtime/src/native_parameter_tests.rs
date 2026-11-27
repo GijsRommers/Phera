@@ -15,6 +15,14 @@ fn native_parameter_tables_match_php_stubs() {
             "websocket/stubs.php",
             stubs(include_str!("websocket/stubs.php"), "websocket/stubs.php"),
         ),
+        (
+            "Phera\\Http\\",
+            "http_server/stubs.php",
+            stubs(
+                include_str!("http_server/stubs.php"),
+                "http_server/stubs.php",
+            ),
+        ),
         ("Phera\\Grpc\\", "grpc/stubs.php", grpc.clone()),
         ("Phera\\Protobuf\\", "grpc/stubs.php", grpc),
     ];
@@ -26,6 +34,16 @@ fn native_parameter_tables_match_php_stubs() {
         phera_stubs: &phera_stubs,
     };
     audit.registry(&runtime.web_registry);
+    // `Phera\Http` exists on the command line only.
+    for class in runtime.registry.classes() {
+        if class.name.starts_with("Phera\\Http\\") {
+            for method in class.methods {
+                if audit.compare(&format!("{}::{}", class.name, method.name), method.params) {
+                    audit.methods += 1;
+                }
+            }
+        }
+    }
     for function in runtime.registry.functions() {
         if runtime.web_registry.get_function(function.name).is_none()
             && audit.compare(function.name, function.params)

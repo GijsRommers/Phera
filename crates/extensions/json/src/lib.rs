@@ -26,6 +26,43 @@ pub fn valid_json(bytes: &[u8], depth: usize) -> bool {
     decode::validate(bytes, depth, 0).is_ok()
 }
 
+/// `json_encode($value, $flags)` straight from Rust, for a value that holds
+/// no objects or references and is small enough to check quickly: such a
+/// value runs no PHP (`jsonSerialize()`), so no call is needed. `None` for
+/// any other value; the caller then calls `json_encode` through its
+/// context. Errors are reported as `json_encode` reports them.
+pub fn encode_plain(
+    context: &mut dyn phera_extension_api::Context,
+    value: &phera_extension_api::Value,
+    flags: i64,
+) -> Option<phera_extension_api::NativeResult> {
+    let mut arguments = [Some(value.clone()), None];
+    if !encode::can_encode_sync(&arguments) {
+        return None;
+    }
+    let value = arguments[0].take().unwrap_or_default();
+    Some(encode::encode_sync(
+        context,
+        &[value, phera_extension_api::Value::Int(flags)],
+    ))
+}
+
+/// `json_decode($json, $associative, 512, $flags)` on bytes the caller
+/// already holds (a request body), without copying them into a PHP string.
+pub fn decode(
+    context: &mut dyn phera_extension_api::Context,
+    json: &[u8],
+    associative: bool,
+    flags: i64,
+) -> phera_extension_api::NativeResult {
+    decode::decode_bytes(context, json, Some(associative), 512, flags)
+}
+
+/// The `JSON_*` flag values, for callers of [`encode_plain`] and [`decode`].
+pub mod flag {
+    pub use crate::flags::{THROW_ON_ERROR, UNESCAPED_SLASHES, UNESCAPED_UNICODE};
+}
+
 pub struct Json;
 
 impl Extension for Json {

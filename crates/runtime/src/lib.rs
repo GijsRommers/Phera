@@ -16,6 +16,7 @@ mod error;
 #[cfg(test)]
 mod extension_introspection_tests;
 mod http;
+mod http_server;
 #[cfg(test)]
 mod ini_tests;
 #[cfg(test)]
@@ -365,9 +366,58 @@ impl Runtime {
         arguments: &[String],
         sink: Option<Box<dyn OutputSink>>,
     ) -> Result<RunResult, RuntimeError> {
+        self.run_compiled_cli_as(compiled, path, arguments, sink, None)
+            .await
+    }
+
+    /// Runs `path` as an extra worker of the `Phera\Http\Server` it
+    /// starts: the script runs from the top on this thread, and its
+    /// `listen()` serves as worker `role.index`.
+    pub(crate) fn run_server_worker_blocking(
+        &self,
+        path: &Path,
+        arguments: &[String],
+        output: http_server::WorkerOutput,
+        role: http_server::WorkerRole,
+    ) -> Result<RunResult, RuntimeError> {
+        let executor = single_threaded_executor()?;
+        let compiled = self.cache.compile_cli_entry(path);
+        tokio::task::LocalSet::new().block_on(
+            &executor,
+            self.run_compiled_cli_as(
+                compiled,
+                path,
+                arguments,
+                Some(Box::new(output)),
+                Some(role),
+            ),
+        )
+    }
+
+    async fn run_compiled_cli_as(
+        &self,
+        compiled: Result<Arc<CompiledUnit>, RuntimeError>,
+        path: &Path,
+        arguments: &[String],
+        sink: Option<Box<dyn OutputSink>>,
+        server_worker: Option<http_server::WorkerRole>,
+    ) -> Result<RunResult, RuntimeError> {
         let mut vm = self.new_cli_vm();
         if let Some(sink) = sink {
             vm.set_sink(sink);
+        }
+        // A `Phera\Http\Server` with more than one worker runs this script
+        // again on each extra worker's thread.
+        vm.state_mut().get_or_default::<http_server::LaunchSlot>().0 =
+            Some(http_server::ScriptLaunch {
+                runtime: self.clone(),
+                script: path.to_path_buf(),
+                arguments: arguments.to_vec(),
+            });
+        if let Some(role) = server_worker {
+            vm.state_mut()
+                .get_or_default::<http_server::WorkerRoleSlot>()
+                .0 = Some(role);
         }
         let unit = match compiled {
             Ok(unit) => unit,

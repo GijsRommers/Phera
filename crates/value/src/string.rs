@@ -27,6 +27,12 @@ impl PhpString {
         Rc::make_mut(&mut self.0).as_mut_slice()
     }
 
+    /// The bytes as an owned buffer: moved out when this is the only
+    /// handle on them, copied otherwise.
+    pub fn into_bytes(self) -> Vec<u8> {
+        Rc::try_unwrap(self.0).unwrap_or_else(|shared| shared.as_ref().clone())
+    }
+
     pub fn as_bytes(&self) -> &[u8] {
         &self.0
     }

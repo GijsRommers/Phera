@@ -379,6 +379,50 @@ failed status. Messages are PHP arrays, encoded by `Phera\Protobuf\Schema`
 from a `protoc --descriptor_set_out` file or from a schema written as an
 array. See [the gRPC README](crates/extensions/grpc/README.md).
 
+### A server in your script (`Phera\Http`)
+
+Next to `phera serve`, a script can be the server itself, as in Go's
+`net/http` or `Bun.serve`. Run it with `phera app.php`:
+
+```php
+use Phera\Http\{Server, Request, Response};
+
+$server = new Server('127.0.0.1:8080', workers: 4);   // workers: 0 = one per CPU
+$server->onWorkerStart(function (int $worker) use (&$db) {
+    $db = new PDO('sqlite:app.db');                    // once per worker
+});
+$server
+    ->get('/', fn() => 'Hello')                        // string: text/plain
+    ->get('/users/{id}', fn(Request $r) => ['id' => $r->param('id')])   // array: JSON
+    ->post('/notes', fn(Request $r) => Response::json($r->json(), 201))
+    ->get('/static/*path', fn(Request $r) => Response::text($r->param('path')))
+    ->fallback(fn() => Response::text('Not here', 404));
+echo "listening on http://", $server->address(), "\n";
+$server->listen();                                     // until Ctrl-C or $server->stop()
+```
+
+- Each worker keeps one PHP VM for the whole run: globals, connections and
+  prepared statements stay between requests, and a request costs a route
+  lookup and a call, with no `$_SERVER`, no output buffer and no boot.
+  Requests on one worker run one after another.
+- `Request` reads the request lazily: `method()`, `path()`, `uri()`,
+  `param()`, `params()`, `query()`, `header()` (any case), `headers()`,
+  `body()`, `json()`. `Response` has `text()`, `html()`, `json()`, `bytes()`,
+  `empty()`, `withStatus()`, `withHeader()`, `status()`, `header()`,
+  `headers()`, `body()`. A handler may also return a string, an array (JSON) or
+  `null` (204).
+- Routes: `{name}` is one path segment, `*name` the rest of the path; static
+  segments win over `{name}`, which wins over `*name`. A path whose routes are
+  for other methods answers 405 with `Allow`; `HEAD` uses the `GET` route.
+- An uncaught exception in a handler is printed as PHP prints one, the client
+  gets 500, and the worker goes on. `exit()` in a handler ends the program.
+- Worker 0 is the script's own VM; every other worker runs the script again
+  on its own thread up to `listen()` (quietly), so it has the same routes.
+  Code after `listen()` runs once. HTTP/1.1 and cleartext HTTP/2 are served by
+  the same connection code as `phera serve`.
+- `benchmarks/bench-phera-http.php` has the `/plaintext`, `/json` and
+  `/users/{id}` routes of the usual benchmarks.
+
 ## 🧩 Extensions
 
 Built in, each checked call by call against real PHP: core, standard, ctype,

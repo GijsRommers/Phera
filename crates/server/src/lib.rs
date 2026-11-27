@@ -14,6 +14,9 @@
 //! the factory is `Send + Sync` and is called once per worker thread,
 //! inside that worker's runtime, and returns the worker's handler.
 //! The handler itself is usually non-`Send`, which is why its future is not.
+//!
+//! A host that owns its worker threads itself (one long-lived PHP VM per
+//! thread) runs the same connection code with [`serve_local`].
 
 #![forbid(unsafe_code)]
 
@@ -21,6 +24,7 @@ pub mod config;
 mod connection;
 mod file_body;
 pub mod handler;
+mod local;
 mod receive_timeout;
 pub mod request;
 pub mod response;
@@ -33,6 +37,7 @@ mod worker;
 
 pub use config::ServerConfig;
 pub use handler::{Handler, HandlerFactory};
+pub use local::{bind_worker_listener, listener_for_next_worker, serve_local, shutdown_on_signal};
 pub use request::{HttpVersion, Request};
 pub use response::{Body, FileSlice, Response};
 pub use response_stream::{ResponseWriter, StreamBody, StreamWriter};
