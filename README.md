@@ -379,6 +379,47 @@ failed status. Messages are PHP arrays, encoded by `Phera\Protobuf\Schema`
 from a `protoc --descriptor_set_out` file or from a schema written as an
 array. See [the gRPC README](crates/extensions/grpc/README.md).
 
+### Fast programmatic routes in `phera serve` (`Phera\Http`)
+
+`Phera\Http` plugs a flat Rust radix-tree router and lazy `Request`/`Response`
+objects directly into `phera serve` (inheriting `--workers`, `--compress`,
+`--health`, WebSockets, HTTP/2, file-change reload, and graceful shutdown):
+
+```php
+use Phera\Http\{Router, Request, Response};
+
+$router = new Router();
+$router->onStart(function (int $worker) use (&$db) {
+    $db = new PDO('sqlite:app.db'); // once per persistent worker VM instance
+});
+$router
+    ->get('/plaintext', fn() => 'Hello, World!')                        // string: text/plain
+    ->get('/users/{id}', fn(Request $r) => ['id' => $r->param('id')])   // array: JSON
+    ->post('/notes', fn(Request $r) => Response::json($r->json(), 201))
+    ->get('/static/*path', fn(Request $r) => Response::text($r->param('path')))
+    ->fallback(fn() => Response::text('Not here', 404));
+
+return $router; // run with: phera serve app.php
+// Or for a single-file CLI handoff: Phera\Http\serve($router, '127.0.0.1:8080', workers: 4);
+```
+
+- **Unified engine, zero duplication**: `phera serve app.php` boots the route
+  script once per worker, freezes a snapshot, and keeps a per-worker pool of
+  persistent VMs (`idle: Vec<Vm>`). Fast sync routes reuse a single warm VM
+  with zero forks, zero channel hops, and no `$_SERVER`/`$_GET` setup;
+  concurrent async I/O routes automatically fork additional persistent
+  instances up to the worker concurrency limit so requests multiplex M:N on the
+  worker's `LocalSet`.
+- **Hybrid mode**: add `routes = "routes.php"` under `[server]` in `phera.toml`
+  (or pass `--routes routes.php`) to match hot API routes in memory ahead of
+  static files and classic `index.php` / Laravel front controllers.
+- **Routes & errors**: `{name}` matches one segment, `*name` matches the rest;
+  static segments beat `{name}`, which beats `*name`. Method mismatches return
+  `405` with `Allow`; `HEAD` runs `GET`. Uncaught exceptions return `500`
+  without tearing down the worker; `exit()` discards only that pooled instance.
+- `benchmarks/bench-phera-http.php` has the `/plaintext`, `/json` and
+  `/users/{id}` benchmark routes.
+
 ## 🧩 Extensions
 
 Built in, each checked call by call against real PHP: core, standard, ctype,

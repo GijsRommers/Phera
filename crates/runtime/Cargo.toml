@@ -54,6 +54,7 @@ phera-ext-streams.workspace = true
 phera-ext-process.workspace = true
 phera-value.workspace = true
 phera-vm.workspace = true
+smallvec.workspace = true
 tokio.workspace = true
 tempfile.workspace = true
 memchr.workspace = true

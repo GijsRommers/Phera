@@ -18,6 +18,9 @@ use std::time::Duration;
 #[derive(Default)]
 pub(super) struct Settings {
     pub(super) preload: bool,
+    /// Optional `Phera\Http\Router` script mounted ahead of static files and
+    /// the front controller (`[server] routes = "routes.php"`).
+    pub(super) routes: Option<PathBuf>,
     /// The paths handled as requests before the snapshot (see `--warmup`).
     pub(super) warmup: Vec<String>,
     pub(super) websocket: WebSocketSettings,
@@ -88,6 +91,23 @@ pub(super) fn read(project: &Path) -> Result<Settings, String> {
         }
         None => Vec::new(),
     };
+    let routes = match server.and_then(|server| server.get("routes")) {
+        Some(toml::Value::String(entry)) if !entry.trim().is_empty() => {
+            let candidate = PathBuf::from(entry.trim());
+            Some(if candidate.is_absolute() {
+                candidate
+            } else {
+                project.join(candidate)
+            })
+        }
+        Some(_) => {
+            return Err(format!(
+                "{}: server.routes must be a non-empty file path string",
+                path.display()
+            ));
+        }
+        None => None,
+    };
     let websocket = match server.and_then(|server| server.get("websocket")) {
         Some(toml::Value::Table(ws)) => read_websocket(&path, ws)?,
         Some(_) => {
@@ -100,6 +120,7 @@ pub(super) fn read(project: &Path) -> Result<Settings, String> {
     };
     Ok(Settings {
         preload,
+        routes,
         warmup,
         websocket,
         path: config_path,

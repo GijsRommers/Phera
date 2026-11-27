@@ -404,22 +404,24 @@ async fn to_request(
         _ => HttpVersion::Http11,
     };
     let path = parts.uri.path().to_string();
-    let query = parts.uri.query().unwrap_or_default().to_string();
+    let query = match parts.uri.query() {
+        Some(q) if !q.is_empty() => q.to_string(),
+        _ => String::new(),
+    };
     // The raw target as the client sent it; hyper does not decode it.
     let target = parts
         .uri
         .path_and_query()
         .map_or_else(|| path.clone(), |target| target.as_str().to_string());
-    let mut headers: Vec<(String, Vec<u8>)> = parts
-        .headers
-        .iter()
-        .map(|(name, value)| (name.as_str().to_string(), value.as_bytes().to_vec()))
-        .collect();
+    let mut headers: Vec<(String, Vec<u8>)> = Vec::with_capacity(parts.headers.len());
+    for (name, value) in &parts.headers {
+        headers.push((name.as_str().to_string(), value.as_bytes().to_vec()));
+    }
     // HTTP/2 carries the host in the `:authority` pseudo-header rather than a
     // `Host` header. Expose it as `host` so PHP sees identical `HTTP_HOST` and
     // `SERVER_NAME` values across HTTP/1.1 and HTTP/2.
-    if !headers.iter().any(|(name, _)| name == "host")
-        && let Some(authority) = parts.uri.authority()
+    if let Some(authority) = parts.uri.authority()
+        && !headers.iter().any(|(name, _)| name == "host")
     {
         headers.insert(
             0,
@@ -469,8 +471,19 @@ fn to_hyper_response(response: Response, http2: bool) -> HyperResponse<WireBody>
     let mut wire = HyperResponse::new(WireBody::from(response.body));
     *wire.status_mut() = status;
     for (name, value) in response.headers {
+        let header_name = match name.as_str() {
+            "content-type" => Ok(hyper::header::CONTENT_TYPE),
+            "allow" => Ok(hyper::header::ALLOW),
+            "cache-control" => Ok(hyper::header::CACHE_CONTROL),
+            "location" => Ok(hyper::header::LOCATION),
+            "content-encoding" => Ok(hyper::header::CONTENT_ENCODING),
+            "etag" => Ok(hyper::header::ETAG),
+            "vary" => Ok(hyper::header::VARY),
+            "set-cookie" => Ok(hyper::header::SET_COOKIE),
+            other => HeaderName::try_from(other),
+        };
         if let (Ok(name), Ok(value)) = (
-            HeaderName::try_from(name.as_str()),
+            header_name,
             HeaderValue::from_maybe_shared(Bytes::from(value)),
         ) {
             // The server alone says where a response ends. A handler (a PHP

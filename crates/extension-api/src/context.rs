@@ -274,6 +274,24 @@ pub trait Context {
         arguments: Vec<Value>,
     ) -> LocalFuture<'a, NativeResult>;
 
+    /// Reports an error that native code caught where a script would have
+    /// ended, as PHP reports an uncaught one ("PHP Fatal error:  Uncaught
+    /// Exception: ..."), and lets the script go on. `Phera\Http\Server`
+    /// calls it when a request handler throws: that request is answered 500
+    /// and the worker serves the next one. `exit()` is not an error to
+    /// report: it comes back unchanged.
+    fn report_unhandled(&mut self, error: NativeError) -> Result<(), NativeError> {
+        Err(error)
+    }
+
+    /// The error that ends the script as `exit()` does, keeping its exit
+    /// status: native code returns it, and the script's shutdown functions
+    /// and destructors run as after `exit()`. An extra worker of
+    /// `Phera\Http\Server` ends with it when the server stops.
+    fn exit_script(&mut self) -> NativeError {
+        NativeError::error("exit() is not available here")
+    }
+
     /// The fiber on this PHP stack, or none on the request's main stack.
     fn current_fiber(&self) -> Option<Rc<Object>> {
         None

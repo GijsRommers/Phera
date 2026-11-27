@@ -13,6 +13,8 @@ pub(crate) struct Site {
     /// It is `index.php` in the document root when that exists, or the
     /// script named on the command line.
     front_controller: Option<PathBuf>,
+    /// True when `phera serve` was pointed directly at a single `.php` file.
+    single_script: bool,
 }
 
 /// What a request path leads to.
@@ -35,6 +37,7 @@ impl Site {
                 excluded: Vec::new(),
                 front_controller: index.is_file().then_some(index),
                 document_root: path,
+                single_script: false,
             })
         } else {
             let document_root = path
@@ -45,6 +48,7 @@ impl Site {
                 document_root,
                 excluded: Vec::new(),
                 front_controller: Some(path),
+                single_script: true,
             })
         }
     }
@@ -64,6 +68,10 @@ impl Site {
     /// The script that answers every path without a file of its own.
     pub(crate) fn front_controller(&self) -> Option<&Path> {
         self.front_controller.as_deref()
+    }
+
+    pub(crate) fn is_single_script(&self) -> bool {
+        self.single_script
     }
 
     pub(crate) fn document_root(&self) -> &Path {

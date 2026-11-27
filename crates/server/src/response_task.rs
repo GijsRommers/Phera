@@ -93,17 +93,51 @@ pub(crate) async fn answer(
     let Some(exchange) = ResponseExchange::new(connection, request.version) else {
         return Response::text(503, "too many requests in flight\n");
     };
-    let writer = ResponseWriter::new(exchange.clone(), request.method == "HEAD");
-    let future = Box::pin(async move {
-        let run = writer.scope(handler.handle(request));
-        match time_limit {
-            None => run.await,
-            Some(limit) => match tokio::time::timeout(limit, run).await {
+    let writer_exchange = exchange.clone();
+    let head = request.method == "HEAD";
+    let mut run: ResponseFuture = Box::pin(async move {
+        let writer = ResponseWriter::new(writer_exchange, head);
+        writer.scope(handler.handle(request)).await
+    });
+    // Fast path: poll once before arming a Tokio timer or building a
+    // ResponseTask. Sync handlers (/plaintext, /json, in-memory SQLite)
+    // complete here with zero timer-wheel insert/cancel overhead.
+    let first =
+        poll_fn(|cx| Poll::Ready(catch_unwind(AssertUnwindSafe(|| run.as_mut().poll(cx))))).await;
+    match first {
+        Ok(Poll::Ready(response)) => {
+            return exchange.slot().take().unwrap_or(response);
+        }
+        Err(_) => return internal_error(),
+        Ok(Poll::Pending) => {
+            if let Some(response) = exchange.slot().take() {
+                let guard = exchange.connection.detached.tasks.subscribe();
+                let future: ResponseFuture = match time_limit {
+                    None => run,
+                    Some(limit) => Box::pin(async move {
+                        match tokio::time::timeout(limit, run).await {
+                            Ok(response) => response,
+                            Err(_) => Response::text(504, "the request took too long\n"),
+                        }
+                    }),
+                };
+                tokio::task::spawn_local(async move {
+                    let _ = future.await;
+                    drop((guard, exchange));
+                });
+                return response;
+            }
+        }
+    }
+    let future: ResponseFuture = match time_limit {
+        None => run,
+        Some(limit) => Box::pin(async move {
+            match tokio::time::timeout(limit, run).await {
                 Ok(response) => response,
                 Err(_) => Response::text(504, "the request took too long\n"),
-            },
-        }
-    });
+            }
+        }),
+    };
     let mut task = ResponseTask {
         future: Some(future),
         exchange,

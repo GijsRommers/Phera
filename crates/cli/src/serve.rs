@@ -25,8 +25,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use phera_runtime::{
-    DebugTimeLimit, HttpRequest, HttpResponse, Runtime, WebSocketEvent as RuntimeWebSocketEvent,
-    WebSocketSink, WebWorker,
+    DebugTimeLimit, HttpRequest, HttpResponse, RouteBootReport, RouteDispatch, Runtime,
+    WebSocketEvent as RuntimeWebSocketEvent, WebSocketSink, WebWorker,
 };
 use phera_server::{
     Handler, HandlerFactory, HttpVersion, Request, Response, ResponseWriter, Server, ServerConfig,
@@ -85,8 +85,40 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
             warmup.join(" ").into_bytes(),
         );
     }
+    let explicit_routes = match options.routes.clone().or(settings.routes) {
+        Some(path) => match path.canonicalize() {
+            Ok(canonical) if canonical.is_file() => Some(canonical),
+            Ok(_) => {
+                eprintln!("Cannot load routes from {}: not a file", path.display());
+                return ExitCode::FAILURE;
+            }
+            Err(error) => {
+                eprintln!("Cannot load routes from {}: {error}", path.display());
+                return ExitCode::FAILURE;
+            }
+        },
+        None => None,
+    };
+    if let Some(routes_file) = &explicit_routes {
+        loaded.paths.push(routes_file.clone());
+    }
     site.exclude_files(loaded.paths);
     let site = Arc::new(site);
+    let route_source = if let Some(script) = explicit_routes {
+        Some(RouteSource {
+            script: Arc::from(script),
+            hybrid: true,
+            explicit: true,
+        })
+    } else if site.is_single_script() {
+        site.front_controller().map(|script| RouteSource {
+            script: Arc::from(script.to_path_buf()),
+            hybrid: false,
+            explicit: false,
+        })
+    } else {
+        None
+    };
     let trusted_proxies = match options
         .trusted_proxies
         .as_deref()
@@ -188,6 +220,7 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
         adapter,
         debug_server,
         site: site.clone(),
+        route_source,
         compress: options.compress,
         trusted_proxies: Arc::new(trusted_proxies),
         health_path: options.health_path.map(Arc::from),
@@ -265,6 +298,13 @@ fn default_address() -> SocketAddr {
     }
 }
 
+#[derive(Clone)]
+struct RouteSource {
+    script: Arc<Path>,
+    hybrid: bool,
+    explicit: bool,
+}
+
 /// Creates one handler per worker thread. The runtime and the site are
 /// shared; everything a request touches while running is created per
 /// request, on the worker's own thread.
@@ -275,6 +315,7 @@ struct SiteHandlerFactory {
     adapter: Adapter,
     debug_server: Option<DebugServer>,
     site: Arc<Site>,
+    route_source: Option<RouteSource>,
     compress: bool,
     trusted_proxies: Arc<TrustedProxies>,
     health_path: Option<Arc<str>>,
@@ -297,6 +338,7 @@ impl HandlerFactory for SiteHandlerFactory {
                 }),
             adapter: self.adapter,
             site: self.site.clone(),
+            route_source: self.route_source.clone(),
             compress: self.compress,
             trusted_proxies: self.trusted_proxies.clone(),
             health_path: self.health_path.clone(),
@@ -320,6 +362,7 @@ struct SiteHandler {
     runtime: WebWorker,
     adapter: Adapter,
     site: Arc<Site>,
+    route_source: Option<RouteSource>,
     /// `--compress`: compress responses for clients that accept it.
     compress: bool,
     /// `--trusted-proxies`: whose forwarding headers are believed.
@@ -432,9 +475,55 @@ impl Handler for DebugSiteHandler {
 }
 
 impl SiteHandler {
-    /// Boots the front controller before the first connection when it is
-    /// known to call `Phera\snapshot()` (see `phera_runtime::BootReport`).
+    /// Boots a `Phera\Http\Router` (if configured or returned by a single-file
+    /// entry script) and/or a `Phera\snapshot()` front controller before the
+    /// first connection.
     async fn boot(&self) {
+        let worker = self.runtime.index();
+        if let Some(source) = &self.route_source {
+            match self
+                .runtime
+                .boot_router(
+                    &source.script,
+                    self.site.document_root(),
+                    source.hybrid,
+                    source.explicit,
+                )
+                .await
+            {
+                RouteBootReport::Ready {
+                    elapsed,
+                    routes,
+                    files,
+                } => {
+                    println!(
+                        "Worker {worker} loaded {routes} routes from {} in {} ms ({files} files)",
+                        source.script.display(),
+                        elapsed.as_millis()
+                    );
+                    if !source.hybrid {
+                        return;
+                    }
+                }
+                RouteBootReport::Failed(message) => {
+                    eprintln!(
+                        "Worker {worker}: failed to boot routes from {}: {message}",
+                        source.script.display()
+                    );
+                    if !source.hybrid {
+                        return;
+                    }
+                }
+                RouteBootReport::NotARouter => {
+                    if source.explicit {
+                        eprintln!(
+                            "Worker {worker}: {} did not return a Phera\\Http\\Router",
+                            source.script.display()
+                        );
+                    }
+                }
+            }
+        }
         let Some(script) = self.site.front_controller() else {
             return;
         };
@@ -444,7 +533,6 @@ impl SiteHandler {
         {
             return;
         }
-        let worker = self.runtime.index();
         match self.runtime.boot(script, self.site.document_root()).await {
             phera_runtime::BootReport::Snapshot { elapsed, files } => println!(
                 "Worker {worker} booted {} in {} ms ({files} files); requests continue after Phera\\snapshot()",
@@ -477,6 +565,32 @@ impl SiteHandler {
             return Response::text(200, "ok\n")
                 .with_header("Cache-Control", "no-store")
                 .with_header("Phera-From-The-Top", from_the_top);
+        }
+        // In-memory `Phera\Http\Router` dispatch runs ahead of any filesystem
+        // lookup (`spawn_blocking` `site.resolve`), keeping routed APIs off the
+        // blocking thread pool completely.
+        if self.runtime.router_handles(&request.method, &request.path) {
+            let accept_encoding = if self.compress {
+                request
+                    .header("accept-encoding")
+                    .map(|value| String::from_utf8_lossy(value).into_owned())
+            } else {
+                None
+            };
+            let rt_request = to_runtime(request, &self.trusted_proxies);
+            match self.runtime.dispatch_router(rt_request).await {
+                RouteDispatch::Handled(response) => {
+                    let response = from_runtime(response, self.site.document_root());
+                    return if self.compress && response.upgrade.is_none() {
+                        compress::php_response(response, accept_encoding.as_deref()).await
+                    } else {
+                        response
+                    };
+                }
+                RouteDispatch::Fallthrough(_) => {
+                    return Response::text(404, "Not Found\n");
+                }
+            }
         }
         let site = self.site.clone();
         let compress = self.compress;

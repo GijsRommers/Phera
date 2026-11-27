@@ -182,6 +182,56 @@ impl Vm {
         }
     }
 
+    /// Runs an entry script and returns its top-level return value without
+    /// running shutdown/teardown so the caller can inspect the returned object
+    /// (such as a `Phera\Http\Router`) and freeze a [`Snapshot`] of the VM.
+    pub async fn boot_returning(&mut self, unit: Arc<CompiledUnit>) -> Result<Value, (i32, bool)> {
+        if let Err(error) = self.load_entry_unit(&unit) {
+            self.unwind(error);
+            let status = self.end_script(crate::request_end::ScriptEnd::Fatal).await;
+            return Err((status, false));
+        }
+        match self.interpret(0).await {
+            Ok(value) => Ok(value),
+            Err(error) => {
+                if matches!(
+                    &error,
+                    phera_extension_api::NativeError::Unwind(payload)
+                        if payload.0.is::<crate::request_end::Exit>()
+                ) {
+                    return Err((self.status, true));
+                }
+                let mut error = self.materialize_error(error);
+                if let Err(failure) = self.run_destructors().await {
+                    error = self.materialize_error(failure);
+                }
+                let end = crate::request_end::ScriptEnd::of(&error);
+                self.report_uncaught(error).await;
+                let status = self.end_script(end).await;
+                Err((status, false))
+            }
+        }
+    }
+
+    /// Freezes the current idle VM state into a [`Snapshot`] that can be
+    /// forked into isolated persistent instances.
+    pub fn freeze_snapshot(&self) -> Result<Snapshot, String> {
+        let (frozen, pure_arrays) = self
+            .fork_vm_for_snapshot()
+            .map_err(|refusal| format!("{}: {}", refusal.class, refusal.reason))?;
+        Ok(Snapshot::new(frozen, pure_arrays))
+    }
+
+    /// Invokes a PHP callable directly on this VM (used by persistent router
+    /// workers to dispatch matched requests without re-running an entry script).
+    pub async fn call_callable(
+        &mut self,
+        callable: &Value,
+        arguments: Vec<Value>,
+    ) -> phera_extension_api::NativeResult {
+        <Self as phera_extension_api::Context>::call(self, callable, arguments).await
+    }
+
     /// Continues a fork after `Phera\snapshot()` and runs the request to
     /// its end, as [`Vm::run`] does; returns the exit status.
     pub async fn resume(&mut self) -> i32 {

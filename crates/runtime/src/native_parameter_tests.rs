@@ -15,6 +15,14 @@ fn native_parameter_tables_match_php_stubs() {
             "websocket/stubs.php",
             stubs(include_str!("websocket/stubs.php"), "websocket/stubs.php"),
         ),
+        (
+            "Phera\\Http\\",
+            "http_server/stubs.php",
+            stubs(
+                include_str!("http_server/stubs.php"),
+                "http_server/stubs.php",
+            ),
+        ),
         ("Phera\\Grpc\\", "grpc/stubs.php", grpc.clone()),
         ("Phera\\Protobuf\\", "grpc/stubs.php", grpc),
     ];

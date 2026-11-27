@@ -1069,6 +1069,36 @@ impl Context for Vm {
         })
     }
 
+    fn exit_script(&mut self) -> NativeError {
+        self.release_frames_for_exit();
+        NativeError::Unwind(phera_extension_api::Unwind(Box::new(
+            crate::request_end::Exit,
+        )))
+    }
+
+    fn report_unhandled(&mut self, error: NativeError) -> Result<(), NativeError> {
+        if matches!(&error, NativeError::Unwind(payload) if payload.0.is::<crate::request_end::Exit>())
+        {
+            return Err(error);
+        }
+        // Reporting sets the exit status of a script that ends; this one
+        // goes on, so its status stays what it was.
+        let status = self.status;
+        self.restore_silence(0);
+        if let NativeError::Unwind(payload) = self.materialize_error(error) {
+            match payload.0.downcast::<crate::last_error::FatalDiagnostic>() {
+                Ok(diagnostic) => self.report_prepared_fatal(*diagnostic),
+                Err(payload) => {
+                    if let Ok(thrown) = payload.downcast::<crate::exceptions::Thrown>() {
+                        self.report_throwable(&thrown.object);
+                    }
+                }
+            }
+        }
+        self.status = status;
+        Ok(())
+    }
+
     fn websocket_sink(
         &self,
     ) -> Option<&std::sync::Arc<dyn phera_extension_api::websocket::WebSocketSink>> {

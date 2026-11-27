@@ -61,6 +61,7 @@ image = { version = "0.25.10", default-features = false, features = ["bmp", "jpe
 png = "0.18.1"
 indexmap = "2"
 itoa = "1"
+smallvec = "1"
 regex = "1"
 phera-analyzer = { path = "crates/analyzer" }
 phera-lexer = { path = "crates/lexer" }

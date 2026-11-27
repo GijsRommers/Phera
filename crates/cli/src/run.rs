@@ -45,9 +45,10 @@ pub(crate) fn script(
             return ExitCode::FAILURE;
         }
     };
+    let debug_enabled = debug;
     let project = crate::debug_settings::project_root(root);
     let settings = crate::debug_settings::read_table(project).and_then(|(table, _)| {
-        crate::debug_settings::configure(debug, &table, &ini, &loaded.environment)
+        crate::debug_settings::configure(debug_enabled, &table, &ini, &loaded.environment)
     });
     let debug = match settings {
         Ok(debug) => debug,
@@ -56,12 +57,22 @@ pub(crate) fn script(
             return ExitCode::FAILURE;
         }
     };
-    let mut runtime = Runtime::with_environment(loaded.environment).with_startup_ini(ini);
-    if let Some(debug) = debug {
-        runtime = runtime.with_debug(debug);
+    let mut runtime = Runtime::with_environment(loaded.environment).with_startup_ini(ini.clone());
+    if let Some(debug_cfg) = debug {
+        runtime = runtime.with_debug(debug_cfg);
     }
     match runtime.run_file_blocking(script, arguments, Some(Box::new(Stdout))) {
         Ok(result) => {
+            if let Some(pending) = result.pending_serve {
+                return crate::serve::serve(crate::arguments::ServeOptions::for_script(
+                    std::path::PathBuf::from(script),
+                    pending.addr,
+                    pending.workers,
+                    files,
+                    ini,
+                    debug_enabled,
+                ));
+            }
             if std::env::var_os("PHERA_INSTRUCTION_COUNT").is_some() {
                 eprintln!("Executed instructions: {}", result.executed_instructions);
             }

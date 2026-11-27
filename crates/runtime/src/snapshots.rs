@@ -67,7 +67,7 @@ impl FileStamps {
     }
 
     /// Whether some file changed. Looks at the disk only once per interval.
-    fn changed(&mut self, policy: IncludeCachePolicy) -> bool {
+    pub(crate) fn changed(&mut self, policy: IncludeCachePolicy) -> bool {
         if !policy.validate_timestamps || self.checked.elapsed() < policy.revalidate_freq {
             return false;
         }

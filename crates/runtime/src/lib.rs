@@ -16,6 +16,7 @@ mod error;
 #[cfg(test)]
 mod extension_introspection_tests;
 mod http;
+mod http_server;
 #[cfg(test)]
 mod ini_tests;
 #[cfg(test)]
@@ -49,6 +50,7 @@ use worker_code_cache::{RequestCodeCache, WorkerCodeCache};
 pub use boot::BootReport;
 pub use error::RuntimeError;
 pub use http::{HttpRequest, HttpResponse, web_output::WebOutput};
+pub use http_server::{PendingServe, RouteBootReport, RouteDispatch};
 pub use phera_ext_http::ResponseHead;
 pub use phera_extension_api::web_log::flush as flush_web_log;
 pub use phera_extension_api::websocket::{WebSocketEvent, WebSocketEventOutcome, WebSocketSink};
@@ -118,6 +120,8 @@ pub struct WebWorker {
     output_factory: Option<Rc<dyn phera_vm::WebOutputFactory>>,
     /// Bounds concurrently forked request VMs on this worker thread.
     active_requests: Option<Rc<tokio::sync::Semaphore>>,
+    /// Optional booted `Phera\Http\Router` persistent VM pool for this worker.
+    router: Rc<http_server::WorkerRouter>,
 }
 
 impl WebWorker {
@@ -218,6 +222,9 @@ pub struct RunResult {
     /// The exit status: 0, the argument of `exit()`, or 255 after an
     /// uncaught error.
     pub status: i32,
+    /// Set when the script called `Phera\Http\serve($router, ...)` on the CLI,
+    /// asking the CLI binary to hand off to the unified `phera serve` engine.
+    pub pending_serve: Option<PendingServe>,
 }
 
 impl Default for Runtime {
@@ -377,6 +384,7 @@ impl Runtime {
                     executed_instructions: 0,
                     output: vm.output,
                     status: 255,
+                    pending_serve: None,
                 });
             }
             Err(error) => return Err(error),
@@ -401,14 +409,18 @@ impl Runtime {
             self.connect_debugger(&mut vm, &unit.file, None).await;
         }
         let status = vm.run(unit).await;
+        let pending_serve = vm
+            .state_mut()
+            .take::<http_server::PendingServeSlot>()
+            .and_then(|slot| slot.0);
         Ok(RunResult {
             executed_instructions: vm.executed_instructions,
             output: vm.output,
             status,
+            pending_serve,
         })
     }
 
-    /// Create this on the thread that will run the web requests.
     /// Create this on the thread that will run the web requests; `index`
     /// is the worker's number.
     pub fn web_worker(&self, index: usize) -> WebWorker {
@@ -424,6 +436,7 @@ impl Runtime {
             active_requests: self
                 .max_concurrent_requests_per_worker
                 .map(|limit| Rc::new(tokio::sync::Semaphore::new(limit))),
+            router: Default::default(),
         }
     }
 
