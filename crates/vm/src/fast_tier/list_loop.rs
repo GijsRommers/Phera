@@ -4,16 +4,20 @@
 //! on a single array register (`heapsort_r($n, &$ra)`, `sieve($n)`, sorting,
 //! searching, DP, prefix sums, etc.), compiles the loop (including nested loops
 //! and internal `if`/`else` branches) into a compact [`ListLoop`] that:
-//! - Borrows the array's `Storage::List` / `Storage::OffsetList` `&mut [Option<Value>]`
-//!   slice ONCE at loop entry (including through `Value::Reference` for `&$ra`!)
+//! - Borrows the array's `Storage::List` `&mut [Option<Value>]` slice ONCE at
+//!   loop entry (including through `Value::Reference` for `&$ra`) and works on
+//!   it in place: a read checks the slot holds an `E`, a write that the slot
+//!   holds a plain int or float, so entering a loop never copies the array
 //! - Monomorphizes over `i64` vs `f64` array element types via [`ListElem`]
 //! - Runs all index/counter arithmetic unboxed in `[i64; 32]` and array values
 //!   unboxed in `[E; 16]` with dirty-bitmask write-back so uninitialized locals
 //!   stay exact on early exit, yield, or fallback
-//! - Falls back cleanly to `FastVm` before mutating on out-of-bounds, type
-//!   mismatch, reference element, overflow, or budget exhaustion.
+//! - Falls back cleanly to `FastVm` before the op that meets an out-of-bounds
+//!   index, a hole, a type mismatch, a reference element or an overflow, and
+//!   yields on budget exhaustion; earlier writes are already in the array.
 
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use phera_value::{PhpArray, Value};
 
@@ -106,6 +110,15 @@ pub(crate) struct ListLoop {
     pub(crate) live_in_elems: Box<[u8]>,
     pub(crate) written_ints: Box<[u8]>,
     pub(crate) written_elems: Box<[u8]>,
+    /// Whether the loop stores into the array. A loop that only reads it
+    /// borrows the array as it is, shared or not: copy-on-write separation
+    /// is for writers.
+    pub(crate) writes_list: bool,
+    /// Steps (backward branches and fill stores) the previous entry ran,
+    /// which picks the element layout of the next one: see
+    /// [`run_list_loop_typed`]. Atomic only so that the compiled function
+    /// stays `Sync`; a relaxed load or store is a plain one.
+    pub(crate) last_steps: AtomicU32,
 }
 
 pub(crate) enum ListExit {
@@ -126,7 +139,10 @@ trait ListElem: Copy {
     const TAG: u8;
     const ZERO: Self;
     fn from_value(v: &Value) -> Option<Self>;
-    fn to_value(self) -> Value;
+    /// Writes `self` into a slot that holds a plain int or float, updating
+    /// the number in place when it is already an `Self`. `false` for any
+    /// other slot (a hole, a reference, a string...), which is left as is.
+    fn store(self, slot: &mut Option<Value>) -> bool;
     fn from_bits(bits: u64) -> Self;
     fn to_bits(self) -> u64;
     fn from_i32(x: i32) -> Self;
@@ -144,8 +160,13 @@ impl ListElem for i64 {
         }
     }
     #[inline(always)]
-    fn to_value(self) -> Value {
-        Value::Int(self)
+    fn store(self, slot: &mut Option<Value>) -> bool {
+        match slot {
+            Some(Value::Int(number)) => *number = self,
+            Some(value @ Value::Float(_)) => *value = Value::Int(self),
+            _ => return false,
+        }
+        true
     }
     #[inline(always)]
     fn from_bits(bits: u64) -> Self {
@@ -184,8 +205,13 @@ impl ListElem for f64 {
         }
     }
     #[inline(always)]
-    fn to_value(self) -> Value {
-        Value::Float(self)
+    fn store(self, slot: &mut Option<Value>) -> bool {
+        match slot {
+            Some(Value::Float(number)) => *number = self,
+            Some(value @ Value::Int(_)) => *value = Value::Float(self),
+            _ => return false,
+        }
+        true
     }
     #[inline(always)]
     fn from_bits(bits: u64) -> Self {
@@ -213,8 +239,8 @@ impl ListElem for f64 {
     }
 }
 
-/// Entry guard, array borrow (direct or via `Value::Reference`), unboxed flat
-/// scratch copy, monomorphized execution, and write-back for `Op::EnterListLoop`.
+/// Entry guard, array borrow (direct or via `Value::Reference`),
+/// monomorphized execution, and register write-back for `Op::EnterListLoop`.
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn try_run_list_loop(
@@ -270,26 +296,62 @@ fn run_on_array_rc(
     buf_f64: &mut Vec<f64>,
     budget: usize,
 ) -> Option<ListExit> {
-    let arr = Rc::make_mut(rc);
-    let (start, slots) = arr.list_slots_mut()?;
+    let (start, elements) = if ll.writes_list {
+        let (start, slots) = Rc::make_mut(rc).list_slots_mut()?;
+        (start, Elements::Writable(slots))
+    } else {
+        let (start, slots) = rc.list_slots()?;
+        (start, Elements::ReadOnly(slots))
+    };
     // Detect element type from first present slot.
-    let is_float = match slots.iter().find_map(Option::as_ref) {
+    let is_float = match elements.slots().iter().find_map(Option::as_ref) {
         Some(Value::Float(_)) => true,
         Some(Value::Int(_)) => false,
         _ => return None,
     };
     if is_float {
-        run_list_loop_typed::<f64>(ll, start, slots, t, v, buf_f64, budget)
+        run_list_loop_typed::<f64>(ll, start, elements, t, v, buf_f64, budget)
     } else {
-        run_list_loop_typed::<i64>(ll, start, slots, t, v, buf_i64, budget)
+        run_list_loop_typed::<i64>(ll, start, elements, t, v, buf_i64, budget)
     }
 }
+
+/// The array's slots as a list loop gets them: writable (separated from
+/// other holders first) when the loop stores into the array, else shared.
+enum Elements<'a> {
+    Writable(&'a mut [Option<Value>]),
+    ReadOnly(&'a [Option<Value>]),
+}
+
+impl Elements<'_> {
+    fn slots(&self) -> &[Option<Value>] {
+        match self {
+            Self::Writable(slots) => slots,
+            Self::ReadOnly(slots) => slots,
+        }
+    }
+}
+
+/// An entry unboxes the array into a flat `[E]` when the loop's previous
+/// entry ran at least this many steps per slot of the array (measured on
+/// 2026-11-27: a heap sort of 20,000 floats needs the unboxed layout to stay
+/// at its old cost, a binary search over a million ints is 3.6 times faster
+/// in place, and a sieve gains with either).
+///
+/// The two layouts trade differently. On the array's own slots an entry
+/// costs nothing, and each access checks the slot's type (a few
+/// instructions). Unboxing costs a pass over the array in and out, and then
+/// each access is a plain load or store. A loop that does little per entry
+/// (a binary search, one sweep over a fresh array) is cheapest in place; one
+/// that does many accesses per element (a sort) is cheapest unboxed. The
+/// previous entry of the same loop is the measure of which this one is.
+const UNBOX_STEPS_PER_SLOT: usize = 1;
 
 #[inline(never)]
 fn run_list_loop_typed<E: ListElem>(
     ll: &ListLoop,
     start: i64,
-    slots: &mut [Option<Value>],
+    elements: Elements<'_>,
     t: &mut [u8; 256],
     v: &mut [u64; 256],
     buf: &mut Vec<E>,
@@ -299,17 +361,6 @@ fn run_list_loop_typed<E: ListElem>(
         if t[ll.elem_regs[slot as usize] as usize] != E::TAG {
             return None;
         }
-    }
-
-    // Unbox `slots: [Option<Value>]` (24B/elem) ONCE into a dense raw `[E]`
-    // scratch slice (8B/elem — 3x smaller in L2 cache, zero enum checks or
-    // `is_reference()` checks in the hot loop!). Bail cleanly BEFORE mutating
-    // anything if any slot is a hole, reference, or wrong type.
-    buf.clear();
-    buf.reserve(slots.len());
-    for slot in slots.iter() {
-        let val = slot.as_ref().and_then(E::from_value)?;
-        buf.push(val);
     }
 
     let mut iv = [0i64; MAX_LIST_INT_SLOTS];
@@ -325,23 +376,44 @@ fn run_list_loop_typed<E: ListElem>(
 
     let mut dirty_int: u32 = 0;
     let mut dirty_elem: u32 = 0;
-    let exit = exec_list_ops::<E>(
-        &ll.ops,
-        &ll.fast_ips,
-        ll.fallthrough_fast_ip as usize,
-        start,
-        buf.as_mut_slice(),
-        &mut iv,
-        &mut ev,
-        &mut dirty_int,
-        &mut dirty_elem,
-        budget_start,
-    );
-
-    // Commit unboxed slice back to `slots` ONCE on exit/yield/fallback.
-    for (slot, &val) in slots.iter_mut().zip(buf.iter()) {
-        *slot = Some(val.to_value());
+    let unbox = ll.last_steps.load(Ordering::Relaxed) as usize
+        >= UNBOX_STEPS_PER_SLOT.saturating_mul(elements.slots().len())
+        && unbox_into(elements.slots(), buf);
+    macro_rules! run_on {
+        ($slots:expr) => {
+            exec_list_ops::<E, _>(
+                &ll.ops,
+                &ll.fast_ips,
+                ll.fallthrough_fast_ip as usize,
+                start,
+                $slots,
+                &mut iv,
+                &mut ev,
+                &mut dirty_int,
+                &mut dirty_elem,
+                budget_start,
+            )
+        };
     }
+    let exit = match elements {
+        Elements::Writable(slots) if unbox => {
+            let exit = run_on!(&mut Unboxed(buf.as_mut_slice()));
+            // Every slot holds an `E`, so each store updates a number in place.
+            for (slot, &value) in slots.iter_mut().zip(buf.iter()) {
+                value.store(slot);
+            }
+            exit
+        }
+        Elements::Writable(slots) => run_on!(&mut Boxed(slots)),
+        Elements::ReadOnly(_) if unbox => run_on!(&mut Unboxed(buf.as_mut_slice())),
+        Elements::ReadOnly(slots) => run_on!(&mut Shared(slots)),
+    };
+    let steps = match exit {
+        ListExit::Exit { spent, .. } | ListExit::Fallback { spent, .. } => spent,
+        ListExit::Yield { .. } => budget_start,
+    };
+    ll.last_steps
+        .store(u32::try_from(steps).unwrap_or(u32::MAX), Ordering::Relaxed);
 
     // Write back ONLY registers actually written during this invocation.
     for &slot in ll.written_ints.iter() {
@@ -364,6 +436,92 @@ fn run_list_loop_typed<E: ListElem>(
     Some(exit)
 }
 
+/// Copies `slots` into `buf` as `E`s; `false` when a slot is a hole, a
+/// reference or another type, and the loop then runs in place.
+fn unbox_into<E: ListElem>(slots: &[Option<Value>], buf: &mut Vec<E>) -> bool {
+    buf.clear();
+    buf.reserve(slots.len());
+    for slot in slots {
+        match slot.as_ref().and_then(E::from_value) {
+            Some(value) => buf.push(value),
+            None => return false,
+        }
+    }
+    true
+}
+
+/// Where a list loop finds the array's elements, by offset from the list's
+/// first key.
+trait ListSlots<E: ListElem> {
+    /// The element at `off` when it is present and an `E`.
+    fn get(&self, off: i64) -> Option<E>;
+    /// Writes `value` at `off`; `false`, changing nothing, when the slot
+    /// cannot take it without PHP semantics the loop does not have.
+    fn set(&mut self, off: i64, value: E) -> bool;
+}
+
+/// The array's own slots, read and written in place.
+struct Boxed<'a>(&'a mut [Option<Value>]);
+
+/// The slots of an array the loop only reads, which other values may share.
+struct Shared<'a>(&'a [Option<Value>]);
+
+/// An unboxed copy of the array, every element an `E`.
+struct Unboxed<'a, E>(&'a mut [E]);
+
+impl<E: ListElem> ListSlots<E> for Boxed<'_> {
+    #[inline(always)]
+    fn get(&self, off: i64) -> Option<E> {
+        let slot = self.0.get(usize::try_from(off).ok()?)?;
+        E::from_value(slot.as_ref()?)
+    }
+
+    /// Only a present int or float is replaced: no destructor runs, no
+    /// reference is written through and no hole is filled.
+    #[inline(always)]
+    fn set(&mut self, off: i64, value: E) -> bool {
+        usize::try_from(off)
+            .ok()
+            .and_then(|off| self.0.get_mut(off))
+            .is_some_and(|slot| value.store(slot))
+    }
+}
+
+impl<E: ListElem> ListSlots<E> for Shared<'_> {
+    #[inline(always)]
+    fn get(&self, off: i64) -> Option<E> {
+        let slot = self.0.get(usize::try_from(off).ok()?)?;
+        E::from_value(slot.as_ref()?)
+    }
+
+    /// Never reached: a loop with a store borrows the array writable.
+    #[inline(always)]
+    fn set(&mut self, _: i64, _: E) -> bool {
+        false
+    }
+}
+
+impl<E: ListElem> ListSlots<E> for Unboxed<'_, E> {
+    #[inline(always)]
+    fn get(&self, off: i64) -> Option<E> {
+        self.0.get(usize::try_from(off).ok()?).copied()
+    }
+
+    #[inline(always)]
+    fn set(&mut self, off: i64, value: E) -> bool {
+        match usize::try_from(off)
+            .ok()
+            .and_then(|off| self.0.get_mut(off))
+        {
+            Some(element) => {
+                *element = value;
+                true
+            }
+            None => false,
+        }
+    }
+}
+
 #[inline(always)]
 fn eval_i64_cmp(code: u8, a: i64, b: i64) -> bool {
     match code {
@@ -379,12 +537,12 @@ fn eval_i64_cmp(code: u8, a: i64, b: i64) -> bool {
 
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
-fn exec_list_ops<E: ListElem>(
+fn exec_list_ops<E: ListElem, S: ListSlots<E>>(
     ops: &[ListOp],
     fast_ips: &[u16],
     fallthrough_fast_ip: usize,
     start: i64,
-    buf: &mut [E],
+    slots: &mut S,
     iv: &mut [i64; MAX_LIST_INT_SLOTS],
     ev: &mut [E; MAX_LIST_ELEM_SLOTS],
     dirty_int: &mut u32,
@@ -394,82 +552,69 @@ fn exec_list_ops<E: ListElem>(
     let mut ip: usize = 0;
     let mut budget = budget_start.max(1);
     let len = ops.len();
-    let slots_len = buf.len();
+    // Leaves the list ops before the current one runs: FastVm executes it
+    // with full PHP semantics (bounds, holes, references, other types).
+    macro_rules! fallback {
+        () => {
+            return ListExit::Fallback {
+                fallback_fast_ip: fast_ips[ip] as usize,
+                spent: budget_start.saturating_sub(budget),
+            }
+        };
+    }
 
     while ip < len {
         let op = ops[ip];
         match op.op {
             LOp::ListGet => {
                 let off = iv[(op.b & 31) as usize].wrapping_sub(start);
-                if off < 0 || (off as usize) >= slots_len {
-                    return ListExit::Fallback {
-                        fallback_fast_ip: fast_ips[ip] as usize,
-                        spent: budget_start.saturating_sub(budget),
-                    };
-                }
+                let Some(value) = slots.get(off) else {
+                    fallback!();
+                };
                 let dst = (op.a & 15) as usize;
-                ev[dst] = buf[off as usize];
+                ev[dst] = value;
                 *dirty_elem |= 1u32 << dst;
                 ip += 1;
             }
             LOp::ListGetPlus1 => {
                 let Some(idx) = iv[(op.b & 31) as usize].checked_add(1) else {
-                    return ListExit::Fallback {
-                        fallback_fast_ip: fast_ips[ip] as usize,
-                        spent: budget_start.saturating_sub(budget),
-                    };
+                    fallback!();
                 };
-                let off = idx.wrapping_sub(start);
-                if off < 0 || (off as usize) >= slots_len {
-                    return ListExit::Fallback {
-                        fallback_fast_ip: fast_ips[ip] as usize,
-                        spent: budget_start.saturating_sub(budget),
-                    };
-                }
+                let Some(value) = slots.get(idx.wrapping_sub(start)) else {
+                    fallback!();
+                };
                 let dst = (op.a & 15) as usize;
-                ev[dst] = buf[off as usize];
+                ev[dst] = value;
                 *dirty_elem |= 1u32 << dst;
                 ip += 1;
             }
             LOp::ListSet => {
                 let off = iv[(op.a & 31) as usize].wrapping_sub(start);
-                if off < 0 || (off as usize) >= slots_len {
-                    return ListExit::Fallback {
-                        fallback_fast_ip: fast_ips[ip] as usize,
-                        spent: budget_start.saturating_sub(budget),
-                    };
+                if !slots.set(off, ev[(op.b & 15) as usize]) {
+                    fallback!();
                 }
-                buf[off as usize] = ev[(op.b & 15) as usize];
                 ip += 1;
             }
             LOp::ListCopy => {
                 let src_off = iv[(op.b & 31) as usize].wrapping_sub(start);
                 let dst_off = iv[(op.a & 31) as usize].wrapping_sub(start);
-                if src_off < 0
-                    || dst_off < 0
-                    || (src_off as usize) >= slots_len
-                    || (dst_off as usize) >= slots_len
-                {
-                    return ListExit::Fallback {
-                        fallback_fast_ip: fast_ips[ip] as usize,
-                        spent: budget_start.saturating_sub(budget),
-                    };
+                let Some(value) = slots.get(src_off) else {
+                    fallback!();
+                };
+                if !slots.set(dst_off, value) {
+                    fallback!();
                 }
-                buf[dst_off as usize] = buf[src_off as usize];
                 ip += 1;
             }
             LOp::ListCmpAdjBranch => {
                 let off = iv[(op.b & 31) as usize].wrapping_sub(start);
-                if off < 0 || (off as usize) + 1 >= slots_len {
-                    return ListExit::Fallback {
-                        fallback_fast_ip: fast_ips[ip] as usize,
-                        spent: budget_start.saturating_sub(budget),
-                    };
-                }
-                let idx = off as usize;
+                let (Some(left), Some(right)) = (slots.get(off), slots.get(off.wrapping_add(1)))
+                else {
+                    fallback!();
+                };
                 let cmp = op.a & 0x0f;
                 let when = (op.a & 0x10) != 0;
-                if E::cmp(cmp, buf[idx], buf[idx + 1]) == when {
+                if E::cmp(cmp, left, right) == when {
                     let target = op.imm as usize;
                     if (op.a & 0x80) != 0 {
                         return ListExit::Exit {
@@ -492,15 +637,12 @@ fn exec_list_ops<E: ListElem>(
             }
             LOp::ListCmpElemBranch => {
                 let off = iv[(op.c & 31) as usize].wrapping_sub(start);
-                if off < 0 || (off as usize) >= slots_len {
-                    return ListExit::Fallback {
-                        fallback_fast_ip: fast_ips[ip] as usize,
-                        spent: budget_start.saturating_sub(budget),
-                    };
-                }
+                let Some(element) = slots.get(off) else {
+                    fallback!();
+                };
                 let cmp = op.a & 0x0f;
                 let when = (op.a & 0x10) != 0;
-                if E::cmp(cmp, ev[(op.b & 15) as usize], buf[off as usize]) == when {
+                if E::cmp(cmp, ev[(op.b & 15) as usize], element) == when {
                     let target = op.imm as usize;
                     if (op.a & 0x80) != 0 {
                         return ListExit::Exit {
@@ -529,23 +671,15 @@ fn exec_list_ops<E: ListElem>(
                 let step = iv[step_slot];
                 let mut k = iv[k_slot];
                 loop {
-                    let off = k.wrapping_sub(start);
-                    if off < 0 || (off as usize) >= slots_len {
+                    if !slots.set(k.wrapping_sub(start), fill_val) {
                         iv[k_slot] = k;
                         *dirty_int |= 1u32 << k_slot;
-                        return ListExit::Fallback {
-                            fallback_fast_ip: fast_ips[ip] as usize,
-                            spent: budget_start.saturating_sub(budget),
-                        };
+                        fallback!();
                     }
-                    buf[off as usize] = fill_val;
                     let Some(next_k) = k.checked_add(step) else {
                         iv[k_slot] = k;
                         *dirty_int |= 1u32 << k_slot;
-                        return ListExit::Fallback {
-                            fallback_fast_ip: fast_ips[ip] as usize,
-                            spent: budget_start.saturating_sub(budget),
-                        };
+                        fallback!();
                     };
                     k = next_k;
                     if k > lim {
@@ -1739,7 +1873,11 @@ pub(crate) fn try_compile_list_loop(
         fast_ips.push(fip);
     }
 
+    let writes_list = lops
+        .iter()
+        .any(|op| matches!(op.op, LOp::ListSet | LOp::ListCopy | LOp::FillStep));
     Some(ListLoop {
+        writes_list,
         ops: lops.into_boxed_slice(),
         fast_ips: fast_ips.into_boxed_slice(),
         fallthrough_fast_ip: (end + 1) as u16,
@@ -1750,6 +1888,7 @@ pub(crate) fn try_compile_list_loop(
         live_in_elems: live_in_elems.into_boxed_slice(),
         written_ints: written_ints.into_boxed_slice(),
         written_elems: written_elems.into_boxed_slice(),
+        last_steps: AtomicU32::new(0),
     })
 }
 

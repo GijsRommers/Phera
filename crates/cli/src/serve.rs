@@ -567,8 +567,7 @@ impl SiteHandler {
                 .with_header("Phera-From-The-Top", from_the_top);
         }
         // In-memory `Phera\Http\Router` dispatch runs ahead of any filesystem
-        // lookup (`spawn_blocking` `site.resolve`), keeping routed APIs off the
-        // blocking thread pool completely.
+        // lookup (`site.resolve`), keeping routed APIs completely in memory.
         if self.runtime.router_handles(&request.method, &request.path) {
             let accept_encoding = if self.compress {
                 request
@@ -592,56 +591,53 @@ impl SiteHandler {
                 }
             }
         }
+        // Finding what the path names costs a `stat` or two of a file the
+        // kernel has cached, so it runs here, on the worker thread, as in
+        // nginx's event loop. Handing it to the blocking pool cost more
+        // than the lookup: a mutex shared with the pool's threads, a
+        // condition variable and two thread switches for every request.
+        // Only reading a static file's bytes goes to the pool.
+        let script = match self.site.resolve(&request.path) {
+            Resolved::Script(script) => script,
+            Resolved::File(file) => return self.answer_file(file, request).await,
+            Resolved::NotFound => return Response::text(404, "Not Found\n"),
+        };
+        let accept_encoding = if self.compress {
+            request
+                .header("accept-encoding")
+                .map(|value| String::from_utf8_lossy(value).into_owned())
+        } else {
+            None
+        };
+        let request = to_runtime(request, &self.trusted_proxies);
+        let root = self.site.document_root();
+        let response = if DEBUG {
+            self.runtime
+                .handle_debug_request(&script, root, request, time_limit)
+                .await
+        } else {
+            self.runtime.handle_request(&script, root, request).await
+        };
+        let response = from_runtime(response, &script);
+        if self.compress && response.upgrade.is_none() {
+            compress::php_response(response, accept_encoding.as_deref()).await
+        } else {
+            response
+        }
+    }
+
+    /// Answers a request for a static file of the site. Opening and reading
+    /// the file may block, so it runs on the blocking pool.
+    async fn answer_file(&self, file: std::path::PathBuf, request: Request) -> Response {
         let site = self.site.clone();
-        let compress = self.compress;
-        // Looking at the file system blocks, so it runs off the worker
-        // thread, which must stay free for other requests.
-        let found = tokio::task::spawn_blocking(move || match site.resolve(&request.path) {
-            Resolved::Script(script) => Found::Script(script, request),
-            Resolved::File(file) => {
-                let conditions = Conditions::of(&request, compress);
-                Found::Answer(static_file::answer(&site, &file, &conditions))
-            }
-            Resolved::NotFound => Found::Answer(Response::text(404, "Not Found\n")),
-        })
-        .await;
-        match found {
-            Ok(Found::Script(script, request)) => {
-                let accept_encoding = if compress {
-                    request
-                        .header("accept-encoding")
-                        .map(|value| String::from_utf8_lossy(value).into_owned())
-                } else {
-                    None
-                };
-                let request = to_runtime(request, &self.trusted_proxies);
-                let root = self.site.document_root();
-                let response = if DEBUG {
-                    self.runtime
-                        .handle_debug_request(&script, root, request, time_limit)
-                        .await
-                } else {
-                    self.runtime.handle_request(&script, root, request).await
-                };
-                let response = from_runtime(response, &script);
-                if self.compress && response.upgrade.is_none() {
-                    compress::php_response(response, accept_encoding.as_deref()).await
-                } else {
-                    response
-                }
-            }
-            Ok(Found::Answer(response)) => response,
+        let conditions = Conditions::of(&request, self.compress);
+        match tokio::task::spawn_blocking(move || static_file::answer(&site, &file, &conditions))
+            .await
+        {
+            Ok(response) => response,
             Err(_) => Response::text(500, "Internal Server Error\n"),
         }
     }
-}
-
-/// What looking up a request path on disk led to.
-enum Found {
-    /// A PHP file to run.
-    Script(std::path::PathBuf, Request),
-    /// A response that is ready: a static file, or "not found".
-    Answer(Response),
 }
 
 /// Hands a request to the runtime. When it came through a trusted proxy,

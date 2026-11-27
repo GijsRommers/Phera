@@ -361,14 +361,19 @@ impl Machine<'_> {
                     let same_function = next.frame.function == position.frame.function;
                     position = next;
                     if !same_function {
-                        if !GUARDED && self.code.facts(position.frame.function).fast_candidate {
+                        // One read of the callee's facts answers all three
+                        // questions; a Tier-2 run may end in another frame,
+                        // whose facts are read again.
+                        let mut facts = self.code.facts(position.frame.function);
+                        if !GUARDED && facts.fast_candidate {
                             match self.try_run_fast_chain(position) {
                                 Ok(after) => position = after,
                                 Err(exit) => return exit,
                             }
+                            facts = self.code.facts(position.frame.function);
                         }
-                        instructions = self.code.instructions(position.frame.function);
-                        windowed = self.windowed(position.frame);
+                        instructions = &facts.instructions;
+                        windowed = facts.registers as usize <= WINDOW;
                     }
                 }
                 Step::Slow => {
