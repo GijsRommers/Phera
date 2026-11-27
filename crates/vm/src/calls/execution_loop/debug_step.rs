@@ -107,7 +107,6 @@ impl Machine<'_> {
                     Progress::Slow
                 }
                 Step::Yield => Progress::Yield,
-                Step::FastTier => Progress::Advanced,
             },
         )
     }

@@ -107,9 +107,6 @@ impl Machine<'_> {
         if self.spend_work() {
             return Step::Yield;
         }
-        if !GUARDED && facts.fast_candidate {
-            return Step::FastTier;
-        }
         Step::Switched(Position { frame, ip: 0 })
     }
 
@@ -628,9 +625,6 @@ impl Machine<'_> {
         }
         if self.spend_work() {
             return Step::Yield;
-        }
-        if facts.fast_candidate && !self.ids.has_due() {
-            return Step::FastTier;
         }
         Step::Switched(Position { frame, ip: 0 })
     }

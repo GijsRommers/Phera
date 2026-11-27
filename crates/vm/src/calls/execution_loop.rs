@@ -91,9 +91,6 @@ enum LoopExit {
     /// This instruction needs the VM; the frame's position is published.
     Slow(Instruction),
     Yield,
-    /// A Tier-2 candidate frame was pushed; enter `FastVm` from `run_batch_loop`
-    /// without adding any Tier-2 branches or call sites inside `Machine::run`.
-    FastTier,
     /// A call or return released an object whose destructor is due; the
     /// frame that runs next is current, with its position stored.
     Destructors,
@@ -169,7 +166,6 @@ impl Vm {
         stop: usize,
         work: &mut usize,
     ) -> Result<BatchExit, NativeError> {
-        let mut try_fast = true;
         loop {
             let mut machine = Machine {
                 code: &self.code,
@@ -191,38 +187,14 @@ impl Vm {
             // `crate::destructors`). Making such an object leaves the loop,
             // so the next batch is guarded.
             let exit = if self.object_ids.has_due() {
-                try_fast = false;
                 machine.run_guarded()
             } else {
-                if try_fast
-                    && let Some(frame) = machine.stack.current().copied()
-                    && machine.code.facts(frame.function).fast_candidate
-                    && let Err(exit) = machine.try_run_fast_chain(Position {
-                        frame,
-                        ip: frame.ip(),
-                    })
-                {
-                    *work = machine.work;
-                    self.executed_instructions += machine.executed;
-                    return match exit {
-                        LoopExit::Yield => Ok(BatchExit::Yield),
-                        _ => Err(internal_error!("unexpected fast exit")),
-                    };
-                }
-                try_fast = false;
                 machine.run::<false>()
             };
             *work = machine.work;
             self.executed_instructions += machine.executed;
             let instruction = match exit {
-                LoopExit::FastTier => {
-                    try_fast = true;
-                    continue;
-                }
-                LoopExit::Slow(instruction) => {
-                    try_fast = true;
-                    instruction
-                }
+                LoopExit::Slow(instruction) => instruction,
                 LoopExit::Yield => {
                     match self.call_stack.handed_back.take() {
                         Some(HandedBack::NativeLoop(value)) => {
@@ -351,6 +323,12 @@ impl Machine<'_> {
             frame,
             ip: frame.ip(),
         };
+        if !GUARDED && self.code.facts(frame.function).fast_candidate {
+            match self.try_run_fast_chain(position) {
+                Ok(next) => position = next,
+                Err(exit) => return exit,
+            }
+        }
         let mut instructions = self.code.instructions(position.frame.function);
         // Whether the frame's registers fit a window (see
         // `registers::WINDOW`): decided when the frame is entered, not per
@@ -383,6 +361,12 @@ impl Machine<'_> {
                     let same_function = next.frame.function == position.frame.function;
                     position = next;
                     if !same_function {
+                        if !GUARDED && self.code.facts(position.frame.function).fast_candidate {
+                            match self.try_run_fast_chain(position) {
+                                Ok(after) => position = after,
+                                Err(exit) => return exit,
+                            }
+                        }
                         instructions = self.code.instructions(position.frame.function);
                         windowed = self.windowed(position.frame);
                     }
@@ -392,7 +376,6 @@ impl Machine<'_> {
                     return LoopExit::Slow(*instruction);
                 }
                 Step::Yield => return LoopExit::Yield,
-                Step::FastTier => return LoopExit::FastTier,
             }
         }
     }
@@ -599,14 +582,14 @@ impl Machine<'_> {
         self.code.facts(frame.function).registers as usize <= WINDOW
     }
 
-    /// Try running a chain of Tier-2 candidate frames from `run_batch_loop`.
+    /// Try running a chain of Tier-2 candidate frames without taking `&mut position`
+    /// so `position` stays 100% register-allocated inside `Machine::run`.
     #[cold]
     #[inline(never)]
-    fn try_run_fast_chain(&mut self, mut position: Position) -> Result<(), LoopExit> {
+    fn try_run_fast_chain(&mut self, mut position: Position) -> Result<Position, LoopExit> {
         loop {
             let Some(exit) = self.try_run_fast(position) else {
-                self.publish(position.ip);
-                return Ok(());
+                return Ok(position);
             };
             match exit {
                 crate::fast_tier::FastExit::Returned(next) => {
@@ -614,8 +597,7 @@ impl Machine<'_> {
                     if self.code.facts(next.frame.function).fast_candidate {
                         continue;
                     }
-                    self.publish(position.ip);
-                    return Ok(());
+                    return Ok(position);
                 }
                 crate::fast_tier::FastExit::Deopt {
                     position: next,
@@ -626,17 +608,17 @@ impl Machine<'_> {
                     if let Some(fn_idx) = disable_fn {
                         self.code.mark_fast_ineligible(fn_idx);
                     }
-                    self.publish(position.ip);
                     if yield_now {
                         return Err(LoopExit::Yield);
                     }
-                    return Ok(());
+                    return Ok(position);
                 }
             }
         }
     }
 
     /// Try to run the current unguarded frame on the Tier-2 compact register VM.
+    #[cold]
     #[inline(never)]
     fn try_run_fast(&mut self, position: Position) -> Option<crate::fast_tier::FastExit> {
         let frame = position.frame;
@@ -793,6 +775,7 @@ impl Machine<'_> {
 
     /// Out-of-line fast path for `foreach ($src as $k => $v) { $dst[$k] += $v; }`
     /// so `cold_step` stays compact.
+    #[cold]
     #[inline(never)]
     fn try_keyed_add_loop(
         &mut self,
@@ -866,8 +849,6 @@ pub(super) enum Step {
     Slow,
     /// A call spent the rest of the budget and published the next frame.
     Yield,
-    /// A Tier-2 candidate frame was pushed; hand off cleanly to `FastVm`.
-    FastTier,
 }
 
 /// Match `IterNextKeyed(iter, k, v, end)` at `iter_ip` followed by optional
