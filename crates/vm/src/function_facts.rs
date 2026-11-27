@@ -46,6 +46,10 @@ pub(crate) struct FunctionFacts {
     /// The declared return type's built-in types, when there is a return type.
     pub(crate) return_mask: Option<TypeMask>,
     pub(crate) shape: FunctionShape,
+    /// Whether this function has a Tier-2-clean loop or self-recursive body,
+    /// computed once at unit load time so non-candidate routes pay zero Tier-2
+    /// lookup cost.
+    pub(crate) fast_candidate: bool,
     /// The class that declares this function as a method: a method frame's
     /// class scope.
     pub(crate) class: Option<crate::classes::ClassIndex>,
@@ -119,6 +123,7 @@ impl FunctionFacts {
             parameter_masks: signature.parameter_masks,
             return_mask: signature.return_mask,
             shape: signature.shape,
+            fast_candidate: false,
             class: None,
         }
     }

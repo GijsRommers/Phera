@@ -397,6 +397,103 @@ pub(crate) fn keyed_step(
     true
 }
 
+pub(crate) enum KeyedAddStep {
+    /// Completed or made progress; advance by `spent` work units.
+    Done(usize),
+    /// Hit work budget mid-loop; yield to scheduler cleanly.
+    Yield,
+    /// Not applicable (e.g. first pass with missing keys) — run normal `keyed_step`.
+    Fallback,
+}
+
+/// Bulk keyed-foreach accumulate fast path for:
+/// `foreach ($src as $k => $v) { $dst[$k] += $v; }`.
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn keyed_add_loop_step(
+    iterator: IterId,
+    (key, value): (Reg, Reg),
+    end: Target,
+    dst_arr: Reg,
+    expr_dst: Reg,
+    clear_expr_dst: bool,
+    iter_next_ip: usize,
+    iterators: &mut crate::iterators::Iterators,
+    slots: &mut [Option<Value>],
+    ip: &mut usize,
+    budget: usize,
+) -> KeyedAddStep {
+    if dst_arr == key
+        || dst_arr == value
+        || dst_arr == expr_dst
+        || holds_reference(slots, key)
+        || holds_reference(slots, value)
+        || holds_reference(slots, expr_dst)
+    {
+        return KeyedAddStep::Fallback;
+    }
+    let Some(state) = iterators.get_mut(iterator.0) else {
+        return KeyedAddStep::Fallback;
+    };
+    if state.started || state.source.is_some() {
+        return KeyedAddStep::Fallback;
+    }
+    let Some(src_rc) = state.snapshot.clone() else {
+        return KeyedAddStep::Fallback;
+    };
+    let Some(Some(Value::Array(dst_rc))) = slots.get_mut(dst_arr.index()) else {
+        return KeyedAddStep::Fallback;
+    };
+    let outcome =
+        std::rc::Rc::make_mut(dst_rc).add_matching_map_entries_from(&src_rc, budget.max(1));
+    let write_last = |slots: &mut [Option<Value>], last_pos: usize, last_sum: i64| {
+        if let Some((element_key, val)) = src_rc.entry_at(last_pos) {
+            let element_key = match element_key {
+                ArrayKey::Int(integer) => Value::Int(integer),
+                ArrayKey::Interned(string) => Value::InternedStr(string),
+                ArrayKey::String(string) => Value::String(string.clone()),
+            };
+            let val = crate::fast::duplicate(&val.deref());
+            put(slots, value, val);
+            put(slots, key, element_key);
+        }
+        if clear_expr_dst {
+            if let Some(slot) = slots.get_mut(expr_dst.index()) {
+                *slot = None;
+            }
+        } else {
+            put(slots, expr_dst, Value::Int(last_sum));
+        }
+    };
+    match outcome {
+        phera_value::MapAddOutcome::Done { last, count } => {
+            if let Some((last_pos, last_sum)) = last {
+                write_last(slots, last_pos, last_sum);
+            }
+            state.started = true;
+            state.position = None;
+            *ip = end.index();
+            KeyedAddStep::Done(count)
+        }
+        phera_value::MapAddOutcome::Partial {
+            last: Some((last_pos, last_sum)),
+            count,
+            yielded,
+        } => {
+            write_last(slots, last_pos, last_sum);
+            state.started = true;
+            state.position = Some(last_pos);
+            *ip = iter_next_ip;
+            if yielded {
+                KeyedAddStep::Yield
+            } else {
+                KeyedAddStep::Done(count)
+            }
+        }
+        phera_value::MapAddOutcome::Partial { last: None, .. } => KeyedAddStep::Fallback,
+    }
+}
+
 /// Consume a combined entry from a by-value cursor on the ordinary path:
 /// the value, then the key.
 pub(crate) fn native_step(

@@ -17,6 +17,34 @@ pub(super) fn list_position(start: i32, key: &ArrayKey) -> Option<usize> {
 }
 
 impl PhpArray {
+    /// Direct borrowed slice access when this array uses packed `Storage::List`.
+    #[inline(always)]
+    pub fn list_slots(&self) -> Option<(i64, &[Option<Value>])> {
+        match &self.storage {
+            Storage::List(values) => Some((i64::from(self.list_start), values)),
+            Storage::Map(_) => None,
+        }
+    }
+
+    /// Direct mutable slice access when this array uses packed `Storage::List`.
+    #[inline(always)]
+    pub fn list_slots_mut(&mut self) -> Option<(i64, &mut [Option<Value>])> {
+        match &mut self.storage {
+            Storage::List(values) => Some((i64::from(self.list_start), values)),
+            Storage::Map(_) => None,
+        }
+    }
+
+    /// Direct mutable slice + dead-slot counter for fast `Storage::List` unsets.
+    #[inline(always)]
+    pub fn list_slots_mut_with_dead(&mut self) -> Option<(i64, &mut [Option<Value>], &mut u32)> {
+        let start = i64::from(self.list_start);
+        match &mut self.storage {
+            Storage::List(values) => Some((start, values, &mut self.dead)),
+            Storage::Map(_) => None,
+        }
+    }
+
     /// Position of the live slot with this key.
     #[inline]
     pub(super) fn find_pos(&self, key: &ArrayKey) -> Option<usize> {

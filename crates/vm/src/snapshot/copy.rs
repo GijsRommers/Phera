@@ -186,6 +186,7 @@ impl Vm {
                 output_writer,
                 request_callbacks,
                 registers,
+                fast_stack: None,
                 constants,
                 frame_limit: self.frame_limit,
                 status: 0,

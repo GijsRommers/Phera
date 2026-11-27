@@ -113,6 +113,7 @@ pub(super) struct Machine<'a> {
     pub(super) classes: &'a mut ClassTable,
     pub(super) stack: &'a mut CallStack,
     pub(super) registers: &'a mut Registers,
+    pub(super) fast_stack: &'a mut Option<Box<crate::fast_tier::FastStack>>,
     /// Loop rounds and calls since the last hand-over.
     work: usize,
     /// Instructions run, for `Vm::executed_instructions`.
@@ -134,9 +135,9 @@ pub(super) struct Machine<'a> {
 
 /// Where the loop is: which function, its registers, its next instruction.
 #[derive(Clone, Copy)]
-pub(super) struct Position {
-    pub(super) frame: Frame,
-    pub(super) ip: usize,
+pub(crate) struct Position {
+    pub(crate) frame: Frame,
+    pub(crate) ip: usize,
 }
 
 impl Vm {
@@ -171,6 +172,7 @@ impl Vm {
                 classes: &mut self.classes,
                 stack: &mut self.call_stack,
                 registers: &mut self.registers,
+                fast_stack: &mut self.fast_stack,
                 work: *work,
                 executed: 0,
                 stop,
@@ -321,11 +323,17 @@ impl Machine<'_> {
             frame,
             ip: frame.ip(),
         };
-        let mut instructions = self.code.instructions(frame.function);
+        if !GUARDED && self.code.facts(frame.function).fast_candidate {
+            match self.try_run_fast_chain(position) {
+                Ok(next) => position = next,
+                Err(exit) => return exit,
+            }
+        }
+        let mut instructions = self.code.instructions(position.frame.function);
         // Whether the frame's registers fit a window (see
         // `registers::WINDOW`): decided when the frame is entered, not per
         // instruction.
-        let mut windowed = self.windowed(frame);
+        let mut windowed = self.windowed(position.frame);
         loop {
             let instruction =
                 match self.run_simple::<GUARDED>(instructions, &mut position, windowed) {
@@ -353,8 +361,14 @@ impl Machine<'_> {
                     let same_function = next.frame.function == position.frame.function;
                     position = next;
                     if !same_function {
-                        instructions = self.code.instructions(next.frame.function);
-                        windowed = self.windowed(next.frame);
+                        if !GUARDED && self.code.facts(position.frame.function).fast_candidate {
+                            match self.try_run_fast_chain(position) {
+                                Ok(after) => position = after,
+                                Err(exit) => return exit,
+                            }
+                        }
+                        instructions = self.code.instructions(position.frame.function);
+                        windowed = self.windowed(position.frame);
                     }
                 }
                 Step::Slow => {
@@ -472,6 +486,12 @@ impl Machine<'_> {
                 value,
                 end,
             } if position.frame.has_extras() => {
+                if !GUARDED
+                    && let Some(step) =
+                        self.try_keyed_add_loop(iter, (key, value), end, position, &mut ip)
+                {
+                    return step;
+                }
                 let Some(extras) = self.stack.current_extras_present() else {
                     return Step::Slow;
                 };
@@ -560,6 +580,86 @@ impl Machine<'_> {
     #[inline(always)]
     fn windowed(&self, frame: Frame) -> bool {
         self.code.facts(frame.function).registers as usize <= WINDOW
+    }
+
+    /// Try running a chain of Tier-2 candidate frames without taking `&mut position`
+    /// so `position` stays 100% register-allocated inside `Machine::run`.
+    #[cold]
+    #[inline(never)]
+    fn try_run_fast_chain(&mut self, mut position: Position) -> Result<Position, LoopExit> {
+        loop {
+            let Some(exit) = self.try_run_fast(position) else {
+                return Ok(position);
+            };
+            match exit {
+                crate::fast_tier::FastExit::Returned(next) => {
+                    position = next;
+                    if self.code.facts(next.frame.function).fast_candidate {
+                        continue;
+                    }
+                    return Ok(position);
+                }
+                crate::fast_tier::FastExit::Deopt {
+                    position: next,
+                    yield_now,
+                    disable_fn,
+                } => {
+                    position = next;
+                    if let Some(fn_idx) = disable_fn {
+                        self.code.mark_fast_ineligible(fn_idx);
+                    }
+                    if yield_now {
+                        return Err(LoopExit::Yield);
+                    }
+                    return Ok(position);
+                }
+            }
+        }
+    }
+
+    /// Try to run the current unguarded frame on the Tier-2 compact register VM.
+    #[cold]
+    #[inline(never)]
+    fn try_run_fast(&mut self, position: Position) -> Option<crate::fast_tier::FastExit> {
+        let frame = position.frame;
+        if frame.has_extras()
+            || frame.passed().is_some()
+            || self.stack.has_calls_from(frame.start())
+        {
+            return None;
+        }
+        let table = self.code.ensure_fast(frame.function)?;
+        let crate::fast_tier::FastEntry::Compiled(entry_fast) =
+            table.get(frame.function.index())?
+        else {
+            return None;
+        };
+        let &fast_ip = entry_fast.bc_to_fast.get(position.ip)?;
+        if fast_ip == u16::MAX
+            || entry_fast
+                .ops
+                .get(fast_ip as usize)
+                .is_none_or(|op| op.op == crate::fast_tier::Op::Deopt)
+        {
+            return None;
+        }
+        let fast_stack = self
+            .fast_stack
+            .get_or_insert_with(|| Box::new(crate::fast_tier::FastStack::new()));
+        Some(crate::fast_tier::exec::run_fast(
+            self.code,
+            &table,
+            self.stack,
+            self.registers,
+            fast_stack,
+            position,
+            entry_fast,
+            fast_ip as usize,
+            self.stop,
+            self.frame_limit,
+            &mut self.work,
+            &mut self.executed,
+        ))
     }
 
     /// The instructions that are not simple but need only the borrowed
@@ -673,6 +773,52 @@ impl Machine<'_> {
         }
     }
 
+    /// Out-of-line fast path for `foreach ($src as $k => $v) { $dst[$k] += $v; }`
+    /// so `cold_step` stays compact.
+    #[cold]
+    #[inline(never)]
+    fn try_keyed_add_loop(
+        &mut self,
+        iter: phera_bytecode::IterId,
+        (key, value): (Reg, Reg),
+        end: Target,
+        position: Position,
+        ip: &mut usize,
+    ) -> Option<Step> {
+        let iter_ip = (*ip).checked_sub(1)?;
+        let func = self.code.function(position.frame.function);
+        let (dst_arr, expr_dst, clear_dst) = match_keyed_add_loop_fn(func, iter_ip, key, value)?;
+        let budget = YIELD_AFTER_STEPS.saturating_sub(self.work).max(1);
+        let extras = self.stack.current_extras_present()?;
+        let iterators = &mut extras.iterators;
+        let slots = self.registers.tail_mut(position.frame.base());
+        match crate::iteration::keyed_add_loop_step(
+            iter,
+            (key, value),
+            end,
+            dst_arr,
+            expr_dst,
+            clear_dst,
+            iter_ip,
+            iterators,
+            slots,
+            ip,
+            budget,
+        ) {
+            crate::iteration::KeyedAddStep::Done(spent) => {
+                self.work += spent;
+                self.executed += (spent * 3) as u64;
+                Some(Step::Done(*ip))
+            }
+            crate::iteration::KeyedAddStep::Yield => {
+                self.work = 0;
+                self.publish(*ip);
+                Some(Step::Yield)
+            }
+            crate::iteration::KeyedAddStep::Fallback => None,
+        }
+    }
+
     /// Count a loop round or a call; `true` when it is time to hand over.
     #[inline(always)]
     pub(super) fn spend_work(&mut self) -> bool {
@@ -703,6 +849,78 @@ pub(super) enum Step {
     Slow,
     /// A call spent the rest of the budget and published the next frame.
     Yield,
+}
+
+/// Match `IterNextKeyed(iter, k, v, end)` at `iter_ip` followed by optional
+/// `Move(temp, reg)` copies, `AssignOpPath(Add, dst, dst_arr[k], v)`, optional
+/// `Clear(temp)*`, and `Jump(iter_ip)`.
+pub(crate) fn match_keyed_add_loop_fn(
+    func: &phera_bytecode::Function,
+    iter_ip: usize,
+    key: Reg,
+    value: Reg,
+) -> Option<(Reg, Reg, bool)> {
+    let insts = &func.instructions;
+    let locals = func.locals.len();
+    let mut p = iter_ip + 1;
+    let mut alias_k: Option<Reg> = None;
+    let mut alias_v: Option<Reg> = None;
+    // Allow up to 4 leading `Move(temp, key|value)` copies emitted by compiler.
+    for _ in 0..4 {
+        match insts.get(p) {
+            Some(&Instruction::Move { dst, src }) if dst.index() >= locals => {
+                if src == key {
+                    alias_k = Some(dst);
+                } else if src == value {
+                    alias_v = Some(dst);
+                } else {
+                    break;
+                }
+                p += 1;
+            }
+            _ => break,
+        }
+    }
+    let Instruction::AssignOpPath {
+        op: BinaryOp::Add,
+        dst,
+        path,
+        src,
+    } = *insts.get(p)?
+    else {
+        return None;
+    };
+    if src != value && Some(src) != alias_v {
+        return None;
+    }
+    p += 1;
+    let mut clear_dst = false;
+    while let Some(&Instruction::Clear { reg }) = insts.get(p) {
+        if reg.index() < locals {
+            return None;
+        }
+        if reg == dst {
+            clear_dst = true;
+        }
+        p += 1;
+    }
+    let Some(&Instruction::Jump { target }) = insts.get(p) else {
+        return None;
+    };
+    if target.index() != iter_ip {
+        return None;
+    }
+    let path_def = func.paths.get(path.index())?;
+    let phera_bytecode::PathBase::Register(dst_arr) = path_def.base else {
+        return None;
+    };
+    let [phera_bytecode::Step::Index(idx_reg)] = path_def.steps.as_slice() else {
+        return None;
+    };
+    if *idx_reg != key && Some(*idx_reg) != alias_k {
+        return None;
+    }
+    Some((dst_arr, dst, clear_dst))
 }
 
 /// Leaves the loop for due destructors; out of line, since it is rare.

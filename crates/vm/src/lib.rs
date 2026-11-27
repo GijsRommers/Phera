@@ -94,6 +94,7 @@ mod execution_time;
 mod extract;
 mod failed_construction;
 mod fast;
+mod fast_tier;
 mod fast_values;
 mod fibers;
 mod finally;
@@ -268,6 +269,7 @@ pub struct Vm {
     output_writer: output::Output,
     request_callbacks: request_callbacks::RequestCallbacks,
     registers: calls::registers::Registers,
+    fast_stack: Option<Box<fast_tier::FastStack>>,
     constants: constant_table::ConstantTable,
     /// PHP call depth limit, independent of the native Rust stack.
     pub frame_limit: usize,
@@ -391,6 +393,7 @@ impl Vm {
             output_writer: output::Output::new(),
             request_callbacks: Default::default(),
             registers: calls::registers::Registers::new(),
+            fast_stack: None,
             constants: constant_table::ConstantTable::new(native.constants.clone()),
             frame_limit: DEFAULT_FRAME_LIMIT,
             status: 0,

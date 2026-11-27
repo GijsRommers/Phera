@@ -19,6 +19,21 @@ use crate::intern::InternedStr;
 use crate::string::PhpString;
 use crate::value::Value;
 
+/// Result of [`PhpArray::add_matching_map_entries_from`].
+pub enum MapAddOutcome {
+    /// Processed every live entry in `src`. `last` is `(last_pos, last_sum)` if non-empty.
+    Done {
+        last: Option<(usize, i64)>,
+        count: usize,
+    },
+    /// Stopped early on a missing/non-int/ref/overflowing entry or work budget.
+    Partial {
+        last: Option<(usize, i64)>,
+        count: usize,
+        yielded: bool,
+    },
+}
+
 /// The entries of an array being built by [`PhpArray::build_distinct`].
 pub struct DistinctEntries {
     storage: Vec<Entry>,
@@ -76,6 +91,113 @@ impl PhpArray {
         array.list_start = list_start;
         array.storage = storage;
         Ok(array)
+    }
+
+    /// Bulk keyed-foreach integer accumulation: for each live entry `(k, v)` of
+    /// `src` (a `Storage::Map`), adds `v` into `self[k]` when `self[k]` already
+    /// exists as an `Int` (fast-pathing matching slot indices with zero hashing
+    /// and zero key clones). Stops cleanly before any missing key, non-int,
+    /// reference, overflow, or budget limit.
+    pub fn add_matching_map_entries_from(
+        &mut self,
+        src: &PhpArray,
+        budget: usize,
+    ) -> MapAddOutcome {
+        let Storage::Map(src_map) = &src.storage else {
+            return MapAddOutcome::Partial {
+                last: None,
+                count: 0,
+                yielded: false,
+            };
+        };
+        if !matches!(self.storage, Storage::Map(_)) {
+            return MapAddOutcome::Partial {
+                last: None,
+                count: 0,
+                yielded: false,
+            };
+        }
+
+        let mut last: Option<(usize, i64)> = None;
+        let mut count: usize = 0;
+
+        for (pos, src_entry) in src_map.entries.iter().enumerate() {
+            let Some(src_val) = &src_entry.value else {
+                continue;
+            };
+            let Value::Int(rv) = *src_val else {
+                return MapAddOutcome::Partial {
+                    last,
+                    count,
+                    yielded: false,
+                };
+            };
+
+            // Fast path: aligned insertion order (`dst.entries[pos].key == src.entries[pos].key`)
+            // skips hashing, probing, and key cloning completely!
+            let aligned_res = if let Storage::Map(dst_map) = &mut self.storage
+                && let Some(dst_entry) = dst_map.entries.get_mut(pos)
+                && dst_entry.key == src_entry.key
+            {
+                match &mut dst_entry.value {
+                    Some(Value::Int(lv)) => match lv.checked_add(rv) {
+                        Some(sum) => {
+                            *lv = sum;
+                            Some(Some(sum))
+                        }
+                        None => Some(None),
+                    },
+                    _ => Some(None),
+                }
+            } else {
+                None
+            };
+
+            let sum = match aligned_res {
+                Some(Some(sum)) => sum,
+                Some(None) => {
+                    return MapAddOutcome::Partial {
+                        last,
+                        count,
+                        yielded: false,
+                    };
+                }
+                None => match self.get_mut(&src_entry.key) {
+                    Some(Value::Int(lv)) => match lv.checked_add(rv) {
+                        Some(sum) => {
+                            *lv = sum;
+                            sum
+                        }
+                        None => {
+                            return MapAddOutcome::Partial {
+                                last,
+                                count,
+                                yielded: false,
+                            };
+                        }
+                    },
+                    _ => {
+                        return MapAddOutcome::Partial {
+                            last,
+                            count,
+                            yielded: false,
+                        };
+                    }
+                },
+            };
+
+            last = Some((pos, sum));
+            count += 1;
+            if count >= budget {
+                return MapAddOutcome::Partial {
+                    last,
+                    count,
+                    yielded: true,
+                };
+            }
+        }
+
+        MapAddOutcome::Done { last, count }
     }
 
     /// Builds an ordered array from entries whose keys are already distinct,

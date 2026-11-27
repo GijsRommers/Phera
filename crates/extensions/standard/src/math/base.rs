@@ -33,7 +33,7 @@ const DECHEX: FunctionEntry =
 
 fn dechex(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let number = args::int(arguments, 0).unwrap_or_default();
-    Ok(Value::from(integer_digits(number as u64, 16)))
+    Ok(integer_digits_value(number as u64, 16))
 }
 
 /// `decbin(int $num): string`
@@ -46,7 +46,7 @@ const DECBIN: FunctionEntry =
 
 fn decbin(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let number = args::int(arguments, 0).unwrap_or_default();
-    Ok(Value::from(integer_digits(number as u64, 2)))
+    Ok(integer_digits_value(number as u64, 2))
 }
 
 /// `decoct(int $num): string`
@@ -59,7 +59,7 @@ const DECOCT: FunctionEntry =
 
 fn decoct(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let number = args::int(arguments, 0).unwrap_or_default();
-    Ok(Value::from(integer_digits(number as u64, 8)))
+    Ok(integer_digits_value(number as u64, 8))
 }
 
 /// `hexdec(string $hex_string): int|float`, a float once the number passes
@@ -151,17 +151,52 @@ fn fpow(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
 }
 
 /// Signed inputs are reinterpreted as unsigned for the dec* functions.
-fn integer_digits(mut number: u64, base: u64) -> String {
-    let mut result = Vec::new();
-    loop {
-        result.push(DIGITS[(number % base) as usize]);
-        number /= base;
-        if number == 0 {
-            break;
-        }
+#[inline]
+fn integer_digits_value(mut number: u64, base: u64) -> Value {
+    let mut buf = [0u8; 64];
+    let mut pos = buf.len();
+    match base {
+        16 => loop {
+            pos -= 1;
+            buf[pos] = DIGITS[(number & 15) as usize];
+            number >>= 4;
+            if number == 0 {
+                break;
+            }
+        },
+        8 => loop {
+            pos -= 1;
+            buf[pos] = DIGITS[(number & 7) as usize];
+            number >>= 3;
+            if number == 0 {
+                break;
+            }
+        },
+        2 => loop {
+            pos -= 1;
+            buf[pos] = b'0' + (number & 1) as u8;
+            number >>= 1;
+            if number == 0 {
+                break;
+            }
+        },
+        _ => loop {
+            pos -= 1;
+            buf[pos] = DIGITS[(number % base) as usize];
+            number /= base;
+            if number == 0 {
+                break;
+            }
+        },
     }
-    result.reverse();
-    result.into_iter().map(char::from).collect()
+    Value::from(buf[pos..].to_vec())
+}
+
+fn integer_digits(number: u64, base: u64) -> String {
+    match integer_digits_value(number, base) {
+        Value::String(s) => s.to_string_lossy(),
+        _ => unreachable!(),
+    }
 }
 
 /// Invalid characters are skipped but cause one deprecation per conversion.

@@ -99,6 +99,10 @@ pub(crate) struct CodeTable {
     trait_method_names: std::rc::Rc<Vec<(u32, std::rc::Rc<str>)>>,
     /// While a class links: the trait methods composed into it.
     imports: Option<Vec<crate::classes::worker_classes::Import>>,
+    /// Lazily lowered Tier-2 compact functions indexed by `FunctionIndex`.
+    fast_tier: std::cell::RefCell<Vec<crate::fast_tier::FastEntry>>,
+    /// Guard so HTTP forks/rollbacks never touch `fast_tier.borrow()`.
+    has_fast_tier: std::cell::Cell<bool>,
 }
 
 impl Default for CodeTable {
@@ -126,6 +130,8 @@ impl CodeTable {
             base_sites: None,
             trait_method_names: Default::default(),
             imports: None,
+            fast_tier: std::cell::RefCell::new(Vec::new()),
+            has_fast_tier: std::cell::Cell::new(false),
         }
     }
 
@@ -235,6 +241,12 @@ impl CodeTable {
         if self.functions.len() > functions_len {
             self.functions.truncate(functions_len);
         }
+        if self.has_fast_tier.get() {
+            let mut fast = self.fast_tier.borrow_mut();
+            if fast.len() > functions_len {
+                fast.truncate(functions_len);
+            }
+        }
         if self.trait_method_names.len() != trait_names.len() {
             self.trait_method_names = trait_names.clone();
         }
@@ -260,6 +272,8 @@ impl CodeTable {
             base_sites: None,
             trait_method_names: Default::default(),
             imports: None,
+            fast_tier: std::cell::RefCell::new(Vec::new()),
+            has_fast_tier: std::cell::Cell::new(false),
         }
     }
 
@@ -278,17 +292,27 @@ impl CodeTable {
             self.slots[id] = index.0 + 1;
         }
         let count = 1 + unit.functions.len() as u32;
-        let first = FunctionIndex(self.worker.number(unit, count, self.own_leases()));
+        let (first_num, fast_candidates) =
+            self.worker.number_with_fast(unit, count, self.own_leases());
+        let first = FunctionIndex(first_num);
         let mut facts = Vec::with_capacity(count as usize);
         let (name_keys, prop_keys, symbol_keys, class_keys) = if let Some(metadata) = &unit.metadata
         {
+            let has_fast = !fast_candidates.is_none();
             facts.extend(metadata.functions.iter().cloned().enumerate().map(
                 |(offset, signature)| {
                     let local = offset.checked_sub(1).map(|local| local as u32);
-                    let instructions = body(unit, local.map(|local| local as usize))
-                        .instructions
-                        .clone();
-                    FunctionFacts::bind((index, first, local), signature, instructions)
+                    let mut entry = FunctionFacts::bind(
+                        (index, first, local),
+                        signature,
+                        body(unit, local.map(|local| local as usize))
+                            .instructions
+                            .clone(),
+                    );
+                    if has_fast {
+                        entry.fast_candidate = fast_candidates.get(offset);
+                    }
+                    entry
                 },
             ));
             (
@@ -301,11 +325,13 @@ impl CodeTable {
             let bodies = std::iter::once(&unit.main).chain(&unit.functions);
             facts.extend(bodies.enumerate().map(|(offset, body)| {
                 let local = offset.checked_sub(1).map(|local| local as u32);
-                FunctionFacts::bind(
+                let mut entry = FunctionFacts::bind(
                     (index, first, local),
                     FunctionSignature::new(body, &unit.types),
                     body.instructions.clone(),
-                )
+                );
+                entry.fast_candidate = crate::fast_tier::lower::is_fast_candidate(body, local);
+                entry
             }));
             let names: Vec<String> = unit
                 .names
@@ -626,6 +652,90 @@ impl CodeTable {
     pub(crate) fn instructions(&self, function: FunctionIndex) -> &[Instruction] {
         &self.facts(function).instructions
     }
+
+    /// Borrow the Tier-2 compiled function table, lazily lowering `function`
+    /// (and its direct callees) on first encounter. Returns `None` if `function`
+    /// is ineligible for Tier 2.
+    pub(crate) fn ensure_fast(
+        &self,
+        function: FunctionIndex,
+    ) -> Option<std::cell::Ref<'_, [crate::fast_tier::FastEntry]>> {
+        use crate::fast_tier::FastEntry;
+        let idx = function.index();
+        {
+            let table = self.fast_tier.borrow();
+            match table.get(idx) {
+                Some(FastEntry::Compiled(_)) => {
+                    return Some(std::cell::Ref::map(table, Vec::as_slice));
+                }
+                Some(FastEntry::Ineligible) => return None,
+                _ => {}
+            }
+        }
+        self.compile_fast_transitive(function);
+        let table = self.fast_tier.borrow();
+        if matches!(table.get(idx), Some(FastEntry::Compiled(_))) {
+            Some(std::cell::Ref::map(table, Vec::as_slice))
+        } else {
+            None
+        }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn compile_fast_transitive(&self, root: FunctionIndex) {
+        use crate::fast_tier::{FastEntry, lower::lower_function};
+        let mut queue = std::collections::VecDeque::new();
+        queue.push_back((root, true));
+        while let Some((func_idx, require_hot)) = queue.pop_front() {
+            let idx = func_idx.index();
+            if idx >= self.functions.len() || self.functions[idx].unit.0 == u32::MAX {
+                continue;
+            }
+            {
+                let table = self.fast_tier.borrow();
+                if matches!(
+                    table.get(idx),
+                    Some(FastEntry::Compiled(_) | FastEntry::Ineligible)
+                ) {
+                    continue;
+                }
+            }
+            let lowered = lower_function(self, func_idx, require_hot);
+            let mut table = self.fast_tier.borrow_mut();
+            if table.len() <= idx {
+                table.resize(idx + 1, FastEntry::Unchecked);
+            }
+            self.has_fast_tier.set(true);
+            match lowered {
+                Some((fast, callees)) => {
+                    table[idx] = FastEntry::Compiled(fast);
+                    drop(table);
+                    for callee in callees {
+                        queue.push_back((callee, false));
+                    }
+                }
+                None => {
+                    table[idx] = FastEntry::Ineligible;
+                }
+            }
+        }
+    }
+
+    /// Permanently disable Tier-2 entry for a function that repeatedly hits
+    /// runtime type deopts (e.g. `SplFixedArray` or string-keyed maps).
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn mark_fast_ineligible(&self, function: FunctionIndex) {
+        use crate::fast_tier::FastEntry;
+        let idx = function.index();
+        let mut table = self.fast_tier.borrow_mut();
+        if table.len() <= idx {
+            table.resize(idx + 1, FastEntry::Unchecked);
+        }
+        table[idx] = FastEntry::Ineligible;
+        self.has_fast_tier.set(true);
+    }
 }
 
 /// Function `local` of a file, or its top-level code for `None`.
@@ -722,6 +832,12 @@ impl crate::snapshot::ForkCopy for CodeTable {
             },
             trait_method_names: self.trait_method_names.clone(),
             imports: None,
+            fast_tier: std::cell::RefCell::new(if self.has_fast_tier.get() {
+                self.fast_tier.borrow().clone()
+            } else {
+                Vec::new()
+            }),
+            has_fast_tier: std::cell::Cell::new(self.has_fast_tier.get()),
         }
     }
 }
