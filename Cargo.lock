@@ -2918,6 +2918,7 @@ dependencies = [
  "pcre2",
  "phera-ast",
  "phera-bytecode",
+ "phera-compiler",
  "phera-lexer",
  "phera-parser",
  "phera-source",
