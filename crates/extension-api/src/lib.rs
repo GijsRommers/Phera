@@ -54,7 +54,7 @@ pub use object_handlers::{
 };
 pub use property_view_request::{PropertyViewContinuation, PropertyViewRequest};
 pub use registry::{BundledSource, ConstantValue, Registry, ResourceFork, folded_name};
-pub use state::{ProcessCancellation, RequestState, StateFork, copy_state, fresh_state};
+pub use state::{ImageSeal, ProcessCancellation, RequestState, StateFork, copy_state, fresh_state};
 pub use working_directory::WorkingDirectory;
 
 /// The iconv errors that PHP reports differently.
