@@ -15,6 +15,9 @@ pub(crate) struct Site {
     front_controller: Option<PathBuf>,
     /// True when `phera serve` was pointed directly at a single `.php` file.
     single_script: bool,
+    /// Optional AOT image so scripts stored inside the image resolve even when
+    /// PHP source files have been stripped from disk.
+    image: Option<std::sync::Arc<phera_runtime::AotImage>>,
 }
 
 /// What a request path leads to.
@@ -38,6 +41,7 @@ impl Site {
                 front_controller: index.is_file().then_some(index),
                 document_root: path,
                 single_script: false,
+                image: None,
             })
         } else {
             let document_root = path
@@ -49,19 +53,97 @@ impl Site {
                 excluded: Vec::new(),
                 front_controller: Some(path),
                 single_script: true,
+                image: None,
             })
         }
     }
 
+    /// Opens a virtual site backed by an AOT image when the target path may not
+    /// exist on disk (e.g., strict stripped container deployments).
+    pub(crate) fn open_with_image(
+        path: &Path,
+        image: std::sync::Arc<phera_runtime::AotImage>,
+    ) -> io::Result<Site> {
+        let mut site = match Self::open(path) {
+            Ok(site) => site,
+            Err(_) => {
+                let root = PathBuf::from(&image.manifest().project_root);
+                let mut front_controller = None;
+                let mut single_script = false;
+                let doc_root = if path == Path::new(".") {
+                    // Prefer a conventional web front controller (`public/index.php` or `index.php`),
+                    // never a CLI entry such as `bin/console` or `artisan`.
+                    let web_entry = image
+                        .find_relative("public/index.php")
+                        .or_else(|| image.find_relative("index.php"))
+                        .filter(|entry| entry.unit_web.is_some());
+                    if let Some(entry) = web_entry {
+                        let fc = PathBuf::from(&entry.canonical_path);
+                        let dir = fc
+                            .parent()
+                            .map(Path::to_path_buf)
+                            .unwrap_or_else(|| root.clone());
+                        front_controller = Some(fc);
+                        dir
+                    } else {
+                        root.clone()
+                    }
+                } else {
+                    let target = if path.is_absolute() {
+                        path.to_path_buf()
+                    } else {
+                        root.join(path)
+                    };
+                    if is_script(&target)
+                        && let Some(entry) = image
+                            .find_exact_canonical(&target)
+                            .filter(|entry| entry.unit_web.is_some())
+                    {
+                        let fc = PathBuf::from(&entry.canonical_path);
+                        let dir = fc
+                            .parent()
+                            .map(Path::to_path_buf)
+                            .unwrap_or_else(|| root.clone());
+                        front_controller = Some(fc);
+                        single_script = true;
+                        dir
+                    } else {
+                        target
+                    }
+                };
+                Site {
+                    document_root: doc_root,
+                    excluded: Vec::new(),
+                    front_controller,
+                    single_script,
+                    image: None,
+                }
+            }
+        };
+        if site.front_controller.is_none() {
+            let index = site.document_root.join("index.php");
+            if let Some(entry) = image
+                .find_exact_canonical(&index)
+                .filter(|entry| entry.unit_web.is_some())
+            {
+                site.front_controller = Some(PathBuf::from(&entry.canonical_path));
+            }
+        }
+        site.image = Some(image);
+        Ok(site)
+    }
+
     pub(crate) fn exclude_files(&mut self, paths: Vec<PathBuf>) {
         self.excluded = paths;
-        if self
-            .front_controller
-            .as_ref()
-            .and_then(|p| p.canonicalize().ok())
-            .is_some_and(|p| self.excluded.contains(&p))
-        {
-            self.front_controller = None;
+        if let Some(fc) = &self.front_controller {
+            let excluded = self.excluded.contains(fc)
+                || fc
+                    .canonicalize()
+                    .ok()
+                    .is_some_and(|p| self.excluded.contains(&p));
+            if excluded {
+                self.front_controller = None;
+            }
         }
     }
 
@@ -94,6 +176,30 @@ impl Site {
             return Resolved::NotFound;
         };
         let mut candidate = self.document_root.join(relative);
+        if let Some(image) = &self.image {
+            if is_script(&candidate)
+                && let Some(entry) = image
+                    .find_exact_canonical(&candidate)
+                    .filter(|entry| entry.unit_web.is_some())
+            {
+                let resolved = PathBuf::from(&entry.canonical_path);
+                if self.is_allowed_image_script(&resolved) {
+                    return Resolved::Script(resolved);
+                }
+                return Resolved::NotFound;
+            }
+            let dir_index = candidate.join("index.php");
+            if let Some(entry) = image
+                .find_exact_canonical(&dir_index)
+                .filter(|entry| entry.unit_web.is_some())
+            {
+                let resolved = PathBuf::from(&entry.canonical_path);
+                if self.is_allowed_image_script(&resolved) {
+                    return Resolved::Script(resolved);
+                }
+                return Resolved::NotFound;
+            }
+        }
         match candidate.metadata() {
             Ok(metadata) if metadata.is_dir() => candidate.push("index.php"),
             Err(error) if error.kind() == io::ErrorKind::NotFound => return fallback(),
@@ -104,7 +210,7 @@ impl Site {
         let Ok(file) = candidate.canonicalize() else {
             return fallback();
         };
-        if self.excluded.contains(&file) {
+        if self.excluded.contains(&file) || is_image_file(&file) {
             return Resolved::NotFound;
         }
         if !file.starts_with(&self.document_root) || !file.is_file() {
@@ -117,14 +223,37 @@ impl Site {
         }
     }
 
+    /// Verifies that an image-resolved script stays strictly inside
+    /// `document_root`, is not excluded, and traverses no hidden or backslash
+    /// path components.
+    fn is_allowed_image_script(&self, path: &Path) -> bool {
+        if self.excluded.iter().any(|excluded| excluded == path)
+            || !path.starts_with(&self.document_root)
+        {
+            return false;
+        }
+        let Ok(rel) = path.strip_prefix(&self.document_root) else {
+            return false;
+        };
+        rel.components().all(|component| match component {
+            Component::Normal(name) => {
+                let s = name.to_string_lossy();
+                !s.starts_with('.') && !s.contains('\\')
+            }
+            _ => false,
+        })
+    }
+
     /// The real path of `candidate` when it is a file this site may send as
-    /// it is: inside the document root, not excluded, and not a script.
+    /// it is: inside the document root, not excluded, not a script, and not a
+    /// `.phb` AOT image.
     pub(crate) fn plain_file(&self, candidate: &Path) -> Option<PathBuf> {
         let file = candidate.canonicalize().ok()?;
         let allowed = file.starts_with(&self.document_root)
             && !self.excluded.contains(&file)
             && file.is_file()
-            && !is_script(&file);
+            && !is_script(&file)
+            && !is_image_file(&file);
         allowed.then_some(file)
     }
 }
@@ -137,6 +266,13 @@ fn is_script(file: &Path) -> bool {
         .is_some_and(|extension| extension.eq_ignore_ascii_case("php"))
 }
 
+/// `.phb` AOT images contain compiled bytecode and every string literal of the
+/// application; never serve them as downloadable static files.
+fn is_image_file(file: &Path) -> bool {
+    file.extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("phb"))
+}
+
 /// Turns `/css/site.css` into `css/site.css`. Returns `None` for a path that
 /// must not be served: one that climbs out with `..`, one that names a hidden
 /// file such as `.env` or `.git/config`, or one that is not valid text.
@@ -145,7 +281,11 @@ fn safe_relative_path(request_path: &str) -> Option<PathBuf> {
     let mut relative = PathBuf::new();
     for component in Path::new(decoded.trim_start_matches('/')).components() {
         match component {
-            Component::Normal(name) if !name.to_string_lossy().starts_with('.') => {
+            Component::Normal(name) => {
+                let s = name.to_string_lossy();
+                if s.starts_with('.') || s.contains('\\') {
+                    return None;
+                }
                 relative.push(name);
             }
             Component::CurDir => {}

@@ -14,6 +14,13 @@ impl Vm {
         autoload: bool,
         arguments: &[Value],
     ) -> NativeResult {
+        if self
+            .state
+            .get::<phera_extension_api::ImageSeal>()
+            .is_some_and(|seal| seal.forbid_class_alias)
+        {
+            return Err(self.sealed_class_alias_error());
+        }
         let class = if autoload {
             self.lookup_class(name).await?
         } else {
@@ -97,5 +104,16 @@ impl Vm {
         self.classes
             .get(name)
             .is_some_and(|target| class.is_a(&target.name))
+    }
+
+    #[cold]
+    fn sealed_class_alias_error(&self) -> phera_extension_api::NativeError {
+        const SEALED: &str = "Phera\\SealedImageException";
+        let message = "class_alias() is disabled in strict AOT image mode";
+        if self.classes.get_ref(SEALED).is_some() {
+            phera_extension_api::NativeError::throw(SEALED, message)
+        } else {
+            phera_extension_api::NativeError::error(message)
+        }
     }
 }

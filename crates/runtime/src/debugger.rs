@@ -14,6 +14,10 @@ impl Runtime {
             Vm::register_debugger(Arc::make_mut(&mut self.web_registry));
             self.cache = CodeCache::new(self.registry.clone(), FileMode::Cli);
             self.web_cache = CodeCache::new(self.web_registry.clone(), FileMode::Web);
+            if let Some(image) = &self.image {
+                self.cache = self.cache.with_image(image.clone());
+                self.web_cache = self.web_cache.with_image(image.clone());
+            }
         }
         self.debug = Some(Arc::new(debug));
         self

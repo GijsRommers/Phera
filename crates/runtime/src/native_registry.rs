@@ -43,6 +43,14 @@ fn register_common(registry: &mut Registry) {
         parent: Some("RuntimeException"),
         ..phera_extension_api::ClassEntry::class("Phera\\SnapshotException")
     });
+    // Thrown in strict AOT image mode when a forbidden dynamic feature runs.
+    registry.class(phera_extension_api::ClassEntry {
+        parent: Some("RuntimeException"),
+        ..phera_extension_api::ClassEntry::class("Phera\\SealedImageException")
+    });
+    registry.fork_state::<phera_extension_api::ImageSeal>(
+        phera_extension_api::copy_state::<phera_extension_api::ImageSeal>,
+    );
     registry.load(&phera_ext_standard::Standard);
     registry.load(&phera_ext_tokenizer::Tokenizer);
     registry.load(&phera_ext_streams::Streams);

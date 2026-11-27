@@ -17,6 +17,7 @@ mod error;
 mod extension_introspection_tests;
 mod http;
 mod http_server;
+pub mod image;
 #[cfg(test)]
 mod ini_tests;
 #[cfg(test)]
@@ -51,6 +52,7 @@ pub use boot::BootReport;
 pub use error::RuntimeError;
 pub use http::{HttpRequest, HttpResponse, web_output::WebOutput};
 pub use http_server::{PendingServe, RouteBootReport, RouteDispatch};
+pub use phera_aot::{AotImage, ImageTarget};
 pub use phera_ext_http::ResponseHead;
 pub use phera_extension_api::web_log::flush as flush_web_log;
 pub use phera_extension_api::websocket::{WebSocketEvent, WebSocketEventOutcome, WebSocketSink};
@@ -100,6 +102,8 @@ pub struct Runtime {
     /// Maximum number of active request VMs running concurrently on one worker
     /// thread (`None` means unbounded).
     max_concurrent_requests_per_worker: Option<usize>,
+    /// Optional pre-compiled `.phb` AOT image backing this runtime.
+    image: Option<Arc<phera_aot::AotImage>>,
 }
 
 /// A web worker links the process's native definitions once on its own
@@ -264,7 +268,25 @@ impl Runtime {
             entry_scripts: Arc::default(),
             websocket_sink: None,
             max_concurrent_requests_per_worker: default_max_concurrent_requests_per_worker(),
+            image: None,
         }
+    }
+
+    /// Serves and runs pre-compiled bytecode from `image` without re-parsing
+    /// or re-compiling files included in the image.
+    pub fn with_image(mut self, image: Arc<phera_aot::AotImage>) -> Self {
+        if image.mode() == phera_bytecode::facts::BuildMode::Strict {
+            self.include_policy.validate_timestamps = false;
+        }
+        self.cache = self.cache.with_image(image.clone());
+        self.web_cache = self.web_cache.with_image(image.clone());
+        self.image = Some(image);
+        self
+    }
+
+    /// Returns the attached AOT image, if any.
+    pub fn image(&self) -> Option<&Arc<phera_aot::AotImage>> {
+        self.image.as_ref()
     }
 
     /// Attaches the WebSocket hub used by `Phera\WebSocket\*`.
@@ -787,6 +809,13 @@ impl Runtime {
             vm.set_startup_ini("opcache.validate_timestamps", "1");
             vm.set_startup_ini("opcache.revalidate_freq", "0");
         }
+        if self
+            .image
+            .as_ref()
+            .is_some_and(|image| image.mode() == phera_bytecode::facts::BuildMode::Strict)
+        {
+            vm.set_startup_ini("opcache.validate_timestamps", "0");
+        }
         // A script's writes copy the inherited array before changing it.
         phera_ext_filter::capture_environment(vm.state_mut(), &environment);
         vm.set_global("_ENV", Value::Array(environment));
@@ -794,6 +823,16 @@ impl Runtime {
             RequestEnvironment::new(self.environment.clone());
         if matches!(sapi, Sapi::Cli) {
             vm.set_local_loader(Rc::new(self.cache.clone()));
+        }
+        if let Some(image) = &self.image
+            && (!image.allows_eval() || !image.allows_class_alias())
+        {
+            *vm.state_mut()
+                .get_or_default::<phera_extension_api::ImageSeal>() =
+                phera_extension_api::ImageSeal {
+                    forbid_eval: !image.allows_eval(),
+                    forbid_class_alias: !image.allows_class_alias(),
+                };
         }
         vm
     }

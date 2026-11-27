@@ -17,7 +17,7 @@ mod web_output;
 
 use std::future::Future;
 use std::net::SocketAddr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::process::ExitCode;
 use std::rc::Rc;
@@ -39,14 +39,64 @@ use site::{Resolved, Site};
 use static_file::Conditions;
 
 pub(crate) fn serve(options: ServeOptions) -> ExitCode {
-    let mut site = match Site::open(&options.path) {
-        Ok(site) => site,
-        Err(error) => {
-            eprintln!("Cannot serve {}: {error}", options.path.display());
-            return ExitCode::FAILURE;
+    let image = if let Some(image_path) = &options.image {
+        if options.dev {
+            eprintln!(
+                "phera serve: --dev ignores --image {} and compiles from source",
+                image_path.display()
+            );
+            None
+        } else {
+            match phera_runtime::image::open_image(image_path) {
+                Ok(image) => {
+                    if image.mode() == phera_bytecode::facts::BuildMode::Strict
+                        && !image.manifest().has_web
+                    {
+                        eprintln!(
+                            "Image {} has no web units; rebuild with `phera build --target web` or `--target both`.",
+                            image_path.display()
+                        );
+                        return ExitCode::FAILURE;
+                    }
+                    Some(image)
+                }
+                Err(error) => {
+                    eprintln!("Cannot open image {}: {error}", image_path.display());
+                    return ExitCode::FAILURE;
+                }
+            }
         }
+    } else {
+        None
     };
-    let project = config::project_root(site.document_root()).to_path_buf();
+
+    let mut site = match &image {
+        Some(image) => match Site::open_with_image(&options.path, image.clone()) {
+            Ok(site) => site,
+            Err(error) => {
+                eprintln!("Cannot serve {}: {error}", options.path.display());
+                return ExitCode::FAILURE;
+            }
+        },
+        None => match Site::open(&options.path) {
+            Ok(site) => site,
+            Err(error) => {
+                eprintln!("Cannot serve {}: {error}", options.path.display());
+                return ExitCode::FAILURE;
+            }
+        },
+    };
+    let project = match &image {
+        Some(image) => {
+            let detected = config::project_root(site.document_root()).to_path_buf();
+            if let Err(error) = image.verify_serve_root(site.document_root(), &detected) {
+                eprintln!("{error}");
+                return ExitCode::FAILURE;
+            }
+            PathBuf::from(&image.manifest().project_root)
+        }
+        None => config::project_root(site.document_root()).to_path_buf(),
+    };
     let settings = match config::read(&project) {
         Ok(settings) => settings,
         Err(error) => {
@@ -65,7 +115,14 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
         }
     };
     loaded.paths.extend(settings.path);
-    let adapter = Adapter::detect(&site, &mut loaded.environment);
+    if let Some(image_path) = &options.image {
+        loaded.paths.push(
+            image_path
+                .canonicalize()
+                .unwrap_or_else(|_| image_path.clone()),
+        );
+    }
+    let adapter = Adapter::detect(&site, image.as_deref(), &mut loaded.environment);
     if !options.service_warmup {
         loaded.environment.insert(
             phera_runtime::adapters::SERVICE_WARMUP_VARIABLE.to_vec(),
@@ -93,8 +150,18 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
                 return ExitCode::FAILURE;
             }
             Err(error) => {
-                eprintln!("Cannot load routes from {}: {error}", path.display());
-                return ExitCode::FAILURE;
+                let from_image = image.as_ref().and_then(|img| {
+                    img.find_canonical(&path)
+                        .or_else(|| path.to_str().and_then(|rel| img.find_relative(rel)))
+                        .filter(|entry| entry.unit_web.is_some())
+                        .map(|entry| PathBuf::from(&entry.canonical_path))
+                });
+                if let Some(canonical) = from_image {
+                    Some(canonical)
+                } else {
+                    eprintln!("Cannot load routes from {}: {error}", path.display());
+                    return ExitCode::FAILURE;
+                }
             }
         },
         None => None,
@@ -149,6 +216,15 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
         }
     };
     if let Some(debug) = &mut debug {
+        if image
+            .as_ref()
+            .is_some_and(|img| img.mode() == phera_bytecode::facts::BuildMode::Strict)
+        {
+            eprintln!(
+                "Cannot enable PHP step debugging with a strict AOT image (use a hybrid image or omit --image)."
+            );
+            return ExitCode::FAILURE;
+        }
         debug.boot = options.debug_boot;
         if !listen.ip().is_loopback() && !options.allow_remote_debug {
             eprintln!("Debugging on a non-loopback address requires --allow-remote-debug");
@@ -188,6 +264,9 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
         .without_web_processes(options.no_process)
         .without_class_warmup(!options.class_warmup)
         .with_websocket_sink(Arc::new(HubSink(ws_hub.clone())));
+    if let Some(image) = &image {
+        runtime = runtime.with_image(image.clone());
+    }
     if let Some(debug) = debug {
         runtime = runtime.with_debug(debug);
     }
@@ -197,7 +276,21 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
             phera_runtime::adapters::LARAVEL_ENTRY,
         );
     }
-    let preload = if options.preload || settings.preload {
+    let preload = if let Some(image) = &image {
+        format!(
+            ", image {} ({} files, {} mode)",
+            options
+                .image
+                .as_deref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default(),
+            image.files().len(),
+            match image.mode() {
+                phera_bytecode::facts::BuildMode::Hybrid => "hybrid",
+                phera_bytecode::facts::BuildMode::Strict => "strict",
+            }
+        )
+    } else if options.preload || settings.preload {
         match runtime.preload_composer(&project) {
             Ok(summary) => {
                 format!(
@@ -261,14 +354,25 @@ enum Adapter {
 impl Adapter {
     /// The adapter for the site, setting `APP_RUNTIME` for a symfony/runtime
     /// application that has not chosen a runtime itself.
-    fn detect(site: &Site, environment: &mut phera_dotenv::Environment) -> Adapter {
+    fn detect(
+        site: &Site,
+        image: Option<&phera_runtime::AotImage>,
+        environment: &mut phera_dotenv::Environment,
+    ) -> Adapter {
         let root = site.document_root();
         let front_controller = site.front_controller();
-        if front_controller.is_some_and(|script| script == root.join("index.php"))
-            && phera_runtime::adapters::is_laravel(root)
-        {
+        let image_framework = image.and_then(|img| img.manifest().framework.as_deref());
+        let is_index_fc = front_controller.is_some_and(|script| script == root.join("index.php"));
+        let image_laravel = image.is_some_and(|img| {
+            img.manifest().framework.as_deref() == Some("laravel")
+                && root == Path::new(&img.manifest().project_root).join("public")
+        });
+        if is_index_fc && (phera_runtime::adapters::is_laravel(root) || image_laravel) {
             Adapter::Laravel
-        } else if phera_runtime::adapters::uses_symfony_runtime(root)
+        } else if (phera_runtime::adapters::uses_symfony_runtime(root)
+            || (image_framework == Some("symfony")
+                && image
+                    .is_some_and(|img| img.find_relative("vendor/autoload_runtime.php").is_some())))
             && environment.get(b"APP_RUNTIME").is_none()
         {
             environment.insert(
