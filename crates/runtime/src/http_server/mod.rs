@@ -33,6 +33,7 @@ use phera_extension_api::Registry;
 pub use pool::{RouteBootReport, RouteDispatch, WorkerRouter};
 pub use router_obj::PendingServe;
 
+pub(crate) use response::{encode_json, received};
 pub(crate) use router_obj::{ActiveRouterSlot, BootRouterSlot, PendingServeSlot};
 
 pub(crate) const ROUTER_CLASS: &str = "Phera\\Http\\Router";

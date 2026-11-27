@@ -103,4 +103,6 @@ fn register_common(registry: &mut Registry) {
     adapters::register(registry);
     crate::websocket::register(registry);
     crate::http_server::register(registry);
+    crate::http_client::register(registry);
+    crate::log::register(registry);
 }

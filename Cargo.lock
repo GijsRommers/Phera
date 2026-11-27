@@ -3678,6 +3678,13 @@ name = "phera-runtime"
 version = "0.1.0"
 dependencies = [
  "blake2b_simd",
+ "bytes",
+ "chrono",
+ "futures-util",
+ "http",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
  "memchr",
  "phera-aot",
  "phera-ast",
@@ -3729,9 +3736,13 @@ dependencies = [
  "phera-value",
  "phera-vm",
  "rcgen",
+ "rustls",
  "smallvec",
  "tempfile",
  "tokio",
+ "tokio-rustls",
+ "tower-service",
+ "url",
 ]
 
 [[package]]

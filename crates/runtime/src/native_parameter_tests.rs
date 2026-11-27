@@ -16,6 +16,19 @@ fn native_parameter_tables_match_php_stubs() {
             stubs(include_str!("websocket/stubs.php"), "websocket/stubs.php"),
         ),
         (
+            "Phera\\Http\\Client",
+            "http_client/stubs.php",
+            stubs(
+                include_str!("http_client/stubs.php"),
+                "http_client/stubs.php",
+            ),
+        ),
+        (
+            "Phera\\Log\\",
+            "log/stubs.php",
+            stubs(include_str!("log/stubs.php"), "log/stubs.php"),
+        ),
+        (
             "Phera\\Http\\",
             "http_server/stubs.php",
             stubs(
