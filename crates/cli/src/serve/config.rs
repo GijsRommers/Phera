@@ -23,6 +23,11 @@ pub(super) struct Settings {
     pub(super) routes: Option<PathBuf>,
     /// The paths handled as requests before the snapshot (see `--warmup`).
     pub(super) warmup: Vec<String>,
+    pub(super) max_connections: Option<usize>,
+    pub(super) backlog: Option<i32>,
+    pub(super) idle_timeout: Option<Duration>,
+    pub(super) keepalive_shed_at: Option<usize>,
+    pub(super) max_active_requests: Option<usize>,
     pub(super) websocket: WebSocketSettings,
     pub(super) path: Option<PathBuf>,
     pub(super) table: toml::Table,
@@ -108,6 +113,35 @@ pub(super) fn read(project: &Path) -> Result<Settings, String> {
         }
         None => None,
     };
+    let max_connections = match server.and_then(|server| server.get("max_connections")) {
+        Some(value) => Some(server_positive_usize(&path, "max_connections", value)?),
+        None => None,
+    };
+    let backlog = match server.and_then(|server| server.get("backlog")) {
+        Some(value) => {
+            let n = server_positive_usize(&path, "backlog", value)?;
+            Some(
+                i32::try_from(n)
+                    .map_err(|_| format!("{}: server.backlog is too large: {n}", path.display()))?,
+            )
+        }
+        None => None,
+    };
+    let idle_timeout = match server.and_then(|server| server.get("idle_timeout")) {
+        Some(value) => {
+            let seconds = server_positive_usize(&path, "idle_timeout", value)?;
+            Some(Duration::from_secs(seconds as u64))
+        }
+        None => None,
+    };
+    let keepalive_shed_at = match server.and_then(|server| server.get("keepalive_shed_at")) {
+        Some(value) => Some(server_positive_usize(&path, "keepalive_shed_at", value)?),
+        None => None,
+    };
+    let max_active_requests = match server.and_then(|server| server.get("max_active_requests")) {
+        Some(value) => Some(server_positive_usize(&path, "max_active_requests", value)?),
+        None => None,
+    };
     let websocket = match server.and_then(|server| server.get("websocket")) {
         Some(toml::Value::Table(ws)) => read_websocket(&path, ws)?,
         Some(_) => {
@@ -122,10 +156,25 @@ pub(super) fn read(project: &Path) -> Result<Settings, String> {
         preload,
         routes,
         warmup,
+        max_connections,
+        backlog,
+        idle_timeout,
+        keepalive_shed_at,
+        max_active_requests,
         websocket,
         path: config_path,
         table,
     })
+}
+
+fn server_positive_usize(path: &Path, key: &str, value: &toml::Value) -> Result<usize, String> {
+    match value.as_integer().and_then(|n| usize::try_from(n).ok()) {
+        Some(n) if n > 0 => Ok(n),
+        _ => Err(format!(
+            "{}: server.{key} must be a positive integer",
+            path.display()
+        )),
+    }
 }
 
 fn read_websocket(

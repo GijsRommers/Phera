@@ -17,6 +17,18 @@ Usage:
     --listen ADDRESS                      default 127.0.0.1:8080, or
                                           0.0.0.0:$PORT when PORT is set
     --workers N                           default: one per CPU core
+    --max-connections N                   maximum open TCP connections per
+                                          worker (default 10000)
+    --backlog N                           listen socket backlog (default 4096)
+    --idle-timeout SECONDS                close idle keep-alive connections
+                                          after this many seconds (default 75)
+    --keepalive-shed-at N                 send Connection: close on HTTP/1.1
+                                          when a worker reaches N active
+                                          connections
+    --max-active-requests N               maximum concurrent PHP request VMs
+                                          per worker (default 32)
+    --routes PATH                         mount a Phera\\Http\\Router script
+                                          ahead of static files and PHP
     --preload                             compile Composer files before listening
     --debug                               start a DBGp session for each request
     --debug-boot                          debug worker boot with --debug --dev
@@ -143,6 +155,11 @@ pub(crate) struct ServeOptions {
     /// `Some(None)` (given as 0) lets a request run without a limit.
     pub request_timeout: Option<Option<Duration>>,
     pub request_read_timeout: Option<Duration>,
+    pub idle_timeout: Option<Duration>,
+    pub max_connections: Option<usize>,
+    pub backlog: Option<i32>,
+    pub keepalive_shed_at: Option<usize>,
+    pub max_active_requests: Option<usize>,
     /// `--trusted-proxies`, not yet parsed into ranges.
     pub trusted_proxies: Option<String>,
     /// `--health`: a path the server answers itself.
@@ -189,6 +206,11 @@ impl ServeOptions {
             no_process: false,
             request_timeout: None,
             request_read_timeout: None,
+            idle_timeout: None,
+            max_connections: None,
+            backlog: None,
+            keepalive_shed_at: None,
+            max_active_requests: None,
             trusted_proxies: None,
             health_path: None,
             ws_max_connections: None,
@@ -431,6 +453,11 @@ fn parse_serve(
         no_process: false,
         request_timeout: None,
         request_read_timeout: None,
+        idle_timeout: None,
+        max_connections: None,
+        backlog: None,
+        keepalive_shed_at: None,
+        max_active_requests: None,
         trusted_proxies: None,
         health_path: None,
         ws_max_connections: None,
@@ -467,6 +494,37 @@ fn parse_serve(
                     .filter(|&count| count > 0)
                     .ok_or_else(|| format!("Not a number of workers: {value}"))?;
                 options.workers = Some(workers);
+            }
+            "--max-connections" => {
+                options.max_connections =
+                    Some(parse_positive_usize(&mut arguments, "--max-connections")?);
+            }
+            "--backlog" => {
+                let backlog = parse_positive_usize(&mut arguments, "--backlog")?;
+                let backlog = i32::try_from(backlog)
+                    .map_err(|_| format!("--backlog is too large: {backlog}"))?;
+                options.backlog = Some(backlog);
+            }
+            "--idle-timeout" => {
+                let value = arguments
+                    .next()
+                    .ok_or("--idle-timeout needs a number of seconds.")?;
+                let seconds: u64 = value
+                    .parse()
+                    .ok()
+                    .filter(|&seconds| seconds > 0)
+                    .ok_or_else(|| format!("Not a positive number of seconds: {value}"))?;
+                options.idle_timeout = Some(Duration::from_secs(seconds));
+            }
+            "--keepalive-shed-at" => {
+                options.keepalive_shed_at =
+                    Some(parse_positive_usize(&mut arguments, "--keepalive-shed-at")?);
+            }
+            "--max-active-requests" => {
+                options.max_active_requests = Some(parse_positive_usize(
+                    &mut arguments,
+                    "--max-active-requests",
+                )?);
             }
             "--compress" => options.compress = true,
             "--preload" => options.preload = true,
@@ -643,5 +701,36 @@ mod tests {
             options.ws_allowed_origins.as_deref(),
             Some(["https://a.test".to_owned(), "https://b.test".to_owned()].as_slice())
         );
+    }
+
+    #[test]
+    fn parses_serve_connection_and_shedding_flags() {
+        let cmd = parse(
+            [
+                "serve",
+                "--max-connections",
+                "60000",
+                "--backlog",
+                "8192",
+                "--idle-timeout",
+                "30",
+                "--keepalive-shed-at",
+                "35000",
+                "--max-active-requests",
+                "1",
+                "server.php",
+            ]
+            .into_iter()
+            .map(str::to_owned),
+        )
+        .expect("parse serve");
+        let Command::Serve(options) = cmd else {
+            panic!("expected Serve");
+        };
+        assert_eq!(options.max_connections, Some(60_000));
+        assert_eq!(options.backlog, Some(8192));
+        assert_eq!(options.idle_timeout, Some(Duration::from_secs(30)));
+        assert_eq!(options.keepalive_shed_at, Some(35_000));
+        assert_eq!(options.max_active_requests, Some(1));
     }
 }

@@ -18,13 +18,13 @@ use hyper::{Request as HyperRequest, Response as HyperResponse};
 use hyper_util::rt::{TokioIo, TokioTimer};
 use hyper_util::server::conn::auto;
 use tokio::io::AsyncWriteExt;
-use tokio::net::TcpStream;
 use tokio::sync::{Semaphore, mpsc, watch};
 use tokio::time::Instant;
 
 use crate::config::ConnectionLimits;
 use crate::file_body::WireBody;
 use crate::handler::Handler;
+use crate::http1_fast::PrefixedIo;
 use crate::receive_timeout::{HeadTimer, PrefaceTimeoutStream, TimeoutStream};
 use crate::request::{HttpVersion, Request};
 use crate::response::Response;
@@ -67,20 +67,20 @@ pub(super) struct WebSocketWorkerContext {
     pub(super) done: mpsc::Sender<()>,
 }
 
-pub(super) struct ConnectionParams {
-    pub(super) stream: TcpStream,
-    pub(super) peer: SocketAddr,
-    pub(super) local_addr: SocketAddr,
-    pub(super) handler: Rc<dyn Handler>,
-    pub(super) shutdown: watch::Receiver<bool>,
-    pub(super) limits: ConnectionLimits,
-    pub(super) work: Rc<ConnectionWork>,
-    pub(super) ws: WebSocketWorkerContext,
+pub(crate) struct ConnectionParams {
+    pub(crate) io: PrefixedIo,
+    pub(crate) peer: SocketAddr,
+    pub(crate) local_addr: SocketAddr,
+    pub(crate) handler: Rc<dyn Handler>,
+    pub(crate) shutdown: watch::Receiver<bool>,
+    pub(crate) limits: ConnectionLimits,
+    pub(crate) work: Rc<ConnectionWork>,
+    pub(crate) ws: WebSocketWorkerContext,
 }
 
-/// Serve one connection over HTTP/1.1, prior-knowledge HTTP/2 (h2c), or
-/// upgraded WebSocket until closed or shutdown.
-pub(super) async fn handle_connection(mut params: ConnectionParams) {
+/// Serve one connection over Hyper (HTTP/2 h2c, WebSocket upgrades, chunked or
+/// large HTTP/1.1 uploads, and other complex framing) until closed or shutdown.
+pub(crate) async fn handle_hyper_connection(mut params: ConnectionParams) {
     let work = params.work;
     let timer = HeadTimer::default();
     let head_timer = timer.clone();
@@ -152,7 +152,7 @@ pub(super) async fn handle_connection(mut params: ConnectionParams) {
     });
 
     let read_limit = limits.idle_timeout.min(limits.request_read_timeout);
-    let mut raw_stream = TimeoutStream::new(params.stream);
+    let mut raw_stream = TimeoutStream::new(params.io);
     let (preface_stream, matched_preface) =
         PrefaceTimeoutStream::new(raw_stream.clone(), read_limit);
     let mut builder = auto::Builder::new(LocalExecutor);
@@ -350,7 +350,7 @@ async fn handle_ws_upgrade(
     accepted
 }
 
-async fn wait_for_shutdown(shutdown: &mut watch::Receiver<bool>) {
+pub(crate) async fn wait_for_shutdown(shutdown: &mut watch::Receiver<bool>) {
     if *shutdown.borrow() {
         return;
     }

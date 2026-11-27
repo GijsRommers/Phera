@@ -15,6 +15,9 @@ async fn fill(context: &mut dyn Context, this: Option<&Rc<Object>>, all: bool) -
         return crate::stream_fetch::fill(context, &state, all).await;
     };
     if all {
+        if !handle.busy() {
+            return Ok(Value::Null);
+        }
         match handle.fetch_all().await {
             Ok(rows) => {
                 let mut statement = state.borrow_mut();

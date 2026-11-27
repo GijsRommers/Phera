@@ -41,3 +41,28 @@ fn two_requests_on_one_connection() {
 
     server.shutdown();
 }
+
+#[test]
+fn keepalive_sheds_with_connection_close_at_threshold() {
+    let config = phera_server::ServerConfig {
+        workers: 1,
+        keepalive_shed_at: Some(2),
+        ..common::test_config()
+    };
+    let (server, addr) = common::start_with(RoutesFactory, config);
+
+    // 1 active connection (< 2): stays keep-alive.
+    let mut first = Client::connect(addr);
+    let r1 = first.request("GET /one HTTP/1.1", &[], b"");
+    assert_eq!(r1.status, 200);
+    assert_ne!(r1.header("connection"), Some("close"));
+
+    // 2 active connections (>= 2): emits Connection: close so sockets drain.
+    let mut second = Client::connect(addr);
+    let r2 = second.request("GET /two HTTP/1.1", &[], b"");
+    assert_eq!(r2.status, 200);
+    assert_eq!(r2.header("connection"), Some("close"));
+
+    drop(second);
+    server.shutdown();
+}

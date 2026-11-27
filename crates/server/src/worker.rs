@@ -7,7 +7,7 @@
 //! to the worker with the fewest active connections (round-robin on ties),
 //! where [`run_dispatched`] registers it on that worker's own reactor.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::io;
 use std::net::{SocketAddr, TcpListener as StdListener, TcpStream as StdStream};
 use std::rc::Rc;
@@ -20,28 +20,28 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore, mpsc, oneshot, watch};
 
 use crate::config::{ConnectionLimits, ServerConfig};
-use crate::connection::{ConnectionParams, WebSocketWorkerContext, handle_connection};
+use crate::connection::WebSocketWorkerContext;
 use crate::handler::HandlerFactory;
+use crate::http1_fast::{WorkerContext, WorkerScratch, serve_connection};
 use crate::response_stream::ResponseSlot;
 use crate::response_task::{ConnectionWork, DetachedRequests};
 use crate::websocket::WebSocketHub;
 
-const BACKLOG: i32 = 1024;
 const ACCEPT_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(50);
 
 /// Bind a single non-blocking listening socket with `SO_REUSEADDR`.
 #[cfg(unix)]
-pub(super) fn bind_listener(addr: SocketAddr) -> io::Result<StdListener> {
+pub(super) fn bind_listener(addr: SocketAddr, backlog: i32) -> io::Result<StdListener> {
     let socket = Socket::new(Domain::for_address(addr), Type::STREAM, Some(Protocol::TCP))?;
     socket.set_reuse_address(true)?;
     socket.set_nonblocking(true)?;
     socket.bind(&addr.into())?;
-    socket.listen(BACKLOG)?;
+    socket.listen(backlog.max(128))?;
     Ok(StdListener::from(socket))
 }
 
 #[cfg(not(unix))]
-pub(super) fn bind_listener(addr: SocketAddr) -> io::Result<StdListener> {
+pub(super) fn bind_listener(addr: SocketAddr, _backlog: i32) -> io::Result<StdListener> {
     let listener = StdListener::bind(addr)?;
     listener.set_nonblocking(true)?;
     Ok(listener)
@@ -163,7 +163,21 @@ pub(super) fn run_direct(
         ));
         let (http_done_tx, mut http_done_rx) = mpsc::channel::<()>(1);
         let (ws_done_tx, mut ws_done_rx) = mpsc::channel::<()>(1);
-        let ws_config = config.websocket.clone();
+        let worker_ctx = Rc::new(WorkerContext {
+            local_addr,
+            handler,
+            limits,
+            ws: WebSocketWorkerContext {
+                hub: ws_hub,
+                config: config.websocket.clone(),
+                slots: ws_slots,
+                done: ws_done_tx,
+            },
+            detached: detached.clone(),
+            active_connections: Cell::new(0),
+            scratch: WorkerScratch::new(),
+            _http_done: http_done_tx,
+        });
         loop {
             // A slot first, then a connection: beyond the limit, clients
             // wait in the operating system's queue instead of being
@@ -177,33 +191,16 @@ pub(super) fn run_direct(
                 _ = wait_for_shutdown(&mut shutdown) => break,
                 accepted = listener.accept() => match accepted {
                     Ok((stream, peer)) => {
-                        let handler = handler.clone();
+                        let _ = stream.set_nodelay(true);
                         let shutdown = shutdown.clone();
-                        let http_done = http_done_tx.clone();
+                        let worker = worker_ctx.clone();
                         let work = Rc::new(ConnectionWork {
                             tcp_slot: RefCell::new(Some(ConnectionSlot::Direct(slot))),
-                            detached: detached.clone(),
+                            detached: worker.detached.clone(),
                             response: ResponseSlot::new(),
                         });
-                        let ws_ctx = WebSocketWorkerContext {
-                            hub: ws_hub.clone(),
-                            config: ws_config.clone(),
-                            slots: ws_slots.clone(),
-                            done: ws_done_tx.clone(),
-                        };
                         tokio::task::spawn_local(async move {
-                            let _http_done = http_done;
-                            handle_connection(ConnectionParams {
-                                stream,
-                                peer,
-                                local_addr,
-                                handler,
-                                shutdown,
-                                limits,
-                                work,
-                                ws: ws_ctx,
-                            })
-                            .await;
+                            serve_connection(stream, peer, shutdown, work, worker).await;
                         });
                     }
                     // A client that hung up before we accepted it is normal.
@@ -221,8 +218,7 @@ pub(super) fn run_direct(
             }
         }
         drop(listener);
-        drop(http_done_tx);
-        drop(ws_done_tx);
+        drop(worker_ctx);
         // Drain HTTP connections and detached requests up to `shutdown_timeout`
         // while WebSockets send `1001` and run `onClose` within `websocket.shutdown_grace`.
         let http_drain = tokio::time::timeout(config.shutdown_timeout, async {
@@ -280,7 +276,21 @@ pub(super) fn run_dispatched(
         ));
         let (http_done_tx, mut http_done_rx) = mpsc::channel::<()>(1);
         let (ws_done_tx, mut ws_done_rx) = mpsc::channel::<()>(1);
-        let ws_config = config.websocket.clone();
+        let worker_ctx = Rc::new(WorkerContext {
+            local_addr,
+            handler,
+            limits,
+            ws: WebSocketWorkerContext {
+                hub: ws_hub,
+                config: config.websocket.clone(),
+                slots: ws_slots,
+                done: ws_done_tx,
+            },
+            detached: detached.clone(),
+            active_connections: Cell::new(0),
+            scratch: WorkerScratch::new(),
+            _http_done: http_done_tx,
+        });
 
         while let Some(Accepted { stream, peer, slot }) = rx.recv().await {
             if let Err(error) = stream.set_nonblocking(true) {
@@ -294,38 +304,20 @@ pub(super) fn run_dispatched(
                     continue;
                 }
             };
-            let handler = handler.clone();
+            let _ = stream.set_nodelay(true);
             let shutdown = shutdown.clone();
-            let http_done = http_done_tx.clone();
+            let worker = worker_ctx.clone();
             let work = Rc::new(ConnectionWork {
                 tcp_slot: RefCell::new(Some(slot)),
-                detached: detached.clone(),
+                detached: worker.detached.clone(),
                 response: ResponseSlot::new(),
             });
-            let ws_ctx = WebSocketWorkerContext {
-                hub: ws_hub.clone(),
-                config: ws_config.clone(),
-                slots: ws_slots.clone(),
-                done: ws_done_tx.clone(),
-            };
             tokio::task::spawn_local(async move {
-                let _http_done = http_done;
-                handle_connection(ConnectionParams {
-                    stream,
-                    peer,
-                    local_addr,
-                    handler,
-                    shutdown,
-                    limits,
-                    work,
-                    ws: ws_ctx,
-                })
-                .await;
+                serve_connection(stream, peer, shutdown, work, worker).await;
             });
         }
 
-        drop(http_done_tx);
-        drop(ws_done_tx);
+        drop(worker_ctx);
         // Drain HTTP connections and detached requests up to `shutdown_timeout`
         // while WebSockets send `1001` and run `onClose` within `websocket.shutdown_grace`.
         let http_drain = tokio::time::timeout(config.shutdown_timeout, async {

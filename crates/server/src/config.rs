@@ -30,6 +30,12 @@ pub struct ServerConfig {
     /// How many connections one worker serves at a time. Further ones wait
     /// in the operating system's queue until a connection closes.
     pub max_connections_per_worker: usize,
+    /// Listen socket backlog passed to `listen(2)` on Unix.
+    pub backlog: i32,
+    /// When a worker's active connections reach this threshold, HTTP/1.1
+    /// responses send `Connection: close` so idle keep-alive sockets drain
+    /// cleanly instead of exhausting file descriptors or memory.
+    pub keepalive_shed_at: Option<usize>,
     pub shutdown_timeout: Duration,
     /// WebSocket limits, timeouts, and Origin allowlist.
     pub websocket: WebSocketConfig,
@@ -51,6 +57,8 @@ impl Default for ServerConfig {
             request_read_timeout: Duration::from_secs(60),
             request_timeout: Some(Duration::from_secs(60)),
             max_connections_per_worker: 10_000,
+            backlog: 4096,
+            keepalive_shed_at: None,
             shutdown_timeout: Duration::from_secs(30),
             websocket: WebSocketConfig::default(),
         }
@@ -66,6 +74,7 @@ pub(crate) struct ConnectionLimits {
     pub(crate) body_idle_timeout: Duration,
     pub(crate) request_read_timeout: Duration,
     pub(crate) request_timeout: Option<Duration>,
+    pub(crate) keepalive_shed_at: Option<usize>,
 }
 
 impl From<&ServerConfig> for ConnectionLimits {
@@ -76,6 +85,7 @@ impl From<&ServerConfig> for ConnectionLimits {
             body_idle_timeout: config.body_idle_timeout,
             request_read_timeout: config.request_read_timeout,
             request_timeout: config.request_timeout,
+            keepalive_shed_at: config.keepalive_shed_at,
         }
     }
 }

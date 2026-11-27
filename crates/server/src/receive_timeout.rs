@@ -12,10 +12,9 @@ use std::time::{Duration, Instant as StdInstant};
 use hyper::rt::{Sleep, Timer};
 use hyper_util::rt::TokioTimer;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-use tokio::net::TcpStream;
 use tokio::time::Instant;
 
-const H2_PREFACE: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
+pub(crate) const H2_PREFACE: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
 
 /// Hyper owns the header timer. Remember its start for the body reader.
 #[derive(Clone)]
@@ -75,16 +74,21 @@ pub(crate) fn body_time_credit(bytes: usize) -> Duration {
 
 /// Keep the socket on the connection's worker after Hyper rejects a partial
 /// head. This lets the worker send a 408 when no HTTP service was called.
-#[derive(Clone)]
-pub(crate) struct TimeoutStream(Arc<Mutex<TcpStream>>);
+pub(crate) struct TimeoutStream<S>(Arc<Mutex<S>>);
 
-impl TimeoutStream {
-    pub(crate) fn new(stream: TcpStream) -> Self {
+impl<S> Clone for TimeoutStream<S> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl<S> TimeoutStream<S> {
+    pub(crate) fn new(stream: S) -> Self {
         Self(Arc::new(Mutex::new(stream)))
     }
 }
 
-impl AsyncRead for TimeoutStream {
+impl<S: AsyncRead + Unpin> AsyncRead for TimeoutStream<S> {
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -95,7 +99,7 @@ impl AsyncRead for TimeoutStream {
     }
 }
 
-impl AsyncWrite for TimeoutStream {
+impl<S: AsyncWrite + Unpin> AsyncWrite for TimeoutStream<S> {
     fn poll_write(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -135,14 +139,14 @@ impl AsyncWrite for TimeoutStream {
 /// HTTP/2 is identified, this wrapper stops polling any timer and leaves
 /// protocol timeouts to Hyper (`header_read_timeout` for HTTP/1, keep-alive
 /// pings for HTTP/2).
-pub(crate) struct PrefaceTimeoutStream {
-    stream: TimeoutStream,
+pub(crate) struct PrefaceTimeoutStream<S> {
+    stream: TimeoutStream<S>,
     deadline: Option<Pin<Box<tokio::time::Sleep>>>,
     matched: Arc<AtomicUsize>,
 }
 
-impl PrefaceTimeoutStream {
-    pub(crate) fn new(stream: TimeoutStream, limit: Duration) -> (Self, Arc<AtomicUsize>) {
+impl<S> PrefaceTimeoutStream<S> {
+    pub(crate) fn new(stream: TimeoutStream<S>, limit: Duration) -> (Self, Arc<AtomicUsize>) {
         let matched = Arc::new(AtomicUsize::new(0));
         let wrapped = Self {
             stream,
@@ -153,7 +157,7 @@ impl PrefaceTimeoutStream {
     }
 }
 
-impl AsyncRead for PrefaceTimeoutStream {
+impl<S: AsyncRead + Unpin> AsyncRead for PrefaceTimeoutStream<S> {
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -207,7 +211,7 @@ impl AsyncRead for PrefaceTimeoutStream {
     }
 }
 
-impl AsyncWrite for PrefaceTimeoutStream {
+impl<S: AsyncWrite + Unpin> AsyncWrite for PrefaceTimeoutStream<S> {
     fn poll_write(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,

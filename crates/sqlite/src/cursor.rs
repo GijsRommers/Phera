@@ -99,10 +99,12 @@ pub(crate) async fn serve(
     }
     let (sender, mut receiver) = mpsc::unbounded_channel();
     let busy = Arc::new(AtomicBool::new(false));
+    let description = Description::read(&statement);
+    let mut cached_columns = Arc::clone(&description.columns);
     let handle = Statement {
         busy: busy.clone(),
         sender,
-        description: Description::read(&statement),
+        description,
         _lifetime: lifetime,
     };
     if ready.send(Ok(handle)).is_err() {
@@ -127,7 +129,7 @@ pub(crate) async fn serve(
                     let _ = reply.send(Err(error.into()));
                     continue;
                 }
-                let description = Description::read_columns_only(&statement);
+                let description = Description::read_columns_cached(&statement, &mut cached_columns);
                 let mut rows = statement.raw_query();
                 let first = read(&mut rows);
                 let active = matches!(&first, Ok(Some(_)));

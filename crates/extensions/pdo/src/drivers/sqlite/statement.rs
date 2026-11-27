@@ -17,7 +17,10 @@ pub async fn execute(
     method: &str,
 ) -> NativeResult {
     if let Some(params) = arguments.first().filter(|v| !v.is_null()) {
-        state.borrow_mut().bindings = Bindings::from_execute(params)?;
+        state.borrow_mut().bindings = match Bindings::packed(params) {
+            Some(packed) => packed,
+            None => Bindings::from_execute(params)?,
+        };
     }
     let (handle, bindings, extended) = {
         let statement = state.borrow();
@@ -26,42 +29,65 @@ pub async fn execute(
                 "this statement is not a SQLite statement",
             ));
         };
-        let mut bindings = Vec::new();
-        let Bindings::Keyed(parameters) = &statement.bindings else {
-            return Err(phera_extension_api::NativeError::error(
-                "SQLite statement bindings must be keyed",
-            ));
-        };
-        for (key, binding) in parameters {
-            let index = key.parse::<usize>().ok().map(|i| i + 1).or_else(|| {
-                handle
-                    .description
-                    .parameters
-                    .iter()
-                    .position(|name| {
-                        name.as_deref()
-                            .and_then(|name| name.strip_prefix(':'))
-                            .is_some_and(|stripped| stripped == key)
-                    })
-                    .map(|i| i + 1)
-            });
-            let Some(index) = index.filter(|i| *i <= handle.description.parameters.len()) else {
-                drop(statement);
-                return crate::statement_execute::fail(
-                    state,
-                    context,
-                    DbError {
-                        state: "HY000".into(),
-                        code: Some(25),
-                        detail: "column index out of range".into(),
-                    },
-                    method,
-                );
-            };
-            bindings.push((
-                index,
-                crate::drivers::sqlite::bindings::read(context, binding)?,
-            ));
+        let mut bindings;
+        match &statement.bindings {
+            Bindings::Packed(array) => {
+                if array.len() > handle.description.parameters.len() {
+                    drop(statement);
+                    return crate::statement_execute::fail(
+                        state,
+                        context,
+                        DbError {
+                            state: "HY000".into(),
+                            code: Some(25),
+                            detail: "column index out of range".into(),
+                        },
+                        method,
+                    );
+                }
+                bindings = Vec::with_capacity(array.len());
+                for (index, (_, value)) in array.iter().enumerate() {
+                    bindings.push((
+                        index + 1,
+                        crate::drivers::sqlite::bindings::read_execute_value(context, value)?,
+                    ));
+                }
+            }
+            Bindings::Keyed(parameters) => {
+                bindings = Vec::with_capacity(parameters.len());
+                for (key, binding) in parameters {
+                    let index = key.parse::<usize>().ok().map(|i| i + 1).or_else(|| {
+                        handle
+                            .description
+                            .parameters
+                            .iter()
+                            .position(|name| {
+                                name.as_deref()
+                                    .and_then(|name| name.strip_prefix(':'))
+                                    .is_some_and(|stripped| stripped == key)
+                            })
+                            .map(|i| i + 1)
+                    });
+                    let Some(index) = index.filter(|i| *i <= handle.description.parameters.len())
+                    else {
+                        drop(statement);
+                        return crate::statement_execute::fail(
+                            state,
+                            context,
+                            DbError {
+                                state: "HY000".into(),
+                                code: Some(25),
+                                detail: "column index out of range".into(),
+                            },
+                            method,
+                        );
+                    };
+                    bindings.push((
+                        index,
+                        crate::drivers::sqlite::bindings::read(context, binding)?,
+                    ));
+                }
+            }
         }
         (
             handle.clone(),
@@ -75,12 +101,12 @@ pub async fn execute(
             let columns: Vec<_> = execution
                 .description
                 .columns
-                .into_iter()
+                .iter()
                 .enumerate()
                 .map(|(index, column)| Column {
                     name: column.name.clone(),
                     metadata: crate::metadata::Metadata::Sqlite(
-                        column,
+                        column.clone(),
                         execution
                             .first
                             .as_ref()

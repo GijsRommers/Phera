@@ -1,5 +1,7 @@
 //! SQLite values preserve bytes: `SELECT X'00FF', 9223372036854775807, NULL`.
 
+use std::sync::Arc;
+
 use rusqlite::types::{ToSql, ToSqlOutput, ValueRef};
 
 #[derive(Clone, Debug)]
@@ -72,7 +74,7 @@ pub struct Column {
 
 #[derive(Clone, Debug)]
 pub struct Description {
-    pub columns: Vec<Column>,
+    pub columns: Arc<[Column]>,
     pub parameters: Vec<Option<String>>,
     pub readonly: bool,
     pub explain: i32,
@@ -90,10 +92,23 @@ impl Description {
         }
     }
 
-    /// Reads column metadata on execute without re-allocating parameter names.
-    pub(crate) fn read_columns_only(statement: &rusqlite::Statement<'_>) -> Self {
+    /// Reuses cached column metadata when the prepared statement's schema has
+    /// not changed, avoiding per-execute column C-FFI calls and heap strings.
+    pub(crate) fn read_columns_cached(
+        statement: &rusqlite::Statement<'_>,
+        cached: &mut Arc<[Column]>,
+    ) -> Self {
+        let count = statement.column_count();
+        let unchanged = count == cached.len()
+            && cached
+                .iter()
+                .enumerate()
+                .all(|(index, column)| statement.column_name(index) == Ok(column.name.as_str()));
+        if !unchanged {
+            *cached = read_columns(statement);
+        }
         Self {
-            columns: read_columns(statement),
+            columns: Arc::clone(cached),
             parameters: Vec::new(),
             readonly: statement.readonly(),
             explain: statement.is_explain(),
@@ -101,7 +116,7 @@ impl Description {
     }
 }
 
-fn read_columns(statement: &rusqlite::Statement<'_>) -> Vec<Column> {
+fn read_columns(statement: &rusqlite::Statement<'_>) -> Arc<[Column]> {
     statement
         .columns()
         .zip(statement.columns_with_metadata())
@@ -110,7 +125,8 @@ fn read_columns(statement: &rusqlite::Statement<'_>) -> Vec<Column> {
             declared: column.decl_type().map(str::to_owned),
             table: metadata.table_name().map(str::to_owned),
         })
-        .collect()
+        .collect::<Vec<_>>()
+        .into()
 }
 
 #[derive(Debug)]

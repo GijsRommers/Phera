@@ -50,3 +50,14 @@ pub fn read(context: &mut dyn Context, binding: &Binding) -> Result<Cell, Native
     }
     Ok(cell)
 }
+
+/// Converts one positional `execute([...])` parameter directly into a SQLite
+/// `Cell` without allocating a `HashMap` or `Binding` wrapper.
+pub fn read_execute_value(context: &mut dyn Context, value: &Value) -> Result<Cell, NativeError> {
+    let value = value.deref();
+    if value.is_null() {
+        return Ok(Cell::Null);
+    }
+    let text = to_php_string(&value, context.diagnostics())?;
+    Ok(Cell::Text(text.as_bytes().to_vec()))
+}
