@@ -368,6 +368,16 @@ impl Context for Vm {
         self.exception_with_previous(error, previous)
     }
 
+    fn thrown_object(&self, error: &NativeError) -> Option<std::rc::Rc<phera_value::Object>> {
+        match error {
+            NativeError::Unwind(payload) => payload
+                .0
+                .downcast_ref::<crate::exceptions::Thrown>()
+                .map(|thrown| thrown.object.clone()),
+            NativeError::Throw { .. } => None,
+        }
+    }
+
     fn native_binary(
         &mut self,
         operator: phera_extension_api::NativeBinaryOp,

@@ -78,6 +78,7 @@ fn register_common(registry: &mut Registry) {
     registry.php_module("pdo_sqlite");
     registry.load(&phera_ext_sqlite3::Sqlite3);
     registry.load(&phera_ext_redis::Redis);
+    registry.load(&phera_ext_grpc::Grpc);
     registry.load(&phera_ext_http::Http);
     http::register_request_parse_body(registry);
     registry.load(&phera_ext_hash::Hash);

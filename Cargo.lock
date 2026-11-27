@@ -3165,6 +3165,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "phera-ext-grpc"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "bytes",
+ "flate2",
+ "futures-util",
+ "h2",
+ "http",
+ "percent-encoding",
+ "phera-extension-api",
+ "phera-io-pool",
+ "rustls",
+ "tokio",
+ "tokio-rustls",
+]
+
+[[package]]
 name = "phera-ext-hash"
 version = "0.1.0"
 dependencies = [
@@ -3661,6 +3679,7 @@ dependencies = [
  "phera-ext-filter",
  "phera-ext-gd",
  "phera-ext-gmp",
+ "phera-ext-grpc",
  "phera-ext-hash",
  "phera-ext-http",
  "phera-ext-intl",
@@ -3694,6 +3713,7 @@ dependencies = [
  "phera-parser",
  "phera-value",
  "phera-vm",
+ "rcgen",
  "tempfile",
  "tokio",
 ]

@@ -49,6 +49,7 @@ rsa = { version = "0.10", features = ["pkcs1v15"] }
 redis = { version = "=1.0.5", default-features = false, features = ["tokio-comp"] }
 phera-ext-reflection = { path = "crates/extensions/reflection" }
 phera-ext-redis = { path = "crates/extensions/redis" }
+phera-ext-grpc = { path = "crates/extensions/grpc" }
 phera-db-drivers = { path = "crates/db-drivers" }
 phera-io-pool = { path = "crates/io-pool" }
 phera-dotenv = { path = "crates/dotenv" }
@@ -206,6 +207,8 @@ hyper-util = { version = "0.1", default-features = false, features = ["tokio", "
 # The HTTP/2 implementation under hyper (Hyper project); used directly only by
 # tests that read the SETTINGS a server announces.
 h2 = { version = "0.4", default-features = false }
+# Request and response types shared by hyper and h2.
+http = "1"
 socket2 = { version = "0.6", features = ["all"] }
 hickory-resolver = "0.26.3"
 tokio = { version = "1", features = [
