@@ -1231,6 +1231,108 @@ fn arr_set_reg_step_loop_helper(
     ArrayLoopExit::Bail(0)
 }
 
+/// Hoisted-slice inner loop for `for ($k = ...; $k < $cols; $k++) $acc += $m1[$i][$k] * $m2[$k][$j]`.
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn arr_2d_mul_add_loop_helper(
+    t: &mut [u8; 256],
+    v: &mut [u64; 256],
+    acc_r: usize,
+    k_r: usize,
+    cols_r: usize,
+    packed_imm: i32,
+    heap: &[Option<Value>],
+    budget_start: usize,
+) -> ArrayLoopExit {
+    let m1_r = (packed_imm & 0xff) as usize;
+    let m2_r = ((packed_imm >> 8) & 0xff) as usize;
+    let i_r = ((packed_imm >> 16) & 0xff) as usize;
+    let j_r = ((packed_imm >> 24) & 0xff) as usize;
+    if t[acc_r] != TAG_INT
+        || t[k_r] != TAG_INT
+        || t[cols_r] != TAG_INT
+        || t[i_r] != TAG_INT
+        || t[j_r] != TAG_INT
+        || t[m1_r] != TAG_HEAP
+        || t[m2_r] != TAG_HEAP
+    {
+        return ArrayLoopExit::Bail(0);
+    }
+    let i_key = v[i_r] as i64;
+    let j_key = v[j_r] as i64;
+    let cols = v[cols_r] as i64;
+    let mut k = v[k_r] as i64;
+    let mut acc = v[acc_r] as i64;
+    let mut budget = budget_start.max(1);
+
+    let (Some(Some(Value::Array(m1_rc))), Some(Some(Value::Array(m2_rc)))) =
+        (heap.get(v[m1_r] as usize), heap.get(v[m2_r] as usize))
+    else {
+        return ArrayLoopExit::Bail(0);
+    };
+    let Some(Value::Array(row1_rc)) = array_get_int_fast(m1_rc, i_key) else {
+        return ArrayLoopExit::Bail(0);
+    };
+    let (Some((r1_start, r1_slots)), Some((m2_start, m2_slots))) =
+        (row1_rc.list_slots(), m2_rc.list_slots())
+    else {
+        return ArrayLoopExit::Bail(0);
+    };
+
+    loop {
+        let o1 = k.wrapping_sub(r1_start);
+        let o2 = k.wrapping_sub(m2_start);
+        if o1 < 0 || o2 < 0 || (o1 as usize) >= r1_slots.len() || (o2 as usize) >= m2_slots.len() {
+            v[acc_r] = acc as u64;
+            v[k_r] = k as u64;
+            return ArrayLoopExit::Bail(budget_start.saturating_sub(budget));
+        }
+        let Some(Value::Int(a)) = r1_slots[o1 as usize] else {
+            v[acc_r] = acc as u64;
+            v[k_r] = k as u64;
+            return ArrayLoopExit::Bail(budget_start.saturating_sub(budget));
+        };
+        let Some(Value::Array(row2_rc)) = &m2_slots[o2 as usize] else {
+            v[acc_r] = acc as u64;
+            v[k_r] = k as u64;
+            return ArrayLoopExit::Bail(budget_start.saturating_sub(budget));
+        };
+        let Some(Value::Int(b)) = array_get_int_fast(row2_rc, j_key) else {
+            v[acc_r] = acc as u64;
+            v[k_r] = k as u64;
+            return ArrayLoopExit::Bail(budget_start.saturating_sub(budget));
+        };
+        let Some(prod) = a.checked_mul(*b) else {
+            v[acc_r] = acc as u64;
+            v[k_r] = k as u64;
+            return ArrayLoopExit::Bail(budget_start.saturating_sub(budget));
+        };
+        let Some(next_acc) = acc.checked_add(prod) else {
+            v[acc_r] = acc as u64;
+            v[k_r] = k as u64;
+            return ArrayLoopExit::Bail(budget_start.saturating_sub(budget));
+        };
+        acc = next_acc;
+        let Some(next_k) = k.checked_add(1) else {
+            v[acc_r] = acc as u64;
+            v[k_r] = k as u64;
+            return ArrayLoopExit::Bail(budget_start.saturating_sub(budget));
+        };
+        k = next_k;
+        if k >= cols {
+            v[acc_r] = acc as u64;
+            v[k_r] = k as u64;
+            return ArrayLoopExit::Done(budget_start.saturating_sub(budget));
+        }
+        budget -= 1;
+        if budget == 0 {
+            v[acc_r] = acc as u64;
+            v[k_r] = k as u64;
+            return ArrayLoopExit::Yield;
+        }
+    }
+}
+
 #[inline(never)]
 fn arr_push_helper(
     t: &[u8; 256],
@@ -1592,6 +1694,39 @@ pub(crate) fn run_fast(
                     }
                     // Entry guard did not match (e.g. iter 0 has TAG_INT for a
                     // float reg): fall through into the tagged ops at `ip + 1`!
+                    ip += 1;
+                }
+                Op::EnterListLoop => {
+                    let ll = &cur_fn.list_loops[op.imm as usize];
+                    let budget = YIELD_AFTER_STEPS.saturating_sub(work).max(1);
+                    if let Some(exit) =
+                        crate::fast_tier::list_loop::try_run_list_loop(ll, t, v, heap, budget)
+                    {
+                        match exit {
+                            crate::fast_tier::list_loop::ListExit::Exit {
+                                next_fast_ip,
+                                spent,
+                            } => {
+                                work += spent;
+                                ip = next_fast_ip;
+                                continue;
+                            }
+                            crate::fast_tier::list_loop::ListExit::Yield { resume_fast_ip } => {
+                                ip = resume_fast_ip;
+                                work = 0;
+                                yield_now = true;
+                                break 'frame_loop;
+                            }
+                            crate::fast_tier::list_loop::ListExit::Fallback {
+                                fallback_fast_ip,
+                                spent,
+                            } => {
+                                work += spent;
+                                ip = fallback_fast_ip;
+                                continue;
+                            }
+                        }
+                    }
                     ip += 1;
                 }
 
@@ -3242,6 +3377,33 @@ pub(crate) fn run_fast(
                         op.b as usize,
                         op.c as usize,
                         i64::from(op.imm),
+                        heap,
+                        budget,
+                    ) {
+                        ArrayLoopExit::Done(spent) => {
+                            work += spent;
+                            ip += 1;
+                        }
+                        ArrayLoopExit::Yield => {
+                            work = 0;
+                            yield_now = true;
+                            break 'frame_loop;
+                        }
+                        ArrayLoopExit::Bail(spent) => {
+                            work += spent;
+                            break 'frame_loop;
+                        }
+                    }
+                }
+                Op::Arr2DMulAddLoop => {
+                    let budget = YIELD_AFTER_STEPS.saturating_sub(work).max(1);
+                    match arr_2d_mul_add_loop_helper(
+                        t,
+                        v,
+                        op.a as usize,
+                        op.b as usize,
+                        op.c as usize,
+                        op.imm,
                         heap,
                         budget,
                     ) {

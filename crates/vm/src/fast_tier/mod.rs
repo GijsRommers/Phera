@@ -10,6 +10,7 @@
 
 pub(crate) mod exec;
 pub(crate) mod int_rec;
+pub(crate) mod list_loop;
 pub(crate) mod lower;
 pub(crate) mod scalar_loop;
 pub(crate) mod stack;
@@ -72,6 +73,7 @@ impl FastOp {
 pub(crate) enum Op {
     // Specialized unboxed inner-loop entry (guarded fallback to tagged ops)
     EnterScalarLoop,
+    EnterListLoop,
 
     // Fused rotated-loop latches
     IncLoopLtImm,
@@ -173,6 +175,7 @@ pub(crate) enum Op {
     ArrAddAssignInt,
     ArrAddFromArr,
     ArrAddFromArrLoop,
+    Arr2DMulAddLoop,
     ArrUnsetStepLoop,
     ArrSetRegStepLoop,
     ArrPush,
@@ -202,6 +205,8 @@ pub(crate) struct FastFunction {
     pub(crate) f64_consts: Box<[f64]>,
     /// Specialized unboxed inner scalar loops referenced by `Op::EnterScalarLoop`.
     pub(crate) scalar_loops: Box<[scalar_loop::ScalarLoop]>,
+    /// Specialized hoisted single-list loops referenced by `Op::EnterListLoop`.
+    pub(crate) list_loops: Box<[list_loop::ListLoop]>,
     /// Optional pure-`i64` self-recursion kernel (`fibo_r`, `Ack`, etc.).
     pub(crate) int_rec: Option<int_rec::IntRecFunc>,
     /// Count of runtime type-deopts; after 2 strikes the function is disabled.

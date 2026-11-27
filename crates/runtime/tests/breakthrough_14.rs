@@ -400,6 +400,61 @@ $m1 = zend_mkmatrix(4, 4);
 $m2 = zend_mkmatrix(4, 4);
 $m3 = zend_mmult(4, 4, $m1, $m2);
 echo $m3[0][0] . "," . $m3[3][3] . "\n";
+
+function zend_heapsort_r($n, &$ra) {
+    $l = ($n >> 1) + 1;
+    $ir = $n;
+    while (1) {
+        if ($l > 1) {
+            $rra = $ra[--$l];
+        } else {
+            $rra = $ra[$ir];
+            $ra[$ir] = $ra[1];
+            if (--$ir == 1) {
+                $ra[1] = $rra;
+                return;
+            }
+        }
+        $i = $l;
+        $j = $l << 1;
+        while ($j <= $ir) {
+            if (($j < $ir) && ($ra[$j] < $ra[$j+1])) {
+                $j++;
+            }
+            if ($rra < $ra[$j]) {
+                $ra[$i] = $ra[$j];
+                $i = $j;
+                $j += $i;
+            } else {
+                $j = $ir + 1;
+            }
+        }
+        $ra[$i] = $rra;
+    }
+}
+
+$ra = [];
+for ($i = 1; $i <= 50; $i++) {
+    $ra[$i] = (($i * 37) % 50) * 0.5;
+}
+zend_heapsort_r(50, $ra);
+echo $ra[1] . "," . $ra[25] . "," . $ra[50] . "\n";
+
+function zend_hash2($n): string {
+    $hash1 = [];
+    $hash2 = [];
+    for ($i = 0; $i < 20; $i++) {
+        $hash1["foo_$i"] = $i;
+        $hash2["foo_$i"] = 0;
+    }
+    for ($i = $n; $i > 0; $i--) {
+        foreach ($hash1 as $key => $value) {
+            $hash2[$key] += $value;
+        }
+    }
+    return $hash2["foo_1"] . "," . $hash2["foo_19"] . "," . $key . "=" . $value;
+}
+echo zend_hash2(10) . "\n";
 "#);
     let lines: Vec<&str> = out.lines().collect();
     assert_eq!(lines[0], "1000");
@@ -408,4 +463,6 @@ echo $m3[0][0] . "," . $m3[3][3] . "\n";
     assert_eq!(lines[3], "46");
     assert_eq!(lines[4], "5,150");
     assert_eq!(lines[5], "90,600");
+    assert_eq!(lines[6], "0,12,24.5");
+    assert_eq!(lines[7], "10,190,foo_19=19");
 }

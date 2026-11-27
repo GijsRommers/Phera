@@ -73,12 +73,46 @@ impl RecOp {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RecKernel {
+    /// Arbitrary pure-`i64` self-recursive function executed by the flat `RecOp` loop.
+    General,
+    /// Specialized zero-dispatch iterative kernel for 1-arg binary-branching recurrences:
+    /// `if cmp(n, lim) { return base } else { return f(n - step1) <op> f(n - step2) }`.
+    UnaryBinOp {
+        cmp: u8,
+        lim: i64,
+        base_is_param: bool,
+        base_val: i64,
+        step1: i64,
+        step2: i64,
+        combine: ROp,
+        call1_dst: u8,
+        call1_ret_ip: u16,
+        call2_dst: u8,
+        call2_ret_ip: u16,
+        combine_ip: u16,
+    },
+    /// Specialized zero-dispatch iterative kernel for 2-arg nested recurrences:
+    /// `if m == 0 { return n + c0 } if n == 0 { return f(m - s0, c1) } return f(m - s0, f(m, n - s1))`.
+    BinaryNested {
+        c0: i64,
+        c1: i64,
+        s0: i64,
+        s1: i64,
+        outer_m_reg: u8,
+        inner_ret_dst: u8,
+        inner_call_ret_ip: u16,
+    },
+}
+
 pub(crate) struct IntRecFunc {
     pub(crate) ops: Box<[RecOp]>,
     pub(crate) bc_ip: Box<[u32]>,
     pub(crate) ret_bc_ip: Box<[u32]>,
     pub(crate) reg_count: u8,
     pub(crate) param_count: u8,
+    pub(crate) kernel: RecKernel,
 }
 
 /// Try to compile a plain untyped self-recursive `FastOp` function with
@@ -300,12 +334,212 @@ pub(crate) fn try_compile_int_rec(
         }
     }
 
+    let kernel = detect_rec_kernel(&rops, param_count);
     Some(IntRecFunc {
         ops: rops.into_boxed_slice(),
         bc_ip: r_bc_ip.into_boxed_slice(),
         ret_bc_ip: r_ret_bc_ip.into_boxed_slice(),
         reg_count,
         param_count,
+        kernel,
+    })
+}
+
+/// Detect general zero-dispatch iterative kernels from the lowered `RecOp` slice.
+fn detect_rec_kernel(ops: &[RecOp], param_count: u8) -> RecKernel {
+    if param_count == 1
+        && let Some(k) = detect_unary_binop(ops)
+    {
+        return k;
+    }
+    if param_count == 2
+        && let Some(k) = detect_binary_nested(ops)
+    {
+        return k;
+    }
+    RecKernel::General
+}
+
+fn detect_unary_binop(ops: &[RecOp]) -> Option<RecKernel> {
+    // Shape A (standard `if ($n < lim) return base; return f($n - s1) op f($n - s2);`
+    // and ternary `return ($n < lim) ? base : f($n - s1) op f($n - s2);`):
+    //   0: BranchLtImm|BranchLeImm(a=0, imm=lim, when=false -> target=2)
+    //   1: RetImm(base_val) | RetReg(0)
+    //   2: CallSelf1Sub(dst=d1, src=0, imm=s1)
+    //   3: CallSelf1Sub(dst=d2, src=0, imm=s2)
+    //   4: AddI64|SubI64|MulI64(dst=dr, b=d1, c=d2)
+    //   5: RetReg(dr)
+    if ops.len() != 6 {
+        return None;
+    }
+    let br = ops[0];
+    if br.a != 0 || !matches!(br.op, ROp::BranchLtImm | ROp::BranchLeImm) {
+        return None;
+    }
+    let cmp = if br.op == ROp::BranchLtImm {
+        CMP_LT
+    } else {
+        CMP_LE
+    };
+    let when = (br.c & 0x80) != 0;
+    let target = (br.b as usize) | (((br.c & 0x7f) as usize) << 8);
+    let (base_idx, rec_start) = if !when && target == 2 {
+        (1usize, 2usize)
+    } else if when && target == 5 {
+        (5usize, 1usize)
+    } else {
+        return None;
+    };
+    let (base_is_param, base_val) = match ops[base_idx] {
+        RecOp {
+            op: ROp::RetImm,
+            imm,
+            ..
+        } => (false, i64::from(imm)),
+        RecOp {
+            op: ROp::RetReg,
+            a: 0,
+            ..
+        } => (true, 0),
+        _ => return None,
+    };
+    let c1 = ops[rec_start];
+    let c2 = ops[rec_start + 1];
+    let comb = ops[rec_start + 2];
+    let ret = ops[rec_start + 3];
+    if c1.op != ROp::CallSelf1Sub
+        || c1.b != 0
+        || c2.op != ROp::CallSelf1Sub
+        || c2.b != 0
+        || c1.a == 0
+        || c2.a == 0
+        || c1.a == c2.a
+        || !matches!(comb.op, ROp::AddI64 | ROp::SubI64 | ROp::MulI64)
+        || comb.b != c1.a
+        || comb.c != c2.a
+        || ret.op != ROp::RetReg
+        || ret.a != comb.a
+    {
+        return None;
+    }
+    Some(RecKernel::UnaryBinOp {
+        cmp,
+        lim: i64::from(br.imm),
+        base_is_param,
+        base_val,
+        step1: i64::from(c1.imm),
+        step2: i64::from(c2.imm),
+        combine: comb.op,
+        call1_dst: c1.a,
+        call1_ret_ip: (rec_start + 1) as u16,
+        call2_dst: c2.a,
+        call2_ret_ip: (rec_start + 2) as u16,
+        combine_ip: (rec_start + 2) as u16,
+    })
+}
+
+fn detect_binary_nested(ops: &[RecOp]) -> Option<RecKernel> {
+    // General 2-arg nested recurrence (`Ack` family):
+    //   0: BranchEqImm(a=0, imm=0, when=false -> p1)
+    //   1: AddImm(dst=t, b=1, imm=c0)
+    //   2: RetReg(t)
+    //   [optional dead Jump(p1)]
+    //  p1: BranchEqImm(a=1, imm=0, when=false -> p2)
+    //  p1+1: SubImm(dst=t0, b=0, imm=s0)
+    //  p1+2: LoadInt(dst=t1, imm=c1)
+    //  p1+3: CallSelf2(dst=tr, b=t0, c=t1)
+    //  p1+4: RetReg(tr)
+    //   [optional dead Jump(p2)]
+    //  p2: SubImm(dst=t2, b=0, imm=s0)
+    //   [optional Mov(tm, 0)]
+    //  ...: SubImm(dst=t3, b=1, imm=s1)
+    //  ...: CallSelf2(dst=t4, b=0|tm, c=t3)
+    //  ...: CallSelf2(dst=t5, b=t2, c=t4)
+    //  ...: RetReg(t5)
+    let br0 = *ops.first()?;
+    let p1 = (br0.b as usize) | (((br0.c & 0x7f) as usize) << 8);
+    if br0.op != ROp::BranchEqImm
+        || br0.a != 0
+        || br0.imm != 0
+        || (br0.c & 0x80) != 0
+        || !(p1 == 3 || (p1 == 4 && ops.get(3).is_some_and(|o| o.op == ROp::Jump)))
+    {
+        return None;
+    }
+    let add0 = *ops.get(1)?;
+    let ret0 = *ops.get(2)?;
+    if add0.op != ROp::AddImm || add0.b != 1 || ret0.op != ROp::RetReg || ret0.a != add0.a {
+        return None;
+    }
+
+    let br1 = *ops.get(p1)?;
+    let p2 = (br1.b as usize) | (((br1.c & 0x7f) as usize) << 8);
+    if br1.op != ROp::BranchEqImm
+        || br1.a != 1
+        || br1.imm != 0
+        || (br1.c & 0x80) != 0
+        || !(p2 == p1 + 5 || (p2 == p1 + 6 && ops.get(p1 + 5).is_some_and(|o| o.op == ROp::Jump)))
+    {
+        return None;
+    }
+    let sub1 = *ops.get(p1 + 1)?;
+    let ld1 = *ops.get(p1 + 2)?;
+    let call1 = *ops.get(p1 + 3)?;
+    let ret1 = *ops.get(p1 + 4)?;
+    if sub1.op != ROp::SubImm
+        || sub1.b != 0
+        || ld1.op != ROp::LoadInt
+        || call1.op != ROp::CallSelf2
+        || call1.b != sub1.a
+        || call1.c != ld1.a
+        || ret1.op != ROp::RetReg
+        || ret1.a != call1.a
+    {
+        return None;
+    }
+
+    let sub_om = *ops.get(p2)?;
+    let (m_arg_reg, q) = match ops.get(p2 + 1) {
+        Some(&RecOp {
+            op: ROp::Mov,
+            a,
+            b: 0,
+            ..
+        }) => (a, p2 + 2),
+        _ => (0u8, p2 + 1),
+    };
+    if q + 4 != ops.len() {
+        return None;
+    }
+    let sub_in = ops[q];
+    let inner_call = ops[q + 1];
+    let outer_call = ops[q + 2];
+    let ret2 = ops[q + 3];
+    if sub_om.op != ROp::SubImm
+        || sub_om.b != 0
+        || sub_om.imm != sub1.imm
+        || sub_in.op != ROp::SubImm
+        || sub_in.b != 1
+        || inner_call.op != ROp::CallSelf2
+        || inner_call.b != m_arg_reg
+        || inner_call.c != sub_in.a
+        || outer_call.op != ROp::CallSelf2
+        || outer_call.b != sub_om.a
+        || outer_call.c != inner_call.a
+        || ret2.op != ROp::RetReg
+        || ret2.a != outer_call.a
+        || sub_om.a == inner_call.a
+    {
+        return None;
+    }
+    Some(RecKernel::BinaryNested {
+        c0: i64::from(add0.imm),
+        c1: i64::from(ld1.imm),
+        s0: i64::from(sub1.imm),
+        s1: i64::from(sub_in.imm),
+        outer_m_reg: sub_om.a,
+        inner_ret_dst: inner_call.a,
+        inner_call_ret_ip: (q + 2) as u16,
     })
 }
 
@@ -341,6 +575,87 @@ pub(crate) fn run_int_rec_entry(
 
     let caller_vm = *stack.caller()?;
     let destination = entry_frame.destination()?;
+
+    match rec.kernel {
+        RecKernel::UnaryBinOp {
+            cmp,
+            lim,
+            base_is_param,
+            base_val,
+            step1,
+            step2,
+            combine,
+            call1_dst,
+            call1_ret_ip,
+            call2_dst,
+            call2_ret_ip,
+            combine_ip,
+        } => {
+            return Some(run_unary_binop(
+                rec,
+                fn_idx,
+                stack,
+                registers,
+                rec_regs,
+                rec_frames,
+                entry_frame,
+                caller_vm,
+                destination,
+                entry_args[0],
+                max_frames,
+                budget_start,
+                work_io,
+                executed_io,
+                cmp,
+                lim,
+                base_is_param,
+                base_val,
+                step1,
+                step2,
+                combine,
+                call1_dst,
+                call1_ret_ip,
+                call2_dst,
+                call2_ret_ip,
+                combine_ip,
+            ));
+        }
+        RecKernel::BinaryNested {
+            c0,
+            c1,
+            s0,
+            s1,
+            outer_m_reg,
+            inner_ret_dst,
+            inner_call_ret_ip,
+        } => {
+            return Some(run_binary_nested(
+                rec,
+                fn_idx,
+                stack,
+                registers,
+                rec_regs,
+                rec_frames,
+                entry_frame,
+                caller_vm,
+                destination,
+                entry_args[0],
+                entry_args[1],
+                max_frames,
+                budget_start,
+                work_io,
+                executed_io,
+                c0,
+                c1,
+                s0,
+                s1,
+                outer_m_reg,
+                inner_ret_dst,
+                inner_call_ret_ip,
+            ));
+        }
+        RecKernel::General => {}
+    }
 
     // Pre-size flat buffers ONCE so the inner loop has zero re-slicing, zero
     // `try_into().expect()`, and zero `Vec::push` capacity checks!
@@ -615,6 +930,309 @@ pub(crate) fn run_int_rec_entry(
         work_io,
         executed_io,
     ))
+}
+
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn run_unary_binop(
+    rec: &IntRecFunc,
+    fn_idx: FunctionIndex,
+    stack: &mut CallStack,
+    registers: &mut Registers,
+    rec_regs: &mut Vec<i64>,
+    rec_frames: &mut Vec<RecFrame>,
+    entry_frame: Frame,
+    caller_vm: Frame,
+    destination: Reg,
+    entry_n: i64,
+    max_frames: usize,
+    budget_start: usize,
+    work_io: &mut usize,
+    executed_io: &mut u64,
+    cmp: u8,
+    lim: i64,
+    base_is_param: bool,
+    base_val: i64,
+    step1: i64,
+    step2: i64,
+    combine: ROp,
+    call1_dst: u8,
+    call1_ret_ip: u16,
+    call2_dst: u8,
+    call2_ret_ip: u16,
+    combine_ip: u16,
+) -> FastExit {
+    enum Pause {
+        CallAtTop { n: i64, ip: usize },
+        Call2Overflow { ret1: i64 },
+        CombineOverflow { lhs: i64, rhs: i64 },
+    }
+
+    let max_d = max_frames.min(255);
+    let mut st_n = [0i64; 256];
+    let mut st_acc = [0i64; 256];
+    let mut st_phase = [0u8; 256];
+    let mut sp: usize = 0;
+    let mut n = entry_n;
+    let mut budget = budget_start.max(1);
+    let mut yield_now = false;
+
+    let pause = 'run: loop {
+        let is_base = if cmp == CMP_LT { n < lim } else { n <= lim };
+        let mut ret = if is_base {
+            if base_is_param { n } else { base_val }
+        } else {
+            if sp >= max_d {
+                break 'run Pause::CallAtTop { n, ip: 0 };
+            }
+            let Some(arg1) = n.checked_sub(step1) else {
+                break 'run Pause::CallAtTop {
+                    n,
+                    ip: (call1_ret_ip as usize).saturating_sub(1),
+                };
+            };
+            st_n[sp] = n;
+            st_phase[sp] = 0;
+            sp += 1;
+            n = arg1;
+            budget -= 1;
+            if budget == 0 {
+                yield_now = true;
+                break 'run Pause::CallAtTop { n, ip: 0 };
+            }
+            continue 'run;
+        };
+
+        loop {
+            if sp == 0 {
+                let spent = budget_start.saturating_sub(budget);
+                *work_io = (*work_io).saturating_add(spent);
+                *executed_io += spent.max(1) as u64;
+                stack.pop_for_return();
+                registers.truncate(entry_frame.start());
+                registers.put(caller_vm.base() + destination.index(), Value::Int(ret));
+                return FastExit::Returned(Position {
+                    frame: caller_vm,
+                    ip: caller_vm.ip(),
+                });
+            }
+            let top = sp - 1;
+            if st_phase[top] == 0 {
+                let cur_n = st_n[top];
+                let Some(arg2) = cur_n.checked_sub(step2) else {
+                    break 'run Pause::Call2Overflow { ret1: ret };
+                };
+                st_acc[top] = ret;
+                st_phase[top] = 1;
+                n = arg2;
+                budget -= 1;
+                if budget == 0 {
+                    yield_now = true;
+                    break 'run Pause::CallAtTop { n, ip: 0 };
+                }
+                continue 'run;
+            }
+            let lhs = st_acc[top];
+            let combined = match combine {
+                ROp::AddI64 => lhs.checked_add(ret),
+                ROp::SubI64 => lhs.checked_sub(ret),
+                ROp::MulI64 => lhs.checked_mul(ret),
+                _ => None,
+            };
+            let Some(val) = combined else {
+                break 'run Pause::CombineOverflow { lhs, rhs: ret };
+            };
+            ret = val;
+            sp = top;
+        }
+    };
+
+    // Reconstruct exact `rec_regs` + `rec_frames` for materialization.
+    let stride = rec.reg_count as usize;
+    let needed = (sp + 2) * stride;
+    if rec_regs.len() < needed {
+        rec_regs.resize(needed, 0);
+    }
+    rec_frames.clear();
+    let (saved_count, cur_base, cur_ip) = match pause {
+        Pause::CallAtTop { n: cur_n, ip } => {
+            let cur_base = sp * stride;
+            rec_regs[cur_base..cur_base + stride].fill(0);
+            rec_regs[cur_base] = cur_n;
+            (sp, cur_base, ip)
+        }
+        Pause::Call2Overflow { ret1 } => {
+            let top = sp - 1;
+            let cur_base = top * stride;
+            rec_regs[cur_base..cur_base + stride].fill(0);
+            rec_regs[cur_base] = st_n[top];
+            rec_regs[cur_base + call1_dst as usize] = ret1;
+            (top, cur_base, (call2_ret_ip as usize).saturating_sub(1))
+        }
+        Pause::CombineOverflow { lhs, rhs } => {
+            let top = sp - 1;
+            let cur_base = top * stride;
+            rec_regs[cur_base..cur_base + stride].fill(0);
+            rec_regs[cur_base] = st_n[top];
+            rec_regs[cur_base + call1_dst as usize] = lhs;
+            rec_regs[cur_base + call2_dst as usize] = rhs;
+            (top, cur_base, combine_ip as usize)
+        }
+    };
+    for k in 0..saved_count {
+        let f_base = k * stride;
+        rec_regs[f_base..f_base + stride].fill(0);
+        rec_regs[f_base] = st_n[k];
+        if st_phase[k] == 0 {
+            rec_frames.push(RecFrame {
+                base: f_base as u32,
+                ret_dst: call1_dst,
+                ret_ip: call1_ret_ip,
+            });
+        } else {
+            rec_regs[f_base + call1_dst as usize] = st_acc[k];
+            rec_frames.push(RecFrame {
+                base: f_base as u32,
+                ret_dst: call2_dst,
+                ret_ip: call2_ret_ip,
+            });
+        }
+    }
+    materialize_int_rec(
+        rec,
+        fn_idx,
+        stack,
+        registers,
+        rec_regs,
+        rec_frames,
+        entry_frame,
+        cur_base,
+        cur_ip,
+        yield_now,
+        budget_start.saturating_sub(budget),
+        work_io,
+        executed_io,
+    )
+}
+
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn run_binary_nested(
+    rec: &IntRecFunc,
+    fn_idx: FunctionIndex,
+    stack: &mut CallStack,
+    registers: &mut Registers,
+    rec_regs: &mut Vec<i64>,
+    rec_frames: &mut Vec<RecFrame>,
+    entry_frame: Frame,
+    caller_vm: Frame,
+    destination: Reg,
+    entry_m: i64,
+    entry_n: i64,
+    max_frames: usize,
+    budget_start: usize,
+    work_io: &mut usize,
+    executed_io: &mut u64,
+    c0: i64,
+    c1: i64,
+    s0: i64,
+    s1: i64,
+    outer_m_reg: u8,
+    inner_ret_dst: u8,
+    inner_call_ret_ip: u16,
+) -> FastExit {
+    let max_d = max_frames.min(2047);
+    let mut st_m = [0i64; 2048];
+    let mut sp: usize = 0;
+    let mut m = entry_m;
+    let mut n = entry_n;
+    let mut budget = budget_start.max(1);
+    let mut yield_now = false;
+
+    loop {
+        if m == 0 {
+            let Some(res) = n.checked_add(c0) else {
+                break;
+            };
+            if sp == 0 {
+                let spent = budget_start.saturating_sub(budget);
+                *work_io = (*work_io).saturating_add(spent);
+                *executed_io += spent.max(1) as u64;
+                stack.pop_for_return();
+                registers.truncate(entry_frame.start());
+                registers.put(caller_vm.base() + destination.index(), Value::Int(res));
+                return FastExit::Returned(Position {
+                    frame: caller_vm,
+                    ip: caller_vm.ip(),
+                });
+            }
+            sp -= 1;
+            m = st_m[sp];
+            n = res;
+        } else if n == 0 {
+            let Some(nm) = m.checked_sub(s0) else {
+                break;
+            };
+            m = nm;
+            n = c1;
+        } else {
+            if sp >= max_d {
+                break;
+            }
+            let Some(outer_m) = m.checked_sub(s0) else {
+                break;
+            };
+            let Some(inner_n) = n.checked_sub(s1) else {
+                break;
+            };
+            st_m[sp] = outer_m;
+            sp += 1;
+            n = inner_n;
+        }
+        budget -= 1;
+        if budget == 0 {
+            yield_now = true;
+            break;
+        }
+    }
+
+    // Reconstruct exact `rec_regs` + `rec_frames` for materialization.
+    let stride = rec.reg_count as usize;
+    let needed = (sp + 2) * stride;
+    if rec_regs.len() < needed {
+        rec_regs.resize(needed, 0);
+    }
+    rec_frames.clear();
+    for (k, &outer_m) in st_m.iter().enumerate().take(sp) {
+        let f_base = k * stride;
+        rec_regs[f_base..f_base + stride].fill(0);
+        rec_regs[f_base] = outer_m.wrapping_add(s0);
+        rec_regs[f_base + outer_m_reg as usize] = outer_m;
+        rec_frames.push(RecFrame {
+            base: f_base as u32,
+            ret_dst: inner_ret_dst,
+            ret_ip: inner_call_ret_ip,
+        });
+    }
+    let cur_base = sp * stride;
+    rec_regs[cur_base..cur_base + stride].fill(0);
+    rec_regs[cur_base] = m;
+    rec_regs[cur_base + 1] = n;
+    materialize_int_rec(
+        rec,
+        fn_idx,
+        stack,
+        registers,
+        rec_regs,
+        rec_frames,
+        entry_frame,
+        cur_base,
+        0,
+        yield_now,
+        budget_start.saturating_sub(budget),
+        work_io,
+        executed_io,
+    )
 }
 
 #[cold]

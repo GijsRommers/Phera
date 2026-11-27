@@ -910,6 +910,13 @@ fn lower_body(
         &local_float,
     );
 
+    // Post-pass 2b: Extract hoisted single-list `ListLoop` kernels (`heapsort_r`, `sieve`).
+    let list_loops = if scalar_loops.is_empty() {
+        extract_list_loops(&mut ops, &mut bc_ip, &mut bc_to_fast, local_count)
+    } else {
+        Vec::new()
+    };
+
     // Post-pass 3: Compile pure-`i64` self-recursion kernel (`fibo_r`, `Ack`).
     let int_rec = crate::fast_tier::int_rec::try_compile_int_rec(
         &ops,
@@ -930,6 +937,7 @@ fn lower_body(
             bc_to_fast: bc_to_fast.into_boxed_slice(),
             f64_consts: f64_consts.into_boxed_slice(),
             scalar_loops: scalar_loops.into_boxed_slice(),
+            list_loops: list_loops.into_boxed_slice(),
             int_rec,
             type_deopts: AtomicU8::new(0),
             reg_count: function.registers as u8,
@@ -1212,6 +1220,17 @@ fn fuse_array_inner_loops(
             continue;
         }
 
+        // Pattern 3b: `Arr2DGetInt(t1, m1, i, k) + Arr2DGetInt(t2, m2, k, j) + Mul(t3, t1, t2) + AddAssign(acc, t3) + IncLoopLtReg(k, cols, target=i)`
+        if let Some((acc_reg, k_reg, cols_reg, end_idx, packed_imm)) =
+            match_arr_2d_mul_add_loop(ops, &is_target, i, local_count)
+        {
+            ops[i] = FastOp::new(Op::Arr2DMulAddLoop, acc_reg, k_reg, cols_reg, packed_imm);
+            skip[(i + 1)..=end_idx].fill(true);
+            changed = true;
+            i = end_idx + 1;
+            continue;
+        }
+
         // Pattern 4: `LoadConstRef(t, id) + CallNoop(dead_dst, t, 1)` -> `CallNoop(dead_dst, 0, 0)`
         if i + 1 < n
             && !is_target[i + 1]
@@ -1223,6 +1242,46 @@ fn fuse_array_inner_loops(
             && ops[i + 1].a >= local_count
         {
             ops[i] = FastOp::new(Op::CallNoop, ops[i + 1].a, 0, 0, 0);
+            skip[i + 1] = true;
+            changed = true;
+            i += 2;
+            continue;
+        }
+
+        // Pattern 5: `Move(t, src) + ArrGetInt(dst, arr, t)` -> `ArrGetInt(dst, arr, src)`
+        // (when `t` is a temp overwritten or cleared immediately after)
+        if i + 1 < n
+            && !is_target[i + 1]
+            && ops[i].op == Op::Move
+            && ops[i].a >= local_count
+            && ops[i + 1].op == Op::ArrGetInt
+            && ops[i + 1].c == ops[i].a
+            && ops[i + 1].b != ops[i].a
+            && fast_temp_dead_after(ops, &is_target, i + 1, ops[i].a)
+        {
+            let mut g = ops[i + 1];
+            g.c = ops[i].b;
+            ops[i] = g;
+            skip[i + 1] = true;
+            changed = true;
+            i += 2;
+            continue;
+        }
+
+        // Pattern 6: `Move(t, src) + ArrSetInt(arr, idx, t)` -> `ArrSetInt(arr, idx, src)`
+        if i + 1 < n
+            && !is_target[i + 1]
+            && ops[i].op == Op::Move
+            && ops[i].a >= local_count
+            && ops[i + 1].op == Op::ArrSetInt
+            && ops[i + 1].c == ops[i].a
+            && ops[i + 1].a != ops[i].a
+            && ops[i + 1].b != ops[i].a
+            && fast_temp_dead_after(ops, &is_target, i + 1, ops[i].a)
+        {
+            let mut s = ops[i + 1];
+            s.c = ops[i].b;
+            ops[i] = s;
             skip[i + 1] = true;
             changed = true;
             i += 2;
@@ -1260,6 +1319,65 @@ fn fuse_array_inner_loops(
     }
     *ops = new_ops;
     *bc_ip = new_bc_ip;
+}
+
+fn fast_temp_dead_after(ops: &[FastOp], is_target: &[bool], after: usize, reg: u8) -> bool {
+    let mut k = after + 1;
+    while k < ops.len() {
+        if is_target[k] {
+            return false;
+        }
+        let op = ops[k];
+        if op.op == Op::Clear && op.a == reg {
+            return true;
+        }
+        if matches!(
+            op.op,
+            Op::ArrGetInt
+                | Op::Arr2DGetInt
+                | Op::LoadInt
+                | Op::LoadF64
+                | Op::LoadBool
+                | Op::LoadNull
+                | Op::LoadConstRef
+                | Op::NewArray
+        ) && op.a == reg
+        {
+            // Check if op reads `reg` before overwriting it.
+            let reads_self = match op.op {
+                Op::ArrGetInt => op.b == reg || op.c == reg,
+                Op::Arr2DGetInt => op.b == reg || op.c == reg || (op.imm & 0xff) as u8 == reg,
+                _ => false,
+            };
+            return !reads_self;
+        }
+        if crate::fast_tier::list_loop::fast_op_reads_reg_pub(op, reg) {
+            return false;
+        }
+        if matches!(op.op, Op::Move | Op::Assign | Op::AssignTake) && op.a == reg {
+            return op.b != reg;
+        }
+        if matches!(
+            op.op,
+            Op::AddNum
+                | Op::SubNum
+                | Op::MulNum
+                | Op::AddImm
+                | Op::SubImm
+                | Op::ShlImm
+                | Op::ShrImm
+        ) && op.a == reg
+        {
+            return true;
+        }
+        if crate::fast_tier::scalar_loop::fast_op_branch_target(op).is_some()
+            || matches!(op.op, Op::ReturnNull | Op::ReturnReg | Op::RetIntImm)
+        {
+            return matches!(op.op, Op::ReturnNull | Op::RetIntImm);
+        }
+        k += 1;
+    }
+    true
 }
 
 fn match_arr_add_loop(
@@ -1421,6 +1539,189 @@ fn match_arr_set_step_loop(
     } else {
         None
     }
+}
+
+fn match_arr_2d_mul_add_loop(
+    ops: &[FastOp],
+    is_target: &[bool],
+    start: usize,
+    local_count: u8,
+) -> Option<(u8, u8, u8, usize, i32)> {
+    let n = ops.len();
+    let mut alias = [0u8; 256];
+    for (idx, slot) in alias.iter_mut().enumerate() {
+        *slot = idx as u8;
+    }
+    let mut p = start;
+    // Allow optional `Move(temp, reg)` index copies before each `Arr2DGetInt`.
+    while p < n && (p == start || !is_target[p]) && ops[p].op == Op::Move && ops[p].a >= local_count
+    {
+        alias[ops[p].a as usize] = alias[ops[p].b as usize];
+        p += 1;
+    }
+    if p >= n
+        || (p > start && is_target[p])
+        || ops[p].op != Op::Arr2DGetInt
+        || (ops[p].imm >> 8) != 0
+    {
+        return None;
+    }
+    let g1 = ops[p];
+    if g1.a < local_count {
+        return None;
+    }
+    p += 1;
+    while p < n && !is_target[p] && ops[p].op == Op::Move && ops[p].a >= local_count {
+        alias[ops[p].a as usize] = alias[ops[p].b as usize];
+        p += 1;
+    }
+    if p >= n || is_target[p] || ops[p].op != Op::Arr2DGetInt || (ops[p].imm >> 8) != 0 {
+        return None;
+    }
+    let g2 = ops[p];
+    if g2.a < local_count {
+        return None;
+    }
+    p += 1;
+    if p >= n || is_target[p] {
+        return None;
+    }
+    let acc_reg = if ops[p].op == Op::MulAddAssign
+        && ((ops[p].b == g1.a && ops[p].c == g2.a) || (ops[p].b == g2.a && ops[p].c == g1.a))
+    {
+        let acc = ops[p].a;
+        p += 1;
+        acc
+    } else if p + 1 < n
+        && !is_target[p + 1]
+        && matches!(ops[p].op, Op::MulNum | Op::MulF64)
+        && ops[p].a >= local_count
+        && ((ops[p].b == g1.a && ops[p].c == g2.a) || (ops[p].b == g2.a && ops[p].c == g1.a))
+    {
+        let mul_dst = ops[p].a;
+        let add = ops[p + 1];
+        let acc = match add.op {
+            Op::AddAssign if add.b == mul_dst => add.a,
+            Op::AddNum | Op::AddF64
+                if (add.b == add.a && add.c == mul_dst) || (add.c == add.a && add.b == mul_dst) =>
+            {
+                add.a
+            }
+            _ => return None,
+        };
+        p += 2;
+        acc
+    } else {
+        return None;
+    };
+    while p < n && !is_target[p] && ops[p].op == Op::Clear && ops[p].a >= local_count {
+        p += 1;
+    }
+    if p >= n || is_target[p] || ops[p].op != Op::IncLoopLtReg || (ops[p].imm as usize) != start {
+        return None;
+    }
+    let k_reg = ops[p].a;
+    let cols_reg = ops[p].b;
+    let m1 = alias[g1.b as usize];
+    let i_reg = alias[g1.c as usize];
+    let k1 = alias[(g1.imm & 0xff) as usize];
+    let m2 = alias[g2.b as usize];
+    let k2 = alias[g2.c as usize];
+    let j_reg = alias[(g2.imm & 0xff) as usize];
+    if k1 != k_reg || k2 != k_reg {
+        return None;
+    }
+    let packed =
+        i32::from(m1) | (i32::from(m2) << 8) | (i32::from(i_reg) << 16) | (i32::from(j_reg) << 24);
+    Some((acc_reg, k_reg, cols_reg, p, packed))
+}
+
+fn extract_list_loops(
+    ops: &mut Vec<FastOp>,
+    bc_ip: &mut Vec<u32>,
+    bc_to_fast: &mut [u16],
+    local_count: u8,
+) -> Vec<crate::fast_tier::list_loop::ListLoop> {
+    use crate::fast_tier::list_loop::try_compile_list_loop;
+    use crate::fast_tier::scalar_loop::fast_op_branch_target;
+
+    // Collect all backward-branch spans, sorted largest-span-first so outer
+    // single-array loops (`heapsort_r`'s `while (1)`, `sieve`'s `for ($i...)`)
+    // hoist the array borrow across their inner loops!
+    let mut raw_spans: Vec<(usize, usize)> = Vec::new();
+    for (end, &op) in ops.iter().enumerate() {
+        let Some(start) = fast_op_branch_target(op) else {
+            continue;
+        };
+        if start <= end && end - start <= 128 {
+            raw_spans.push((start, end));
+        }
+    }
+    raw_spans.sort_by_key(|&(s, e)| std::cmp::Reverse(e - s));
+
+    let mut candidates: Vec<(usize, usize)> = Vec::new();
+    for (start, end) in raw_spans {
+        if candidates.iter().any(|&(s, e)| !(end < s || start > e)) {
+            continue;
+        }
+        if try_compile_list_loop(ops, start, end, start, local_count).is_some() {
+            candidates.push((start, end));
+        }
+    }
+    if candidates.is_empty() || ops.len() + candidates.len() >= 16_383 {
+        return Vec::new();
+    }
+    candidates.sort_by_key(|&(s, _)| s);
+
+    let old_len = ops.len();
+    let mut old_to_new = vec![0usize; old_len + 1];
+    let mut new_ops = Vec::with_capacity(old_len + candidates.len());
+    let mut new_bc_ip = Vec::with_capacity(old_len + candidates.len());
+    let mut new_spans: Vec<(usize, usize)> = Vec::with_capacity(candidates.len());
+
+    let mut cand_i = 0usize;
+    for old_i in 0..old_len {
+        if cand_i < candidates.len() && candidates[cand_i].0 == old_i {
+            let header_pos = new_ops.len();
+            old_to_new[old_i] = header_pos;
+            new_ops.push(FastOp::new(Op::EnterListLoop, 0, 0, 0, cand_i as i32));
+            new_bc_ip.push(bc_ip[old_i]);
+            new_spans.push((header_pos, 0));
+            cand_i += 1;
+        } else {
+            old_to_new[old_i] = new_ops.len();
+        }
+        let pushed_pos = new_ops.len();
+        new_ops.push(ops[old_i]);
+        new_bc_ip.push(bc_ip[old_i]);
+        if cand_i > 0 && candidates[cand_i - 1].1 == old_i {
+            new_spans[cand_i - 1].1 = pushed_pos;
+        }
+    }
+    old_to_new[old_len] = new_ops.len();
+
+    for op in &mut new_ops {
+        remap_fast_op_target(op, &old_to_new);
+    }
+    for slot in bc_to_fast.iter_mut() {
+        if *slot != u16::MAX && (*slot as usize) < old_to_new.len() {
+            *slot = old_to_new[*slot as usize] as u16;
+        }
+    }
+
+    let mut loops = Vec::with_capacity(new_spans.len());
+    for &(header_pos, end_pos) in &new_spans {
+        let Some(compiled) =
+            try_compile_list_loop(&new_ops, header_pos + 1, end_pos, header_pos, local_count)
+        else {
+            return Vec::new();
+        };
+        loops.push(compiled);
+    }
+
+    *ops = new_ops;
+    *bc_ip = new_bc_ip;
+    loops
 }
 
 fn extract_scalar_loops(
@@ -2423,6 +2724,94 @@ mod tests {
             !zend_ucall.scalar_loops.is_empty(),
             "Zend simpleucall should extract ScalarLoop; ops={:?}",
             zend_ucall.ops
+        );
+
+        assert!(
+            matches!(
+                fibo.int_rec.as_ref().map(|r| r.kernel),
+                Some(crate::fast_tier::int_rec::RecKernel::UnaryBinOp { .. })
+            ),
+            "fibo_r should compile to RecKernel::UnaryBinOp; rec={:?}",
+            fibo.int_rec.as_ref().map(|r| r.kernel)
+        );
+        assert!(
+            matches!(
+                ack.int_rec.as_ref().map(|r| r.kernel),
+                Some(crate::fast_tier::int_rec::RecKernel::BinaryNested { .. })
+            ),
+            "Ack should compile to RecKernel::BinaryNested; ops={:?}",
+            ack.int_rec.as_ref().map(|r| &r.ops)
+        );
+        assert!(
+            !zend_sieve.list_loops.is_empty(),
+            "Zend sieve should extract ListLoop; ops={:?}",
+            zend_sieve.ops
+        );
+
+        let zend_mmult = lower_fn(
+            r#"<?php
+            function mmult($rows, $cols, $m1, $m2) {
+                $m3 = array();
+                for ($i=0; $i<$rows; $i++) {
+                    for ($j=0; $j<$cols; $j++) {
+                        $x = 0;
+                        for ($k=0; $k<$cols; $k++) {
+                            $x += $m1[$i][$k] * $m2[$k][$j];
+                        }
+                        $m3[$i][$j] = $x;
+                    }
+                }
+                return $m3;
+            }
+            "#,
+            "mmult",
+        );
+        assert!(
+            zend_mmult.ops.iter().any(|o| o.op == Op::Arr2DMulAddLoop),
+            "Zend mmult should fuse Arr2DMulAddLoop; ops={:?}",
+            zend_mmult.ops
+        );
+
+        let zend_heapsort = lower_fn(
+            r#"<?php
+            function heapsort_r($n, &$ra) {
+                $l = ($n >> 1) + 1;
+                $ir = $n;
+                while (1) {
+                    if ($l > 1) {
+                        $rra = $ra[--$l];
+                    } else {
+                        $rra = $ra[$ir];
+                        $ra[$ir] = $ra[1];
+                        if (--$ir == 1) {
+                            $ra[1] = $rra;
+                            return;
+                        }
+                    }
+                    $i = $l;
+                    $j = $l << 1;
+                    while ($j <= $ir) {
+                        if (($j < $ir) && ($ra[$j] < $ra[$j+1])) {
+                            $j++;
+                        }
+                        if ($rra < $ra[$j]) {
+                            $ra[$i] = $ra[$j];
+                            $i = $j;
+                            $j += $i;
+                        } else {
+                            $j = $ir + 1;
+                        }
+                    }
+                    $ra[$i] = $rra;
+                }
+            }
+            "#,
+            "heapsort_r",
+        );
+        assert!(
+            !zend_heapsort.list_loops.is_empty(),
+            "Zend heapsort_r should extract ListLoop; ops={:?}",
+            zend_heapsort.ops
         );
     }
 }

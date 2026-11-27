@@ -103,6 +103,9 @@ pub(crate) struct CodeTable {
     fast_tier: std::cell::RefCell<Vec<crate::fast_tier::FastEntry>>,
     /// Guard so HTTP forks/rollbacks never touch `fast_tier.borrow()`.
     has_fast_tier: std::cell::Cell<bool>,
+    /// True iff any loaded function in this table is a Tier-2 `fast_candidate`.
+    /// Lets `Machine::run` specialize away all Tier-2 checks on HTTP/OOP code.
+    has_fast_candidates: bool,
 }
 
 impl Default for CodeTable {
@@ -132,7 +135,13 @@ impl CodeTable {
             imports: None,
             fast_tier: std::cell::RefCell::new(Vec::new()),
             has_fast_tier: std::cell::Cell::new(false),
+            has_fast_candidates: false,
         }
+    }
+
+    #[inline(always)]
+    pub(crate) fn has_fast_candidates(&self) -> bool {
+        self.has_fast_candidates
     }
 
     /// Starts recording the trait methods composed into a class being linked.
@@ -274,6 +283,7 @@ impl CodeTable {
             imports: None,
             fast_tier: std::cell::RefCell::new(Vec::new()),
             has_fast_tier: std::cell::Cell::new(false),
+            has_fast_candidates: false,
         }
     }
 
@@ -348,6 +358,9 @@ impl CodeTable {
         let start = first.index();
         self.cover(start + facts.len());
         for (slot, facts) in self.functions[start..].iter_mut().zip(facts) {
+            if facts.fast_candidate {
+                self.has_fast_candidates = true;
+            }
             *slot = facts;
         }
         self.units.push(LoadedUnit {
@@ -833,6 +846,7 @@ impl crate::snapshot::ForkCopy for CodeTable {
                 Vec::new()
             }),
             has_fast_tier: std::cell::Cell::new(self.has_fast_tier.get()),
+            has_fast_candidates: self.has_fast_candidates,
         }
     }
 }

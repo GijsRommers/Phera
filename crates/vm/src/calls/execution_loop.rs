@@ -188,8 +188,10 @@ impl Vm {
             // so the next batch is guarded.
             let exit = if self.object_ids.has_due() {
                 machine.run_guarded()
+            } else if self.code.has_fast_candidates() {
+                machine.run_fast_tier()
             } else {
-                machine.run::<false>()
+                machine.run::<false, false>()
             };
             *work = machine.work;
             self.executed_instructions += machine.executed;
@@ -309,12 +311,21 @@ impl Machine<'_> {
     #[cold]
     #[inline(never)]
     fn run_guarded(&mut self) -> LoopExit {
-        self.run::<true>()
+        self.run::<true, false>()
+    }
+
+    /// The loop when this script contains Tier-2 `fast_candidate` functions.
+    /// Kept out of line so non-numeric HTTP/OOP code running `run::<false, false>()`
+    /// compiles with zero Tier-2 branches, cache lookups, or register spills.
+    #[cold]
+    #[inline(never)]
+    fn run_fast_tier(&mut self) -> LoopExit {
+        self.run::<false, true>()
     }
 
     /// The loop itself. Simple instructions run in [`Machine::run_simple`];
     /// this loop takes the others and switches frames on calls and returns.
-    fn run<const GUARDED: bool>(&mut self) -> LoopExit {
+    fn run<const GUARDED: bool, const FAST_TIER: bool>(&mut self) -> LoopExit {
         let [.., frame] = self.stack.frames() else {
             return LoopExit::Invalid;
         };
@@ -323,7 +334,7 @@ impl Machine<'_> {
             frame,
             ip: frame.ip(),
         };
-        if !GUARDED && self.code.facts(frame.function).fast_candidate {
+        if FAST_TIER && !GUARDED && self.code.facts(frame.function).fast_candidate {
             match self.try_run_fast_chain(position) {
                 Ok(next) => position = next,
                 Err(exit) => return exit,
@@ -361,7 +372,10 @@ impl Machine<'_> {
                     let same_function = next.frame.function == position.frame.function;
                     position = next;
                     if !same_function {
-                        if !GUARDED && self.code.facts(position.frame.function).fast_candidate {
+                        if FAST_TIER
+                            && !GUARDED
+                            && self.code.facts(position.frame.function).fast_candidate
+                        {
                             match self.try_run_fast_chain(position) {
                                 Ok(after) => position = after,
                                 Err(exit) => return exit,
@@ -486,6 +500,43 @@ impl Machine<'_> {
                 value,
                 end,
             } if position.frame.has_extras() => {
+                // Fast path for `foreach ($src as $k => $v) { $dst[$k] += $v; }`:
+                // check on loop start (`ip` is right after `IterNextKeyed`).
+                if !GUARDED
+                    && let Some((dst_arr, expr_dst, clear_dst)) =
+                        self.match_keyed_add_loop(position, key, value)
+                {
+                    let budget = YIELD_AFTER_STEPS.saturating_sub(self.work).max(1);
+                    if let Some(extras) = self.stack.current_extras_present() {
+                        let iterators = &mut extras.iterators;
+                        let slots = self.registers.tail_mut(base);
+                        match crate::iteration::keyed_add_loop_step(
+                            iter,
+                            (key, value),
+                            end,
+                            dst_arr,
+                            expr_dst,
+                            clear_dst,
+                            ip - 1,
+                            iterators,
+                            slots,
+                            &mut ip,
+                            budget,
+                        ) {
+                            crate::iteration::KeyedAddStep::Done(spent) => {
+                                self.work += spent;
+                                self.executed += (spent * 3) as u64;
+                                return Step::Done(ip);
+                            }
+                            crate::iteration::KeyedAddStep::Yield => {
+                                self.work = 0;
+                                self.publish(ip);
+                                return Step::Yield;
+                            }
+                            crate::iteration::KeyedAddStep::Fallback => {}
+                        }
+                    }
+                }
                 let Some(extras) = self.stack.current_extras_present() else {
                     return Step::Slow;
                 };
@@ -764,6 +815,54 @@ impl Machine<'_> {
             }
             _ => Step::Slow,
         }
+    }
+
+    /// Match `IterNextKeyed(iter, k, v, end)` followed immediately by
+    /// `AssignOpPath(Add, dst, dst_arr[k], v)`, optional `Clear(dst)`, and
+    /// `Jump(iter_next_ip)`.
+    #[inline]
+    fn match_keyed_add_loop(
+        &self,
+        position: Position,
+        key: Reg,
+        value: Reg,
+    ) -> Option<(Reg, Reg, bool)> {
+        let iter_ip = position.ip.checked_sub(1)?;
+        let func = self.code.function(position.frame.function);
+        let insts = &func.instructions;
+        let Instruction::AssignOpPath {
+            op: BinaryOp::Add,
+            dst,
+            path,
+            src,
+        } = *insts.get(position.ip)?
+        else {
+            return None;
+        };
+        if src != value {
+            return None;
+        }
+        let (clear_dst, jump_ip) = match insts.get(position.ip + 1) {
+            Some(&Instruction::Clear { reg }) if reg == dst => (true, position.ip + 2),
+            _ => (false, position.ip + 1),
+        };
+        let Some(&Instruction::Jump { target }) = insts.get(jump_ip) else {
+            return None;
+        };
+        if target.index() != iter_ip {
+            return None;
+        }
+        let path_def = func.paths.get(path.index())?;
+        let phera_bytecode::PathBase::Register(dst_arr) = path_def.base else {
+            return None;
+        };
+        let [phera_bytecode::Step::Index(idx_reg)] = path_def.steps.as_slice() else {
+            return None;
+        };
+        if *idx_reg != key {
+            return None;
+        }
+        Some((dst_arr, dst, clear_dst))
     }
 
     /// Count a loop round or a call; `true` when it is time to hand over.
