@@ -21,7 +21,7 @@ use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore, mpsc, oneshot, watch}
 
 use crate::config::{ConnectionLimits, ServerConfig};
 use crate::connection::{ConnectionParams, WebSocketWorkerContext, handle_connection};
-use crate::handler::{Handler, HandlerFactory};
+use crate::handler::HandlerFactory;
 use crate::response_stream::ResponseSlot;
 use crate::response_task::{ConnectionWork, DetachedRequests};
 use crate::websocket::WebSocketHub;
@@ -45,47 +45,6 @@ pub(super) fn bind_listener(addr: SocketAddr) -> io::Result<StdListener> {
     let listener = StdListener::bind(addr)?;
     listener.set_nonblocking(true)?;
     Ok(listener)
-}
-
-/// Bind the listening socket of the first of several workers that each
-/// accept on a socket of their own. With `shared` on Linux it gets
-/// `SO_REUSEPORT`, so [`listener_for_next_worker`] can bind more sockets to
-/// the same port and the kernel spreads new connections over them.
-#[cfg(unix)]
-pub(super) fn bind_worker_listener(addr: SocketAddr, shared: bool) -> io::Result<StdListener> {
-    let socket = Socket::new(Domain::for_address(addr), Type::STREAM, Some(Protocol::TCP))?;
-    socket.set_reuse_address(true)?;
-    #[cfg(target_os = "linux")]
-    if shared {
-        socket.set_reuse_port(true)?;
-    }
-    #[cfg(not(target_os = "linux"))]
-    let _ = shared;
-    socket.set_nonblocking(true)?;
-    socket.bind(&addr.into())?;
-    socket.listen(BACKLOG)?;
-    Ok(StdListener::from(socket))
-}
-
-#[cfg(not(unix))]
-pub(super) fn bind_worker_listener(addr: SocketAddr, _shared: bool) -> io::Result<StdListener> {
-    bind_listener(addr)
-}
-
-/// The listening socket of one more worker next to `first`. On Linux it is
-/// a new `SO_REUSEPORT` socket on the same port: each worker accepts from
-/// its own queue. Elsewhere (macOS spreads nothing over `SO_REUSEPORT`
-/// sockets) it is the same socket, duplicated: every worker's reactor waits
-/// on it, and whichever is free first accepts.
-pub(super) fn listener_for_next_worker(first: &StdListener) -> io::Result<StdListener> {
-    #[cfg(target_os = "linux")]
-    {
-        bind_worker_listener(first.local_addr()?, true)
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        first.try_clone()
-    }
 }
 
 /// Tracks one occupied TCP connection slot on a worker.
@@ -158,7 +117,7 @@ pub(super) fn run_direct(
     factory: Arc<dyn HandlerFactory>,
     ws_hub: Arc<WebSocketHub>,
     config: ServerConfig,
-    shutdown: watch::Receiver<bool>,
+    mut shutdown: watch::Receiver<bool>,
 ) {
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -176,116 +135,104 @@ pub(super) fn run_direct(
         // (Rc fields) never leaves this thread.
         let handler = factory.create(index);
         handler.start().await;
-        serve_direct(index, listener, handler, ws_hub, config, shutdown).await;
-    }));
-}
-
-/// Accept from `listener` and serve every connection with `handler` on the
-/// current thread's `LocalSet`, until `shutdown` turns true; then drain
-/// in-flight requests up to `shutdown_timeout`.
-pub(crate) async fn serve_direct(
-    index: usize,
-    listener: StdListener,
-    handler: Rc<dyn Handler>,
-    ws_hub: Arc<WebSocketHub>,
-    config: ServerConfig,
-    mut shutdown: watch::Receiver<bool>,
-) {
-    let listener = {
-        // Tokio refuses to register a blocking socket.
-        if let Err(error) = listener.set_nonblocking(true) {
-            eprintln!("phera-server: worker {index} could not ready its socket: {error}");
-            return;
-        }
-        match TcpListener::from_std(listener) {
-            Ok(listener) => listener,
-            Err(error) => {
-                eprintln!("phera-server: worker {index} could not register its socket: {error}");
+        let listener = {
+            // Tokio refuses to register a blocking socket.
+            if let Err(error) = listener.set_nonblocking(true) {
+                eprintln!("phera-server: worker {index} could not ready its socket: {error}");
                 return;
             }
-        }
-    };
-    let local_addr = listener
-        .local_addr()
-        .expect("listening socket has an address");
-    let limits = ConnectionLimits::from(&config);
-    let connection_limit = config.max_connections_per_worker.max(1);
-    let free_slots = Arc::new(Semaphore::new(connection_limit));
-    let detached = Rc::new(DetachedRequests::new(connection_limit));
-    let ws_slots = Arc::new(Semaphore::new(
-        config.websocket.max_connections_per_worker.max(1),
-    ));
-    let (http_done_tx, mut http_done_rx) = mpsc::channel::<()>(1);
-    let (ws_done_tx, mut ws_done_rx) = mpsc::channel::<()>(1);
-    let ws_config = config.websocket.clone();
-    loop {
-        // A slot first, then a connection: beyond the limit, clients
-        // wait in the operating system's queue instead of being
-        // accepted and costing memory here.
-        let slot = tokio::select! {
-            _ = wait_for_shutdown(&mut shutdown) => break,
-            slot = free_slots.clone().acquire_owned() => slot,
-        };
-        let Ok(slot) = slot else { break };
-        tokio::select! {
-            _ = wait_for_shutdown(&mut shutdown) => break,
-            accepted = listener.accept() => match accepted {
-                Ok((stream, peer)) => {
-                    let handler = handler.clone();
-                    let shutdown = shutdown.clone();
-                    let http_done = http_done_tx.clone();
-                    let work = Rc::new(ConnectionWork {
-                        tcp_slot: RefCell::new(Some(ConnectionSlot::Direct(slot))),
-                        detached: detached.clone(),
-                        response: ResponseSlot::new(),
-                    });
-                    let ws_ctx = WebSocketWorkerContext {
-                        hub: ws_hub.clone(),
-                        config: ws_config.clone(),
-                        slots: ws_slots.clone(),
-                        done: ws_done_tx.clone(),
-                    };
-                    tokio::task::spawn_local(async move {
-                        let _http_done = http_done;
-                        handle_connection(ConnectionParams {
-                            stream,
-                            peer,
-                            local_addr,
-                            handler,
-                            shutdown,
-                            limits,
-                            work,
-                            ws: ws_ctx,
-                        })
-                        .await;
-                    });
-                }
-                // A client that hung up before we accepted it is normal.
-                Err(error) if is_transient_accept_error(&error) => continue,
-                // Running out of file descriptors and similar errors pass;
-                // a worker that stopped accepting would never come back.
+            match TcpListener::from_std(listener) {
+                Ok(listener) => listener,
                 Err(error) => {
-                    eprintln!("phera-server: worker {index} accept failed: {error}");
-                    tokio::select! {
-                        _ = wait_for_shutdown(&mut shutdown) => break,
-                        _ = tokio::time::sleep(ACCEPT_RETRY_DELAY) => {}
-                    }
+                    eprintln!(
+                        "phera-server: worker {index} could not register its socket: {error}"
+                    );
+                    return;
                 }
-            },
+            }
+        };
+        let local_addr = listener
+            .local_addr()
+            .expect("listening socket has an address");
+        let limits = ConnectionLimits::from(&config);
+        let connection_limit = config.max_connections_per_worker.max(1);
+        let free_slots = Arc::new(Semaphore::new(connection_limit));
+        let detached = Rc::new(DetachedRequests::new(connection_limit));
+        let ws_slots = Arc::new(Semaphore::new(
+            config.websocket.max_connections_per_worker.max(1),
+        ));
+        let (http_done_tx, mut http_done_rx) = mpsc::channel::<()>(1);
+        let (ws_done_tx, mut ws_done_rx) = mpsc::channel::<()>(1);
+        let ws_config = config.websocket.clone();
+        loop {
+            // A slot first, then a connection: beyond the limit, clients
+            // wait in the operating system's queue instead of being
+            // accepted and costing memory here.
+            let slot = tokio::select! {
+                _ = wait_for_shutdown(&mut shutdown) => break,
+                slot = free_slots.clone().acquire_owned() => slot,
+            };
+            let Ok(slot) = slot else { break };
+            tokio::select! {
+                _ = wait_for_shutdown(&mut shutdown) => break,
+                accepted = listener.accept() => match accepted {
+                    Ok((stream, peer)) => {
+                        let handler = handler.clone();
+                        let shutdown = shutdown.clone();
+                        let http_done = http_done_tx.clone();
+                        let work = Rc::new(ConnectionWork {
+                            tcp_slot: RefCell::new(Some(ConnectionSlot::Direct(slot))),
+                            detached: detached.clone(),
+                            response: ResponseSlot::new(),
+                        });
+                        let ws_ctx = WebSocketWorkerContext {
+                            hub: ws_hub.clone(),
+                            config: ws_config.clone(),
+                            slots: ws_slots.clone(),
+                            done: ws_done_tx.clone(),
+                        };
+                        tokio::task::spawn_local(async move {
+                            let _http_done = http_done;
+                            handle_connection(ConnectionParams {
+                                stream,
+                                peer,
+                                local_addr,
+                                handler,
+                                shutdown,
+                                limits,
+                                work,
+                                ws: ws_ctx,
+                            })
+                            .await;
+                        });
+                    }
+                    // A client that hung up before we accepted it is normal.
+                    Err(error) if is_transient_accept_error(&error) => continue,
+                    // Running out of file descriptors and similar errors pass;
+                    // a worker that stopped accepting would never come back.
+                    Err(error) => {
+                        eprintln!("phera-server: worker {index} accept failed: {error}");
+                        tokio::select! {
+                            _ = wait_for_shutdown(&mut shutdown) => break,
+                            _ = tokio::time::sleep(ACCEPT_RETRY_DELAY) => {}
+                        }
+                    }
+                },
+            }
         }
-    }
-    drop(listener);
-    drop(http_done_tx);
-    drop(ws_done_tx);
-    // Drain HTTP connections and detached requests up to `shutdown_timeout`
-    // while WebSockets send `1001` and run `onClose` within `websocket.shutdown_grace`.
-    let http_drain = tokio::time::timeout(config.shutdown_timeout, async {
-        let _ = http_done_rx.recv().await;
-        detached.drain().await;
-    });
-    let ws_drain = tokio::time::timeout(config.websocket.shutdown_grace, ws_done_rx.recv());
-    let _ = tokio::join!(http_drain, ws_drain);
-    detached.stop();
+        drop(listener);
+        drop(http_done_tx);
+        drop(ws_done_tx);
+        // Drain HTTP connections and detached requests up to `shutdown_timeout`
+        // while WebSockets send `1001` and run `onClose` within `websocket.shutdown_grace`.
+        let http_drain = tokio::time::timeout(config.shutdown_timeout, async {
+            let _ = http_done_rx.recv().await;
+            detached.drain().await;
+        });
+        let ws_drain = tokio::time::timeout(config.websocket.shutdown_grace, ws_done_rx.recv());
+        let _ = tokio::join!(http_drain, ws_drain);
+        detached.stop();
+    }));
 }
 
 /// Run one worker in multi-worker mode, receiving accepted sockets over `rx`

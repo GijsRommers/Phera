@@ -20,10 +20,10 @@ use phera_extension_api::{
     ArrayKey, ClassEntry, ClassKind, ConstantValue, Context, LocalFuture, MethodEntry, NativeError,
     NativeResult, Object, Param, ParamType, PhpArray, PhpString, Registry, Value, Visibility, args,
 };
-use phera_server::{Body, Response};
 use smallvec::SmallVec;
 
 use super::RESPONSE_CLASS;
+use crate::HttpResponse;
 
 const TEXT: &str = "text/plain; charset=utf-8";
 const HTML: &str = "text/html; charset=utf-8";
@@ -63,16 +63,16 @@ impl ResponseData {
         self.headers.push((name, value));
     }
 
-    fn into_server(self) -> Response {
-        Response {
+    fn into_http_response(self) -> HttpResponse {
+        HttpResponse {
             status: self.status,
             headers: self
                 .headers
                 .into_iter()
                 .map(|(name, value)| (name, value.into_bytes()))
                 .collect(),
-            body: Body::Bytes(self.body.into_bytes()),
-            upgrade: None,
+            body: self.body.into_bytes(),
+            websocket: None,
         }
     }
 }
@@ -414,22 +414,30 @@ fn check_header_value(value: &[u8], method: &str) -> Result<(), NativeError> {
 pub(super) async fn from_handler_result(
     context: &mut dyn Context,
     result: Value,
-) -> Result<Response, NativeError> {
+) -> Result<HttpResponse, NativeError> {
     let result = result.deref().clone();
     match result {
         Value::Object(object) => match take_response(object) {
-            Some(data) => Ok(data.into_server()),
+            Some(data) => Ok(data.into_http_response()),
             None => Err(wrong_return_type("an object of another class")),
         },
-        Value::String(body) => Ok(ResponseData::new(200, Some(TEXT), body).into_server()),
+        Value::String(body) => Ok(ResponseData::new(200, Some(TEXT), body).into_http_response()),
         Value::InternedStr(body) => {
-            Ok(ResponseData::new(200, Some(TEXT), PhpString::from(body.as_bytes())).into_server())
+            Ok(
+                ResponseData::new(200, Some(TEXT), PhpString::from(body.as_bytes()))
+                    .into_http_response(),
+            )
         }
         Value::Array(_) => {
             let body = encode_json(context, &result).await?;
-            Ok(ResponseData::new(200, Some(JSON), PhpString::from(body)).into_server())
+            Ok(ResponseData::new(200, Some(JSON), PhpString::from(body)).into_http_response())
         }
-        Value::Null => Ok(Response::new(204)),
+        Value::Null => Ok(HttpResponse {
+            status: 204,
+            headers: Vec::new(),
+            body: Vec::new(),
+            websocket: None,
+        }),
         other => Err(wrong_return_type(&other.type_name())),
     }
 }
@@ -447,6 +455,6 @@ fn take_response(object: Rc<Object>) -> Option<ResponseData> {
 
 fn wrong_return_type(given: &str) -> NativeError {
     NativeError::type_error(format!(
-        "Phera\\Http\\Server: a handler must return Phera\\Http\\Response, string, array or null, {given} returned"
+        "Phera\\Http\\Router: a handler must return Phera\\Http\\Response, string, array or null, {given} returned"
     ))
 }

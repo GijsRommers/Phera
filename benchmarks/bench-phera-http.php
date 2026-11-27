@@ -1,31 +1,22 @@
 <?php
-// The built-in HTTP server, Phera\Http\Server, on the three routes of the
-// usual web framework benchmarks.
-//
-//     PORT=8080 WORKERS=4 phera benchmarks/bench-phera-http.php
-//     oha -z 10s -c 64 http://127.0.0.1:8080/plaintext
-//     oha -z 10s -c 64 http://127.0.0.1:8080/json
-//     oha -z 10s -c 64 http://127.0.0.1:8080/users/42
-//
-// PORT defaults to 8080 (0 picks a free port; the line printed at start
-// says which), WORKERS to the number of CPUs. Stop it with Ctrl-C.
 
-use Phera\Http\{Request, Response, Server};
+/**
+ * Benchmark routes for unified `phera serve` + `Phera\Http\Router`:
+ *   phera serve --listen 127.0.0.1:8791 --workers 2 benchmarks/bench-phera-http.php
+ */
 
-$port = getenv('PORT');
-$workers = getenv('WORKERS');
-$server = new Server(
-    '127.0.0.1:' . ($port === false ? '8080' : $port),
-    workers: $workers === false ? 0 : (int) $workers,
-);
+use Phera\Http\Request;
+use Phera\Http\Response;
+use Phera\Http\Router;
 
-$server
-    ->get('/plaintext', fn() => 'Hello, World!')
-    ->get('/json', fn() => Response::json(['message' => 'Hello, World!']))
-    ->get('/users/{id}', fn(Request $request) => Response::json([
-        'id' => (int) $request->param('id'),
-        'name' => 'User ' . $request->param('id'),
-    ]));
+$router = new Router();
 
-echo "listening on http://", $server->address(), " with ", $server->workers(), " workers\n";
-$server->listen();
+$router->get('/plaintext', static fn(): Response => Response::text('Hello, World!'));
+
+$router->get('/json', static fn(): Response => Response::json(['message' => 'Hello, World!']));
+
+$router->get('/users/{id}', static function (Request $req): Response {
+    return Response::json(['id' => (int) $req->param('id')]);
+});
+
+return $router;

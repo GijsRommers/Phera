@@ -147,7 +147,52 @@ pub(crate) struct ServeOptions {
     pub ws_ping_interval: Option<Duration>,
     pub ws_send_queue: Option<usize>,
     pub ws_allowed_origins: Option<Vec<String>>,
+    /// `--routes`: a `Phera\Http\Router` script mounted ahead of static files
+    /// and the front controller.
+    pub routes: Option<PathBuf>,
     pub path: PathBuf,
+}
+
+impl ServeOptions {
+    /// Options for handing off a `Phera\Http\serve($router, ...)` script run
+    /// directly via `phera app.php` to the unified `phera serve` engine.
+    pub(crate) fn for_script(
+        script: PathBuf,
+        listen: SocketAddr,
+        workers: Option<usize>,
+        files: FileSelection,
+        ini: Vec<(String, String)>,
+        debug: bool,
+    ) -> Self {
+        ServeOptions {
+            files,
+            ini,
+            dev: false,
+            debug,
+            debug_boot: false,
+            allow_remote_debug: false,
+            listen: Some(listen),
+            workers,
+            preload: false,
+            class_warmup: true,
+            service_warmup: true,
+            warmup: Vec::new(),
+            compress: false,
+            no_process: false,
+            request_timeout: None,
+            request_read_timeout: None,
+            trusted_proxies: None,
+            health_path: None,
+            ws_max_connections: None,
+            ws_max_message_size: None,
+            ws_idle_timeout: None,
+            ws_ping_interval: None,
+            ws_send_queue: None,
+            ws_allowed_origins: None,
+            routes: None,
+            path: script,
+        }
+    }
 }
 
 pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, String> {
@@ -357,10 +402,15 @@ fn parse_serve(
         ws_ping_interval: None,
         ws_send_queue: None,
         ws_allowed_origins: None,
+        routes: None,
         path: PathBuf::from("."),
     };
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
+            "--routes" => {
+                let value = arguments.next().ok_or("--routes needs a script path.")?;
+                options.routes = Some(PathBuf::from(value));
+            }
             "-d" => options.ini.push(ini_option(&mut arguments)?),
             "--env-file" | "--no-env-file" => {
                 file_option(&argument, &mut arguments, &mut options.files)?

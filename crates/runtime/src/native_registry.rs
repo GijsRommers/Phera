@@ -23,7 +23,6 @@ pub(crate) fn web() -> Arc<Registry> {
 fn register_cli(registry: &mut Registry) {
     register_common(registry);
     phera_ext_process::register_cli_process_control(registry);
-    crate::http_server::register(registry);
     registry.constant("PHP_SAPI", Sapi::Cli.name());
 }
 
@@ -95,4 +94,5 @@ fn register_common(registry: &mut Registry) {
     registry.load(&phera_ext_session::Session);
     adapters::register(registry);
     crate::websocket::register(registry);
+    crate::http_server::register(registry);
 }

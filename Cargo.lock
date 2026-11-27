@@ -3714,6 +3714,7 @@ dependencies = [
  "phera-value",
  "phera-vm",
  "rcgen",
+ "smallvec",
  "tempfile",
  "tokio",
 ]

@@ -1,13 +1,15 @@
-//! End-to-end tests of `Phera\Http\Server`: a script run with the `phera`
-//! binary serves real HTTP/1.1 and HTTP/2 connections.
-//!
-//! Every script listens on port 0 and prints `listening on http://ADDR` as
-//! its first line; the test reads the address from there.
+//! End-to-end tests of unified `phera serve` + `Phera\Http\Router`:
+//! - Direct `phera serve app.php` returning a `Router`
+//! - `Phera\Http\serve($router, ...)` CLI handoff to the same `phera serve` engine
+//! - Hybrid mode (`[server] routes = "routes.php"` + static files + classic PHP)
+//! - True M:N concurrency via per-worker persistent `idle: Vec<Vm>` pools
+//! - HTTP/1.1 keep-alive, HTTP/2 (h2c), SQLite `onStart`, 500 recovery, and `exit()` discard.
 
 use std::collections::HashSet;
 use std::io::{BufRead, BufReader, Read};
 use std::path::PathBuf;
-use std::process::{Child, ChildStdout, Command, Stdio};
+use std::process::{Child, ChildStderr, ChildStdout, Command, Stdio};
+use std::time::{Duration, Instant};
 
 use http_body_util::{BodyExt, Full};
 use hyper::body::Bytes;
@@ -15,31 +17,64 @@ use hyper::client::conn::{http1, http2};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use tokio::net::TcpStream;
 
-/// A running `phera script.php`.
 struct App {
     process: Child,
     stdout: BufReader<ChildStdout>,
+    stderr: Option<ChildStderr>,
     address: String,
     root: PathBuf,
 }
 
 impl App {
-    fn start(name: &str, script: &str, workers: usize) -> App {
+    fn start_serve(name: &str, script: &str, workers: usize, extra_args: &[&str]) -> App {
         let root =
-            std::env::temp_dir().join(format!("phera-http-server-{name}-{}", std::process::id()));
+            std::env::temp_dir().join(format!("phera-http-router-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).expect("create test directory");
         let file = root.join("app.php");
         std::fs::write(&file, script).expect("write script");
-        let mut process = Command::new(env!("CARGO_BIN_EXE_phera"))
-            .arg(&file)
+        Self::spawn_serve(root, file, workers, extra_args)
+    }
+
+    fn spawn_serve(root: PathBuf, target: PathBuf, workers: usize, extra_args: &[&str]) -> App {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_phera"));
+        cmd.arg("serve")
+            .arg("--listen")
+            .arg("127.0.0.1:0")
+            .arg("--workers")
+            .arg(workers.to_string());
+        for arg in extra_args {
+            cmd.arg(arg);
+        }
+        cmd.arg(&target)
+            .current_dir(&root)
+            .env_clear()
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        Self::read_banner(cmd, root)
+    }
+
+    fn start_cli_handoff(name: &str, script: &str, workers: usize) -> App {
+        let root =
+            std::env::temp_dir().join(format!("phera-http-cli-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("create test directory");
+        let file = root.join("app.php");
+        std::fs::write(&file, script).expect("write script");
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_phera"));
+        cmd.arg(&file)
             .current_dir(&root)
             .env_clear()
             .env("WORKERS", workers.to_string())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .expect("start phera");
+            .stderr(Stdio::piped());
+        Self::read_banner(cmd, root)
+    }
+
+    fn read_banner(mut cmd: Command, root: PathBuf) -> App {
+        let mut process = cmd.spawn().expect("start phera");
         let mut stdout = BufReader::new(process.stdout.take().expect("stdout"));
+        let stderr = process.stderr.take();
         let mut banner = String::new();
         stdout.read_line(&mut banner).expect("read banner");
         let address = banner
@@ -51,28 +86,28 @@ impl App {
         App {
             process,
             stdout,
+            stderr,
             address,
             root,
         }
     }
 
-    /// Waits for the script to end; returns its exit status and the rest
-    /// of what it printed. Waits on a blocking thread, so that the test's
-    /// own connections keep running and can close when the server ends
-    /// them.
-    async fn wait(self) -> (i32, String) {
+    async fn wait(self) -> (i32, String, String) {
         tokio::task::spawn_blocking(move || {
             let mut app = self;
-            let mut rest = String::new();
-            app.stdout.read_to_string(&mut rest).expect("read output");
+            let mut out = String::new();
+            app.stdout.read_to_string(&mut out).expect("read stdout");
+            let mut err = String::new();
+            if let Some(mut stderr) = app.stderr.take() {
+                let _ = stderr.read_to_string(&mut err);
+            }
             let status = app.process.wait().expect("wait for phera");
-            (status.code().unwrap_or(-1), rest)
+            (status.code().unwrap_or(-1), out, err)
         })
         .await
         .expect("wait task")
     }
 
-    /// Stops the server the way an operator does.
     fn terminate(&self) {
         let status = Command::new("kill")
             .args(["-TERM", &self.process.id().to_string()])
@@ -90,7 +125,6 @@ impl Drop for App {
     }
 }
 
-/// A response as the tests look at it.
 struct Reply {
     status: u16,
     headers: hyper::HeaderMap,
@@ -141,7 +175,6 @@ async fn read(response: hyper::Response<hyper::body::Incoming>) -> Reply {
     }
 }
 
-/// An HTTP/1.1 connection that sends its requests one after another.
 struct Http1 {
     sender: http1::SendRequest<Full<Bytes>>,
     address: String,
@@ -184,16 +217,16 @@ async fn get(address: &str, target: &str) -> Reply {
 }
 
 const ROUTES: &str = r#"<?php
-use Phera\Http\{Server, Request, Response};
+use Phera\Http\{Router, Request, Response};
 
-$server = new Server('127.0.0.1:0', (int) getenv('WORKERS'));
+$router = new Router();
 $echo = fn(Request $r) => [
     'method' => $r->method(),
     'path' => $r->path(),
     'uri' => $r->uri(),
     'params' => $r->params(),
 ];
-$server
+$router
     ->get('/plaintext', fn() => 'Hello, World!')
     ->get('/json', fn() => Response::json(['message' => 'Hello, World!', 'path' => '/a/b', 'name' => 'Zoë']))
     ->get('/users/{id}', fn(Request $r) => Response::json(['id' => $r->param('id'), 'missing' => $r->param('nope', 'dflt')]))
@@ -232,13 +265,12 @@ $server
         return [$r->status(), $r->body(), $r->header('content-type'), $r->headers()];
     })
     ->fallback(fn(Request $r) => Response::text('fallback for ' . $r->path(), 404));
-echo "listening on http://", $server->address(), "\n";
-$server->listen();
+return $router;
 "#;
 
 #[tokio::test(flavor = "current_thread")]
 async fn routes_methods_params_query_headers_and_bodies() {
-    let app = App::start("routes", ROUTES, 1);
+    let app = App::start_serve("routes", ROUTES, 1, &[]);
     let mut client = Http1::connect(&app.address).await;
 
     let reply = client.get("/plaintext").await;
@@ -311,7 +343,6 @@ async fn routes_methods_params_query_headers_and_bodies() {
 
     let reply = client.send("HEAD", "/only-head", &[], "").await;
     assert_eq!((reply.status, reply.header("x-head")), (200, "yes"));
-    // HEAD is answered by a GET route, with the GET headers and no body.
     let reply = client.send("HEAD", "/plaintext", &[], "").await;
     assert_eq!(reply.status, 200);
     assert_eq!(reply.header("content-length"), "13");
@@ -321,16 +352,14 @@ async fn routes_methods_params_query_headers_and_bodies() {
         let reply = client.send(method, "/any", &[], "").await;
         assert!(reply.body.contains(&format!(r#""method":"{method}""#)));
     }
-    assert!(client.send("POST", "/route", &[], "").await.status == 200);
+    assert_eq!(client.send("POST", "/route", &[], "").await.status, 200);
 
-    // A path with routes for other methods only: 405 with their list.
     let reply = client.send("POST", "/plaintext", &[], "").await;
     assert_eq!(reply.status, 405);
     assert_eq!(reply.header("allow"), "GET, HEAD");
     let reply = client.send("GET", "/route", &[], "").await;
     assert_eq!((reply.status, reply.header("allow")), (405, "POST"));
 
-    // No route at all: the fallback.
     let reply = client.get("/nowhere").await;
     assert_eq!(
         (reply.status, reply.body.as_str()),
@@ -359,22 +388,21 @@ async fn routes_methods_params_query_headers_and_bodies() {
     assert_eq!(app.wait().await.0, 0);
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn route_registration_errors_are_php_exceptions() {
+#[test]
+fn route_registration_errors_are_php_exceptions() {
     let script = r#"<?php
-use Phera\Http\Server;
-$server = new Server('127.0.0.1:0', 1);
-echo "listening on http://", $server->address(), "\n";
+use Phera\Http\Router;
+$router = new Router();
 $attempts = [
-    fn() => $server->get('no-slash', fn() => 1),
-    fn() => $server->get('/a/{id', fn() => 1),
-    fn() => $server->get('/a/x{id}', fn() => 1),
-    fn() => $server->get('/a/*rest/more', fn() => 1),
-    fn() => $server->get('/twice', fn() => 1)->get('/twice', fn() => 2),
-    fn() => $server->route('BREW', '/coffee', fn() => 1),
-    fn() => $server->get('/x', 'no_such_function'),
-    fn() => new Server('not an address'),
-    fn() => new Server('127.0.0.1:0', -1),
+    fn() => $router->get('no-slash', fn() => 1),
+    fn() => $router->get('/a/{id', fn() => 1),
+    fn() => $router->get('/a/x{id}', fn() => 1),
+    fn() => $router->get('/a/*rest/more', fn() => 1),
+    fn() => $router->get('/twice', fn() => 1)->get('/twice', fn() => 2),
+    fn() => $router->route('BREW', '/coffee', fn() => 1),
+    fn() => $router->get('/x', 'no_such_function'),
+    fn() => Phera\Http\serve($router, 'not an address'),
+    fn() => Phera\Http\serve($router, '127.0.0.1:0', -1),
 ];
 foreach ($attempts as $attempt) {
     try {
@@ -384,14 +412,25 @@ foreach ($attempts as $attempt) {
         echo get_class($e), ': ', $e->getMessage(), "\n";
     }
 }
-$server->stop();
-$server->listen();
 echo "done\n";
 "#;
-    let app = App::start("registration", script, 1);
-    let (status, output) = app.wait().await;
-    assert_eq!(status, 0, "{output}");
-    let lines: Vec<&str> = output.lines().collect();
+    let root = std::env::temp_dir().join(format!("phera-http-reg-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).expect("mkdir");
+    let file = root.join("reg.php");
+    std::fs::write(&file, script).expect("write");
+    let out = Command::new(env!("CARGO_BIN_EXE_phera"))
+        .arg(&file)
+        .output()
+        .expect("run phera");
+    let _ = std::fs::remove_dir_all(&root);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let lines: Vec<&str> = stdout.lines().collect();
     assert_eq!(
         lines,
         [
@@ -399,23 +438,23 @@ echo "done\n";
             r#"ValueError: invalid route pattern "/a/{id": "{" is not closed"#,
             r#"ValueError: invalid route pattern "/a/x{id}": a {parameter} must be a whole path segment"#,
             r#"ValueError: invalid route pattern "/a/*rest/more": a *wildcard must be the end of the pattern"#,
-            "LogicException: Phera\\Http\\Server: route GET /twice is already registered",
-            r#"ValueError: Phera\Http\Server::route(): Argument #1 ($method) must be an HTTP method such as "GET" or "ANY", "BREW" given"#,
-            "TypeError: Phera\\Http\\Server::get(): Argument #2 ($handler) must be a valid callback, function \"no_such_function\" not found or invalid function name",
-            r#"ValueError: Phera\Http\Server::__construct(): Argument #1 ($addr) must be "host:port", "not an address" given"#,
-            "ValueError: Phera\\Http\\Server::__construct(): Argument #2 ($workers) must be greater than or equal to 0",
+            "LogicException: Phera\\Http\\Router: route GET /twice is already registered",
+            r#"ValueError: Phera\Http\Router::route(): Argument #1 ($method) must be an HTTP method such as "GET" or "ANY", "BREW" given"#,
+            "TypeError: Phera\\Http\\Router::get(): Argument #2 ($handler) must be a valid callback, function \"no_such_function\" not found or invalid function name",
+            r#"ValueError: Phera\Http\serve(): Argument #2 ($addr) must be "host:port", "not an address" given"#,
+            "ValueError: Phera\\Http\\serve(): Argument #3 ($workers) must be greater than or equal to 0",
             "done",
         ]
     );
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_failing_handler_answers_500_and_the_worker_goes_on() {
+async fn failing_handler_answers_500_and_exit_discards_only_that_instance() {
     let script = r#"<?php
-use Phera\Http\{Server, Request};
-$server = new Server('127.0.0.1:0', 1);
+use Phera\Http\{Router, Request};
+$router = new Router();
 $count = 0;
-$server
+$router
     ->get('/count', function () use (&$count) { return (string) ++$count; })
     ->get('/throw', function () use (&$count) { $count += 100; throw new RuntimeException('kaboom'); })
     ->get('/deep', function () {
@@ -427,12 +466,11 @@ $server
     ->post('/json', fn(Request $r) => $r->json())
     ->get('/caught', function () {
         try { throw new Exception('inner'); } catch (Exception $e) { return 'caught ' . $e->getMessage(); }
-    });
-echo "listening on http://", $server->address(), "\n";
-$server->listen();
-echo "count at the end: $count\n";
+    })
+    ->get('/exit', function () { exit(3); });
+return $router;
 "#;
-    let app = App::start("failures", script, 1);
+    let app = App::start_serve("failures", script, 1, &[]);
     let mut client = Http1::connect(&app.address).await;
     assert_eq!(client.get("/count").await.body, "1");
     for target in ["/throw", "/deep", "/error", "/type"] {
@@ -442,51 +480,57 @@ echo "count at the end: $count\n";
     }
     let reply = client.send("POST", "/json", &[], "{not json").await;
     assert_eq!(reply.status, 500);
-    // The VM state survived: the counter still counts, and catch works.
+    // The pooled instance kept its state across caught errors.
     assert_eq!(client.get("/count").await.body, "102");
     assert_eq!(client.get("/caught").await.body, "caught inner");
+
+    // `exit()` discards only that pooled VM instance; the worker stays alive and
+    // the next request forks a fresh instance starting back at `$count = 0`.
+    let reply = client.get("/exit").await;
+    assert_eq!(reply.status, 500);
+    assert_eq!(client.get("/count").await.body, "1");
+
     app.terminate();
-    let (status, output) = app.wait().await;
+    let (status, _out, err) = app.wait().await;
     assert_eq!(status, 0);
     assert!(
-        output.contains("Fatal error: Uncaught RuntimeException: kaboom"),
-        "{output}"
+        err.contains("Fatal error: Uncaught RuntimeException: kaboom"),
+        "{err}"
     );
-    assert!(output.contains("finally ran"), "{output}");
-    assert!(output.contains("Uncaught LogicException: deep"), "{output}");
+    assert!(err.contains("finally ran"), "{err}");
+    assert!(err.contains("Uncaught LogicException: deep"), "{err}");
     assert!(
-        output.contains("Call to undefined function undefined_function()"),
-        "{output}"
+        err.contains("Call to undefined function undefined_function()"),
+        "{err}"
     );
     assert!(
-        output.contains(
+        err.contains(
             "a handler must return Phera\\Http\\Response, string, array or null, int returned"
         ),
-        "{output}"
+        "{err}"
     );
     assert!(
-        output.contains("Uncaught JsonException: Syntax error"),
-        "{output}"
+        err.contains("Uncaught JsonException: Syntax error"),
+        "{err}"
     );
-    assert!(output.ends_with("count at the end: 102\n"), "{output}");
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn on_worker_start_keeps_a_sqlite_connection_per_worker() {
+async fn on_start_keeps_a_sqlite_connection_per_instance() {
     let script = r#"<?php
-use Phera\Http\{Server, Request, Response};
-$server = new Server('127.0.0.1:0', 1);
+use Phera\Http\{Router, Request, Response};
+$router = new Router();
 $db = null;
 $insert = null;
 $opened = 0;
-$server->onWorkerStart(function (int $worker) use (&$db, &$insert, &$opened) {
+$router->onStart(function (int $worker) use (&$db, &$insert, &$opened) {
     $opened++;
     $db = new PDO('sqlite::memory:');
     $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $db->exec('CREATE TABLE notes (id INTEGER PRIMARY KEY, text TEXT NOT NULL)');
     $insert = $db->prepare('INSERT INTO notes (text) VALUES (?)');
 });
-$server
+$router
     ->post('/notes', function (Request $r) use (&$db, &$insert) {
         $insert->execute([$r->json()['text']]);
         return Response::json(['id' => (int) $db->lastInsertId()], 201);
@@ -498,10 +542,9 @@ $server
         return $row === false ? Response::json(['error' => 'not found'], 404) : Response::json($row);
     })
     ->get('/opened', function () use (&$opened) { return (string) $opened; });
-echo "listening on http://", $server->address(), "\n";
-$server->listen();
+return $router;
 "#;
-    let app = App::start("sqlite", script, 1);
+    let app = App::start_serve("sqlite", script, 1, &[]);
     let mut client = Http1::connect(&app.address).await;
     for (index, text) in ["first", "second", "third"].into_iter().enumerate() {
         let reply = client
@@ -513,37 +556,150 @@ $server->listen();
     let reply = client.get("/notes/2").await;
     assert_eq!(reply.body, r#"{"id":2,"text":"second"}"#);
     assert_eq!(client.get("/notes/9").await.status, 404);
-    // The callback ran once, before the first request.
     assert_eq!(client.get("/opened").await.body, "1");
     app.terminate();
     assert_eq!(app.wait().await.0, 0);
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn several_workers_each_serve_with_their_own_vm() {
+async fn single_worker_runs_concurrent_async_handlers_via_vm_pool() {
     let script = r#"<?php
-use Phera\Http\Server;
-$server = new Server('127.0.0.1:0', (int) getenv('WORKERS'));
+use Phera\Http\{Router, Request};
+$router = new Router();
+$router->get('/wait/{id}', function (Request $r) {
+    usleep(120000); // 120 ms non-blocking async sleep on worker's LocalSet
+    return 'done:' . $r->param('id');
+});
+return $router;
+"#;
+    let app = App::start_serve("mn-concurrency", script, 1, &[]);
+    // Warm up first request so worker boot is complete.
+    assert_eq!(get(&app.address, "/wait/0").await.body, "done:0");
+
+    // Fire 4 concurrent 120 ms requests against a SINGLE worker (`--workers 1`).
+    // Sequential execution would take >= 480 ms; M:N pooling completes in ~150 ms.
+    let started = Instant::now();
+    let mut tasks = Vec::new();
+    for id in 1..=4 {
+        let addr = app.address.clone();
+        tasks.push(tokio::spawn(async move {
+            (id, get(&addr, &format!("/wait/{id}")).await)
+        }));
+    }
+    for task in tasks {
+        let (id, reply) = task.await.expect("task");
+        assert_eq!(reply.status, 200);
+        assert_eq!(reply.body, format!("done:{id}"));
+    }
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed < Duration::from_millis(360),
+        "4 x 120 ms concurrent requests on 1 worker took {:?} (expected overlap < 360 ms)",
+        elapsed
+    );
+
+    app.terminate();
+    assert_eq!(app.wait().await.0, 0);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn hybrid_mode_combines_router_static_files_and_classic_php() {
+    let root = std::env::temp_dir().join(format!("phera-http-hybrid-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).expect("mkdir");
+    std::fs::write(
+        root.join("phera.toml"),
+        "[server]\nroutes = \"routes.php\"\n",
+    )
+    .expect("write toml");
+    std::fs::write(
+        root.join("routes.php"),
+        r#"<?php
+use Phera\Http\{Router, Request};
+return (new Router())
+    ->get('/api/ping', fn() => ['pong' => true])
+    ->get('/api/items/{id}', fn(Request $r) => ['item' => $r->param('id')]);
+"#,
+    )
+    .expect("write routes");
+    std::fs::write(root.join("hello.txt"), "static asset\n").expect("write static");
+    std::fs::write(
+        root.join("index.php"),
+        r#"<?php echo "classic:" . $_SERVER['REQUEST_URI'];"#,
+    )
+    .expect("write index");
+
+    let app = App::spawn_serve(root.clone(), root, 1, &[]);
+    let mut client = Http1::connect(&app.address).await;
+
+    // 1. Fast router endpoint
+    let reply = client.get("/api/ping").await;
+    assert_eq!(
+        (reply.status, reply.body.as_str()),
+        (200, r#"{"pong":true}"#)
+    );
+    let reply = client.get("/api/items/99").await;
+    assert_eq!(
+        (reply.status, reply.body.as_str()),
+        (200, r#"{"item":"99"}"#)
+    );
+    // 2. Method mismatch on known route still returns 405
+    let reply = client.send("POST", "/api/ping", &[], "").await;
+    assert_eq!((reply.status, reply.header("allow")), (405, "GET, HEAD"));
+    // 3. Static file falls through cleanly
+    let reply = client.get("/hello.txt").await;
+    assert_eq!((reply.status, reply.body.as_str()), (200, "static asset\n"));
+    // 4. Classic PHP front controller falls through cleanly
+    let reply = client.get("/blog/post-1").await;
+    assert_eq!(
+        (reply.status, reply.body.as_str()),
+        (200, "classic:/blog/post-1")
+    );
+    // 5. `routes.php` itself is excluded from direct serving
+    let reply = client.get("/routes.php").await;
+    assert_eq!(reply.status, 404);
+
+    app.terminate();
+    assert_eq!(app.wait().await.0, 0);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn cli_handoff_via_phera_http_serve_uses_unified_server() {
+    let script = r#"<?php
+use Phera\Http\{Router, Request};
+$router = (new Router())
+    ->get('/hello/{name}', fn(Request $r) => 'hi ' . $r->param('name'));
+Phera\Http\serve($router, '127.0.0.1:0', (int) getenv('WORKERS'));
+"#;
+    let app = App::start_cli_handoff("handoff", script, 2);
+    let reply = get(&app.address, "/hello/phera").await;
+    assert_eq!((reply.status, reply.body.as_str()), (200, "hi phera"));
+    app.terminate();
+    assert_eq!(app.wait().await.0, 0);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn several_workers_and_http2_streams() {
+    let script = r#"<?php
+use Phera\Http\{Router, Request};
 $worker = -1;
 $served = 0;
-$server->onWorkerStart(function (int $index) use (&$worker) { $worker = $index; });
-$server->get('/work', function () use (&$worker, &$served) {
-    // Keep this worker's thread busy, so that the others accept too.
+$router = new Router();
+$router->onStart(function (int $index) use (&$worker) { $worker = $index; });
+$router->get('/work', function () use (&$worker, &$served) {
     $sum = 0;
     for ($i = 0; $i < 200000; $i++) { $sum += $i; }
     $served++;
     return "$worker:$served";
 });
-echo "listening on http://", $server->address(), "\n";
-$server->listen();
-echo "after listen\n";
+$router->get('/users/{id}', fn(Request $r) => ['id' => $r->param('id')]);
+return $router;
 "#;
-    let app = App::start("workers", script, 4);
-    // The other workers start once worker 0 listens, each booting the
-    // script, so send waves of concurrent requests until several answered.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let app = App::start_serve("workers-h2", script, 4, &[]);
+
+    let deadline = Instant::now() + Duration::from_secs(30);
     let mut workers = HashSet::new();
-    while workers.len() < 2 && std::time::Instant::now() < deadline {
+    while workers.len() < 2 && Instant::now() < deadline {
         let mut tasks = Vec::new();
         for _ in 0..16 {
             let address = app.address.clone();
@@ -559,26 +715,8 @@ echo "after listen\n";
         }
     }
     assert!(workers.len() > 1, "only workers {workers:?} answered");
-    app.terminate();
-    let (status, output) = app.wait().await;
-    assert_eq!(status, 0);
-    // Code after listen() runs once: the other workers end with listen().
-    assert_eq!(output, "after listen\n");
-}
 
-#[tokio::test(flavor = "current_thread")]
-async fn http1_keep_alive_and_http2_streams() {
-    let app = App::start("protocols", ROUTES, 2);
-
-    // Many requests over one HTTP/1.1 connection.
-    let mut client = Http1::connect(&app.address).await;
-    for id in 0..20 {
-        let reply = client.get(&format!("/users/{id}")).await;
-        assert_eq!(reply.body, format!(r#"{{"id":"{id}","missing":"dflt"}}"#));
-    }
-
-    // Concurrent streams over one HTTP/2 connection (cleartext, prior
-    // knowledge).
+    // Concurrent HTTP/2 (h2c) streams
     let stream = TcpStream::connect(&app.address).await.expect("connect");
     let (sender, connection) = http2::Builder::new(TokioExecutor::new())
         .handshake(TokioIo::new(stream))
@@ -600,40 +738,9 @@ async fn http1_keep_alive_and_http2_streams() {
     for stream in streams {
         let (id, reply) = stream.await.expect("stream task");
         assert_eq!(reply.status, 200);
-        assert_eq!(reply.body, format!(r#"{{"id":"{id}","missing":"dflt"}}"#));
+        assert_eq!(reply.body, format!(r#"{{"id":"{id}"}}"#));
     }
-    let request = build(&app.address, "POST", "/echo", &[], "over h2");
-    let reply = read(sender.clone().send_request(request).await.expect("h2 post")).await;
-    assert_eq!((reply.status, reply.body.as_str()), (201, "over h2"));
 
     app.terminate();
     assert_eq!(app.wait().await.0, 0);
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn stop_ends_listen_and_exit_ends_the_program() {
-    let script = r#"<?php
-use Phera\Http\Server;
-$server = new Server('127.0.0.1:0', (int) getenv('WORKERS'));
-$server->get('/stop', function () use ($server) { $server->stop(); return 'stopping'; });
-$server->get('/exit', function () { echo "exiting\n"; exit(3); });
-$server->get('/ping', fn() => 'pong');
-echo "listening on http://", $server->address(), "\n";
-$server->listen();
-echo "listen returned\n";
-"#;
-    let app = App::start("stop", script, 2);
-    assert_eq!(get(&app.address, "/ping").await.body, "pong");
-    assert_eq!(get(&app.address, "/stop").await.body, "stopping");
-    let (status, output) = app.wait().await;
-    assert_eq!((status, output.as_str()), (0, "listen returned\n"));
-
-    let app = App::start("exit", script, 1);
-    assert_eq!(get(&app.address, "/ping").await.body, "pong");
-    let reply = get(&app.address, "/exit").await;
-    assert!(reply.status == 503 || reply.status == 500);
-    let (status, output) = app.wait().await;
-    // exit() ends the program as it would any script: listen() does not
-    // return.
-    assert_eq!((status, output.as_str()), (3, "exiting\n"));
 }

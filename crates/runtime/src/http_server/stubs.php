@@ -7,10 +7,11 @@
 
 namespace Phera\Http;
 
-final class Server
+function serve(Router $router, string $addr = '127.0.0.1:8080', int $workers = 0): void {}
+
+final class Router
 {
-    /** `$workers: 0` starts one worker per CPU. The constructor binds the socket. */
-    public function __construct(string $addr = '127.0.0.1:8080', int $workers = 0) {}
+    public function __construct() {}
 
     public function get(string $path, callable $handler): static {}
 
@@ -32,16 +33,8 @@ final class Server
 
     public function fallback(callable $handler): static {}
 
-    /** `$callback(int $worker)` runs in each worker before it accepts requests. */
-    public function onWorkerStart(callable $callback): static {}
-
-    public function address(): string {}
-
-    public function workers(): int {}
-
-    public function stop(): void {}
-
-    public function listen(): void {}
+    /** `$callback(int $worker)` runs once per persistent worker VM instance before it serves requests. */
+    public function onStart(callable $callback): static {}
 }
 
 final class Request

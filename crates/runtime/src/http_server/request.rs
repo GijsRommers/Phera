@@ -1,17 +1,4 @@
-//! The `Phera\Http\Request` class: a handle on the bytes of one request.
-//!
-//! ```php
-//! $server->post('/users/{id}', function (Request $request) {
-//!     $id    = $request->param('id');              // "42", percent-decoded
-//!     $page  = $request->query('page', '1');       // the query string, parsed on first use
-//!     $token = $request->header('Authorization');  // any case
-//!     $input = $request->json();                   // the body as JSON
-//! });
-//! ```
-//!
-//! The object holds the request exactly as `phera-server` read it. Nothing
-//! is copied into PHP values until a method asks for it, and no superglobal
-//! is filled.
+//! The `Phera\Http\Request` class: a lazy handle on one request's bytes.
 
 use std::borrow::Cow;
 use std::cell::OnceCell;
@@ -22,44 +9,41 @@ use phera_extension_api::{
     ArrayKey, ClassEntry, ClassKind, ConstantValue, Context, MethodEntry, NativeError,
     NativeResult, Object, Param, ParamType, PhpArray, PhpString, Registry, Value, Visibility, args,
 };
-use phera_server::Request;
 
 use super::REQUEST_CLASS;
-use super::dispatch::RouteTable;
-use super::router::{ParamRanges, RouteId};
+use super::router::{ParamRanges, RouteId, Router};
+use crate::HttpRequest;
 
-/// The native state of a `Phera\Http\Request` object.
+/// Native state of a `Phera\Http\Request` object.
 pub(super) struct RequestData {
-    request: Request,
-    /// The server's routes, for the names of this route's parameters.
-    routes: Rc<RouteTable>,
+    request: HttpRequest,
+    router: Rc<Router>,
     /// `None` when the fallback answers.
     route: Option<RouteId>,
     params: ParamRanges,
-    /// The query string as `$_GET` would hold it, parsed on first use.
+    /// Query string parsed on first use.
     query: OnceCell<Rc<PhpArray>>,
 }
 
 impl RequestData {
     pub(super) fn new(
-        request: Request,
-        routes: Rc<RouteTable>,
+        request: HttpRequest,
+        router: Rc<Router>,
         route: Option<RouteId>,
         params: ParamRanges,
     ) -> Self {
         RequestData {
             request,
-            routes,
+            router,
             route,
             params,
             query: OnceCell::new(),
         }
     }
 
-    /// Each parameter's name with its raw value.
     fn params(&self) -> impl Iterator<Item = (&str, &[u8])> {
         let names = match self.route {
-            Some(route) => self.routes.router.param_names(route),
+            Some(route) => self.router.param_names(route),
             None => &[],
         };
         let path = self.request.path.as_bytes();
@@ -82,10 +66,13 @@ impl RequestData {
         })
     }
 
-    /// The value of a header, any case: its values joined by `", "` when the
-    /// client sent it more than once (`"; "` for `Cookie`).
     fn header(&self, name: &str) -> Option<Cow<'_, [u8]>> {
-        let mut values = self.request.header_values(name);
+        let mut values = self
+            .request
+            .headers
+            .iter()
+            .filter(|(key, _)| key.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.as_slice());
         let first = values.next()?;
         let Some(second) = values.next() else {
             return Some(Cow::Borrowed(first));
@@ -140,7 +127,6 @@ pub(super) fn register(registry: &mut Registry) {
     });
 }
 
-/// A new `Phera\Http\Request` object holding `data`.
 pub(super) fn new_object(context: &mut dyn Context, data: RequestData) -> NativeResult {
     let object = context.create_object(REQUEST_CLASS, PhpArray::new())?;
     if let Value::Object(object) = &object {
@@ -149,7 +135,6 @@ pub(super) fn new_object(context: &mut dyn Context, data: RequestData) -> Native
     Ok(object)
 }
 
-/// Runs `read` on the request's native state.
 fn with_request<R>(
     this: Option<&Rc<Object>>,
     read: impl FnOnce(&RequestData) -> R,
@@ -165,7 +150,6 @@ fn with_request<R>(
     Ok(read(data))
 }
 
-/// Requests are made by the server only.
 fn private_construct(_: &mut dyn Context, _: Option<&Rc<Object>>, _: &[Value]) -> NativeResult {
     Ok(Value::Null)
 }
@@ -182,8 +166,6 @@ fn uri(_: &mut dyn Context, this: Option<&Rc<Object>>, _: &[Value]) -> NativeRes
     with_request(this, |data| Value::from(data.request.target.as_str()))
 }
 
-/// The first argument as text, or the second argument when the first names
-/// nothing.
 fn default_argument(arguments: &[Value]) -> Value {
     args::value(arguments, 1).clone()
 }
@@ -211,8 +193,6 @@ fn params(_: &mut dyn Context, this: Option<&Rc<Object>>, _: &[Value]) -> Native
     })
 }
 
-/// `query()` is the whole query string as an array; `query('page')` one
-/// value of it, which is an array for `page[]=1&page[]=2`.
 fn query(_: &mut dyn Context, this: Option<&Rc<Object>>, arguments: &[Value]) -> NativeResult {
     with_request(this, |data| {
         let query = data.query();
@@ -236,7 +216,6 @@ fn header(_: &mut dyn Context, this: Option<&Rc<Object>>, arguments: &[Value]) -
     })
 }
 
-/// Every header, by lower-case name; repeated ones joined as `header()` does.
 fn headers(_: &mut dyn Context, this: Option<&Rc<Object>>, _: &[Value]) -> NativeResult {
     with_request(this, |data| {
         let mut headers = PhpArray::new();
@@ -256,9 +235,6 @@ fn body(_: &mut dyn Context, this: Option<&Rc<Object>>, _: &[Value]) -> NativeRe
     with_request(this, |data| Value::from(data.request.body.as_slice()))
 }
 
-/// The body decoded as JSON, arrays for objects unless `$associative` is
-/// false. An empty body is `null`; anything else that is not JSON throws a
-/// `JsonException`.
 fn json(context: &mut dyn Context, this: Option<&Rc<Object>>, arguments: &[Value]) -> NativeResult {
     let associative = args::bool(arguments, 0).unwrap_or(true);
     with_request(this, |data| {
@@ -274,8 +250,6 @@ fn json(context: &mut dyn Context, this: Option<&Rc<Object>>, arguments: &[Value
     })?
 }
 
-/// Decodes `%XX` escapes as `rawurldecode()` does (a `+` stays a `+`);
-/// borrows when there is nothing to decode.
 fn percent_decode(raw: &[u8]) -> Cow<'_, [u8]> {
     if !raw.contains(&b'%') {
         return Cow::Borrowed(raw);
@@ -311,7 +285,6 @@ mod tests {
         assert_eq!(percent_decode(b"plain").as_ref(), b"plain");
         assert_eq!(percent_decode(b"a%20b+c").as_ref(), b"a b+c");
         assert_eq!(percent_decode(b"%C3%A9").as_ref(), "é".as_bytes());
-        // Broken escapes stay as they are.
         assert_eq!(percent_decode(b"100%").as_ref(), b"100%");
         assert_eq!(percent_decode(b"%zz%4").as_ref(), b"%zz%4");
     }
