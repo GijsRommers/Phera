@@ -2926,6 +2926,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "phera-aot"
+version = "0.1.0"
+dependencies = [
+ "blake2b_simd",
+ "phera-bytecode",
+ "phera-compiler",
+ "phera-source",
+ "tempfile",
+]
+
+[[package]]
 name = "phera-ast"
 version = "0.1.0"
 dependencies = [
@@ -2954,6 +2965,8 @@ dependencies = [
  "hyper-util",
  "mimalloc",
  "phera-analyzer",
+ "phera-aot",
+ "phera-bytecode",
  "phera-dotenv",
  "phera-extension-api",
  "phera-io-pool",
@@ -3664,7 +3677,9 @@ dependencies = [
 name = "phera-runtime"
 version = "0.1.0"
 dependencies = [
+ "blake2b_simd",
  "memchr",
+ "phera-aot",
  "phera-ast",
  "phera-bytecode",
  "phera-compiler",
