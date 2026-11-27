@@ -113,6 +113,7 @@ pub(super) struct Machine<'a> {
     pub(super) classes: &'a mut ClassTable,
     pub(super) stack: &'a mut CallStack,
     pub(super) registers: &'a mut Registers,
+    pub(super) fast_stack: &'a mut crate::fast_tier::FastStack,
     /// Loop rounds and calls since the last hand-over.
     work: usize,
     /// Instructions run, for `Vm::executed_instructions`.
@@ -134,9 +135,9 @@ pub(super) struct Machine<'a> {
 
 /// Where the loop is: which function, its registers, its next instruction.
 #[derive(Clone, Copy)]
-pub(super) struct Position {
-    pub(super) frame: Frame,
-    pub(super) ip: usize,
+pub(crate) struct Position {
+    pub(crate) frame: Frame,
+    pub(crate) ip: usize,
 }
 
 impl Vm {
@@ -171,6 +172,7 @@ impl Vm {
                 classes: &mut self.classes,
                 stack: &mut self.call_stack,
                 registers: &mut self.registers,
+                fast_stack: &mut self.fast_stack,
                 work: *work,
                 executed: 0,
                 stop,
@@ -326,7 +328,40 @@ impl Machine<'_> {
         // `registers::WINDOW`): decided when the frame is entered, not per
         // instruction.
         let mut windowed = self.windowed(frame);
+        let mut skip_fast_at: Option<(crate::code_table::FunctionIndex, usize)> = None;
         loop {
+            if !GUARDED
+                && skip_fast_at != Some((position.frame.function, position.ip))
+                && let Some(exit) = self.try_run_fast(position)
+            {
+                match exit {
+                    crate::fast_tier::FastExit::Returned(next) => {
+                        skip_fast_at = None;
+                        let same_function = next.frame.function == position.frame.function;
+                        position = next;
+                        if !same_function {
+                            instructions = self.code.instructions(next.frame.function);
+                            windowed = self.windowed(next.frame);
+                        }
+                        continue;
+                    }
+                    crate::fast_tier::FastExit::Deopt {
+                        position: next,
+                        yield_now,
+                    } => {
+                        let same_function = next.frame.function == position.frame.function;
+                        position = next;
+                        if !same_function {
+                            instructions = self.code.instructions(next.frame.function);
+                            windowed = self.windowed(next.frame);
+                        }
+                        if yield_now {
+                            return LoopExit::Yield;
+                        }
+                        skip_fast_at = Some((position.frame.function, position.ip));
+                    }
+                }
+            }
             let instruction =
                 match self.run_simple::<GUARDED>(instructions, &mut position, windowed) {
                     Ok(instruction) => instruction,
@@ -560,6 +595,49 @@ impl Machine<'_> {
     #[inline(always)]
     fn windowed(&self, frame: Frame) -> bool {
         self.code.facts(frame.function).registers as usize <= WINDOW
+    }
+
+    /// Try to run the current unguarded frame on the Tier-2 compact register VM.
+    /// Kept `#[inline(never)]` so it adds zero code size or register pressure to
+    /// `Machine::run` and `run_simple`.
+    #[inline(never)]
+    fn try_run_fast(&mut self, position: Position) -> Option<crate::fast_tier::FastExit> {
+        let frame = position.frame;
+        if frame.has_extras()
+            || frame.passed().is_some()
+            || self.stack.has_calls_from(frame.start())
+        {
+            return None;
+        }
+        let table = self.code.ensure_fast(frame.function)?;
+        let crate::fast_tier::FastEntry::Compiled(entry_fast) =
+            table.get(frame.function.index())?
+        else {
+            return None;
+        };
+        let &fast_ip = entry_fast.bc_to_fast.get(position.ip)?;
+        if fast_ip == u16::MAX
+            || entry_fast
+                .ops
+                .get(fast_ip as usize)
+                .is_none_or(|op| op.op == crate::fast_tier::Op::Deopt)
+        {
+            return None;
+        }
+        Some(crate::fast_tier::exec::run_fast(
+            self.code,
+            &table,
+            self.stack,
+            self.registers,
+            self.fast_stack,
+            position,
+            entry_fast,
+            fast_ip as usize,
+            self.stop,
+            self.frame_limit,
+            &mut self.work,
+            &mut self.executed,
+        ))
     }
 
     /// The instructions that are not simple but need only the borrowed

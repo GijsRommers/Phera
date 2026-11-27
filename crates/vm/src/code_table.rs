@@ -99,6 +99,8 @@ pub(crate) struct CodeTable {
     trait_method_names: std::rc::Rc<Vec<(u32, std::rc::Rc<str>)>>,
     /// While a class links: the trait methods composed into it.
     imports: Option<Vec<crate::classes::worker_classes::Import>>,
+    /// Lazily lowered Tier-2 compact functions indexed by `FunctionIndex`.
+    fast_tier: std::cell::RefCell<Vec<crate::fast_tier::FastEntry>>,
 }
 
 impl Default for CodeTable {
@@ -126,6 +128,7 @@ impl CodeTable {
             base_sites: None,
             trait_method_names: Default::default(),
             imports: None,
+            fast_tier: std::cell::RefCell::new(Vec::new()),
         }
     }
 
@@ -235,6 +238,12 @@ impl CodeTable {
         if self.functions.len() > functions_len {
             self.functions.truncate(functions_len);
         }
+        {
+            let mut fast = self.fast_tier.borrow_mut();
+            if fast.len() > functions_len {
+                fast.truncate(functions_len);
+            }
+        }
         if self.trait_method_names.len() != trait_names.len() {
             self.trait_method_names = trait_names.clone();
         }
@@ -260,6 +269,7 @@ impl CodeTable {
             base_sites: None,
             trait_method_names: Default::default(),
             imports: None,
+            fast_tier: std::cell::RefCell::new(Vec::new()),
         }
     }
 
@@ -626,6 +636,74 @@ impl CodeTable {
     pub(crate) fn instructions(&self, function: FunctionIndex) -> &[Instruction] {
         &self.facts(function).instructions
     }
+
+    /// Borrow the Tier-2 compiled function table, lazily lowering `function`
+    /// (and its direct callees) on first encounter. Returns `None` if `function`
+    /// is ineligible for Tier 2.
+    pub(crate) fn ensure_fast(
+        &self,
+        function: FunctionIndex,
+    ) -> Option<std::cell::Ref<'_, [crate::fast_tier::FastEntry]>> {
+        use crate::fast_tier::FastEntry;
+        let idx = function.index();
+        {
+            let table = self.fast_tier.borrow();
+            match table.get(idx) {
+                Some(FastEntry::Compiled(_)) => {
+                    return Some(std::cell::Ref::map(table, Vec::as_slice));
+                }
+                Some(FastEntry::Ineligible) => return None,
+                _ => {}
+            }
+        }
+        self.compile_fast_transitive(function);
+        let table = self.fast_tier.borrow();
+        if matches!(table.get(idx), Some(FastEntry::Compiled(_))) {
+            Some(std::cell::Ref::map(table, Vec::as_slice))
+        } else {
+            None
+        }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn compile_fast_transitive(&self, root: FunctionIndex) {
+        use crate::fast_tier::{FastEntry, lower::lower_function};
+        let mut queue = std::collections::VecDeque::new();
+        queue.push_back((root, true));
+        while let Some((func_idx, require_hot)) = queue.pop_front() {
+            let idx = func_idx.index();
+            if idx >= self.functions.len() || self.functions[idx].unit.0 == u32::MAX {
+                continue;
+            }
+            {
+                let table = self.fast_tier.borrow();
+                if matches!(
+                    table.get(idx),
+                    Some(FastEntry::Compiled(_) | FastEntry::Ineligible)
+                ) {
+                    continue;
+                }
+            }
+            let lowered = lower_function(self, func_idx, require_hot);
+            let mut table = self.fast_tier.borrow_mut();
+            if table.len() <= idx {
+                table.resize(idx + 1, FastEntry::Unchecked);
+            }
+            match lowered {
+                Some((fast, callees)) => {
+                    table[idx] = FastEntry::Compiled(fast);
+                    drop(table);
+                    for callee in callees {
+                        queue.push_back((callee, false));
+                    }
+                }
+                None => {
+                    table[idx] = FastEntry::Ineligible;
+                }
+            }
+        }
+    }
 }
 
 /// Function `local` of a file, or its top-level code for `None`.
@@ -722,6 +800,7 @@ impl crate::snapshot::ForkCopy for CodeTable {
             },
             trait_method_names: self.trait_method_names.clone(),
             imports: None,
+            fast_tier: std::cell::RefCell::new(self.fast_tier.borrow().clone()),
         }
     }
 }

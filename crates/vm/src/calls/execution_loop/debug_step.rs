@@ -32,6 +32,7 @@ impl Vm {
             classes: &mut self.classes,
             stack: &mut self.call_stack,
             registers: &mut self.registers,
+            fast_stack: &mut self.fast_stack,
             work: *work,
             executed: 0,
             stop,
