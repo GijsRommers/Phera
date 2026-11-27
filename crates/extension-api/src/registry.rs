@@ -206,6 +206,16 @@ impl Registry {
         self.entries().bundled_classes.get(lowercase_name).copied()
     }
 
+    /// All distinct bundled PHP sources shipped by this registry, sorted by file name.
+    pub fn bundled_sources(&self) -> Vec<BundledSource> {
+        let mut by_file: std::collections::BTreeMap<&'static str, BundledSource> =
+            std::collections::BTreeMap::new();
+        for &source in self.entries().bundled_classes.values() {
+            by_file.entry(source.file).or_insert(source);
+        }
+        by_file.into_values().collect()
+    }
+
     /// Says how a fork copies an open resource of this kind (`"stream"`).
     pub fn fork_resource(&mut self, kind: &'static str, fork: ResourceFork) {
         self.entries_mut().resource_forks.insert(kind, fork);

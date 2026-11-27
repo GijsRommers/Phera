@@ -26,6 +26,7 @@ pub mod project;
 pub mod rules;
 pub mod scope;
 mod signature_types;
+pub mod sound;
 pub mod stubs;
 mod suppress;
 mod trait_users;

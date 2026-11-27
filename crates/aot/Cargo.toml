@@ -1,0 +1,18 @@
+[package]
+name = "phera-aot"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+blake2b_simd.workspace = true
+phera-bytecode.workspace = true
+phera-source.workspace = true
+
+[dev-dependencies]
+phera-compiler.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

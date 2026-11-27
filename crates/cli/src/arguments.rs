@@ -8,9 +8,12 @@ use std::time::Duration;
 
 pub(crate) const USAGE: &str = "\
 Usage:
-  phera [run] [--debug] [ENV OPTIONS] [-d NAME=VALUE] <file.php> [arguments...]   run a script
+  phera [run] [--debug] [--image FILE] [ENV OPTIONS] [-d NAME=VALUE] <file.php> [arguments...]
+                                          run a script (or a script inside an AOT image)
+  phera build [OPTIONS] [PATH]            compile a project into a .phb AOT image (see build --help)
   phera serve [OPTIONS] [PATH]            serve PATH (a directory, or one
                                           script that answers every request)
+    --image FILE                          serve pre-compiled bytecode from a .phb image
     --listen ADDRESS                      default 127.0.0.1:8080, or
                                           0.0.0.0:$PORT when PORT is set
     --workers N                           default: one per CPU core
@@ -88,12 +91,14 @@ ENV OPTIONS: --env-file PATH (repeatable) or --no-env-file";
 pub(crate) enum Command {
     Run {
         debug: bool,
+        image: Option<PathBuf>,
         files: FileSelection,
         ini: Vec<(String, String)>,
         script: String,
         /// What the script sees as `$argv`: its own name first.
         arguments: Vec<String>,
     },
+    Build(Box<crate::build::BuildOptions>),
     Dump {
         script: String,
     },
@@ -108,6 +113,7 @@ pub(crate) enum Command {
 }
 
 pub(crate) struct ServeOptions {
+    pub image: Option<PathBuf>,
     pub files: FileSelection,
     pub ini: Vec<(String, String)>,
     pub dev: bool,
@@ -163,8 +169,10 @@ impl ServeOptions {
         files: FileSelection,
         ini: Vec<(String, String)>,
         debug: bool,
+        image: Option<PathBuf>,
     ) -> Self {
         ServeOptions {
+            image,
             files,
             ini,
             dev: false,
@@ -200,8 +208,17 @@ pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, 
     let mut files = FileSelection::Automatic;
     let mut ini = Vec::new();
     let mut debug = false;
-    leading_options(&mut arguments, &mut files, &mut ini, &mut debug)?;
+    let mut image = None;
+    leading_options(&mut arguments, &mut files, &mut ini, &mut debug, &mut image)?;
     match arguments.peek().map(String::as_str) {
+        None if image.is_some() => Ok(Command::Run {
+            debug,
+            image,
+            script: String::new(),
+            arguments: Vec::new(),
+            files,
+            ini,
+        }),
         None => Err("No script given.".to_string()),
         Some("--version") => Ok(Command::Version),
         Some("--help" | "-h") => Ok(Command::Help(USAGE)),
@@ -209,6 +226,14 @@ pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, 
             arguments.next();
             let script = arguments.next().ok_or("--dump needs a file.")?;
             Ok(Command::Dump { script })
+        }
+        Some("build") => {
+            arguments.next();
+            command_with_help(arguments, crate::build::HELP, |args| {
+                crate::build::BuildOptions::parse(args)
+                    .map(Box::new)
+                    .map(Command::Build)
+            })
         }
         Some("check") => {
             arguments.next();
@@ -227,7 +252,7 @@ pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, 
             if matches!(arguments.peek().map(String::as_str), Some("--help" | "-h")) {
                 return Ok(Command::Help(USAGE));
             }
-            parse_serve(arguments, files, ini)
+            parse_serve(arguments, files, ini, image)
                 .map(Box::new)
                 .map(Command::Serve)
         }
@@ -250,6 +275,7 @@ pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, 
             let named = arguments.next_if(|argument| argument == "run").is_some();
             if named
                 && !debug
+                && image.is_none()
                 && matches!(&files, FileSelection::Automatic)
                 && ini.is_empty()
                 && arguments
@@ -261,11 +287,16 @@ pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, 
                     .collect();
                 return Ok(Command::Packages(args));
             }
-            leading_options(&mut arguments, &mut files, &mut ini, &mut debug)?;
+            leading_options(&mut arguments, &mut files, &mut ini, &mut debug, &mut image)?;
             let arguments: Vec<String> = arguments.collect();
-            let script = arguments.first().cloned().ok_or("No script given.")?;
+            let script = match arguments.first().cloned() {
+                Some(script) => script,
+                None if image.is_some() => String::new(),
+                None => return Err("No script given.".into()),
+            };
             Ok(Command::Run {
                 debug,
+                image,
                 script,
                 arguments,
                 files,
@@ -322,17 +353,21 @@ fn leading_options(
     files: &mut FileSelection,
     ini: &mut Vec<(String, String)>,
     debug: &mut bool,
+    image: &mut Option<PathBuf>,
 ) -> Result<(), String> {
     while let Some(option) = arguments.next_if(|s| {
         matches!(
             s.as_str(),
-            "--env-file" | "--no-env-file" | "-d" | "--debug"
+            "--env-file" | "--no-env-file" | "-d" | "--debug" | "--image"
         )
     }) {
         if option == "-d" {
             ini.push(ini_option(arguments)?);
         } else if option == "--debug" {
             *debug = true;
+        } else if option == "--image" {
+            let path = arguments.next().ok_or("--image needs a .phb file path.")?;
+            *image = Some(PathBuf::from(path));
         } else {
             file_option(&option, arguments, files)?;
         }
@@ -376,8 +411,10 @@ fn parse_serve(
     mut arguments: impl Iterator<Item = String>,
     files: FileSelection,
     ini: Vec<(String, String)>,
+    image: Option<PathBuf>,
 ) -> Result<ServeOptions, String> {
     let mut options = ServeOptions {
+        image,
         files,
         ini,
         dev: false,
@@ -433,6 +470,10 @@ fn parse_serve(
             }
             "--compress" => options.compress = true,
             "--preload" => options.preload = true,
+            "--image" => {
+                let path = arguments.next().ok_or("--image needs a .phb file path.")?;
+                options.image = Some(PathBuf::from(path));
+            }
             "--no-class-warmup" => options.class_warmup = false,
             "--no-service-warmup" => options.service_warmup = false,
             "--warmup" => {

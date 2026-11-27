@@ -44,6 +44,8 @@ pub struct CompiledUnit {
     pub types: Vec<Type>,
     /// Call and lookup facts prepared once for code retained by the web runtime.
     pub metadata: Option<std::sync::Arc<crate::UnitMetadata>>,
+    /// Closed-world whole-program facts attached by `phera build`.
+    pub facts: Option<std::sync::Arc<crate::facts::UnitBuildFacts>>,
 }
 
 /// A literal value. Converted to a PHP value by the VM when loaded.

@@ -12,6 +12,7 @@ phera-ext-reflection.workspace = true
 phera-ext-redis.workspace = true
 phera-ext-grpc.workspace = true
 phera-dotenv.workspace = true
+phera-aot.workspace = true
 phera-bytecode.workspace = true
 phera-compiler.workspace = true
 phera-extension-api.workspace = true
@@ -58,6 +59,7 @@ smallvec.workspace = true
 tokio.workspace = true
 tempfile.workspace = true
 memchr.workspace = true
+blake2b_simd.workspace = true
 
 [dev-dependencies]
 rcgen.workspace = true

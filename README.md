@@ -91,8 +91,9 @@ those constructs.
 
 | Command | What it does |
 | --- | --- |
-| `phera file.php` | Runs a script |
-| `phera serve public` | Serves a directory over HTTP: one process, one worker thread per core, many requests per thread |
+| `phera file.php` | Runs a script (pass `--image app.phb` to run from an AOT image) |
+| `phera build [PATH]` | Discovers, audits, and compiles a project into a `.phb` AOT production image |
+| `phera serve public` | Serves a directory over HTTP: one process, one worker thread per core, many requests per thread (pass `--image app.phb` to serve pre-compiled bytecode) |
 | `phera new shop` | Starts a project: a small JSON application, or Symfony's or Laravel's official one |
 | `phera check src` | Type-checks PHP and PHPDoc at levels 0–10 (`--level max`) and reads PHPStan baselines |
 | `phera lint src` | Finds unused code and suspicious constructs; `--fix` applies the safe fixes |

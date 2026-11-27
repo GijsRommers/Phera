@@ -147,3 +147,11 @@ impl ProcessCancellation {
         self.0.load(Ordering::Relaxed)
     }
 }
+
+/// Stored in [`RequestState`] when a request runs from a strict AOT image that
+/// forbids runtime code evaluation or dynamic class aliasing.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ImageSeal {
+    pub forbid_eval: bool,
+    pub forbid_class_alias: bool,
+}

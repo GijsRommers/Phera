@@ -14,6 +14,15 @@ impl Vm {
     }
 
     pub(super) async fn debug_eval(&mut self, expression: &[u8]) -> NativeResult {
+        if self
+            .state
+            .get::<phera_extension_api::ImageSeal>()
+            .is_some_and(|seal| seal.forbid_eval)
+        {
+            return Err(phera_extension_api::NativeError::error(
+                "eval() is disabled in strict AOT image mode",
+            ));
+        }
         let mut script = b"return (".to_vec();
         script.extend_from_slice(expression);
         script.extend_from_slice(b"\n);");

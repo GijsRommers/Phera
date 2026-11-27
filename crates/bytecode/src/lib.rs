@@ -38,6 +38,7 @@ mod builtin;
 mod class;
 mod code;
 mod display;
+pub mod facts;
 mod function;
 mod ids;
 mod instruction;

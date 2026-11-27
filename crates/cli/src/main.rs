@@ -2,6 +2,7 @@
 //! project, or show the bytecode of a file.
 
 mod arguments;
+mod build;
 mod check;
 mod debug_settings;
 mod lint;
@@ -27,11 +28,13 @@ fn main() -> ExitCode {
     match arguments::parse(std::env::args().skip(1)) {
         Ok(Command::Run {
             debug,
+            image,
             script,
             arguments,
             files,
             ini,
-        }) => run::script(&script, &arguments, files, ini, debug),
+        }) => run::script(&script, &arguments, files, ini, debug, image.as_deref()),
+        Ok(Command::Build(options)) => build::run(*options),
         Ok(Command::Dump { script }) => run::dump(&script),
         Ok(Command::Serve(options)) => serve::serve(*options),
         Ok(Command::Help(help)) => {
