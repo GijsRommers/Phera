@@ -76,6 +76,7 @@ impl Vm {
                 property_hooks: None,
                 position: None,
                 started: false,
+                bulk_resume: false,
             },
         );
         Ok(())

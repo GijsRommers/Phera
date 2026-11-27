@@ -62,6 +62,32 @@ pub fn integer_string(number: i64) -> PhpString {
     PhpString::from(&digits[at..])
 }
 
+/// `dechex`, `decoct` and `decbin`: `number` read as unsigned, in base 16, 8
+/// or 2 (`bits` is 4, 3 or 1), lowercase, without leading zeros.
+///
+/// ```php
+/// dechex(255); // "ff"
+/// dechex(-1);  // "ffffffffffffffff"
+/// ```
+pub fn power_of_two_digits(number: u64, bits: u32) -> PhpString {
+    debug_assert!(matches!(bits, 1 | 3 | 4));
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mask = (1u64 << bits) - 1;
+    // 64 binary digits is the longest any `u64` needs.
+    let mut digits = [0u8; 64];
+    let mut at = digits.len();
+    let mut rest = number;
+    loop {
+        at -= 1;
+        digits[at] = DIGITS[(rest & mask) as usize];
+        rest >>= bits;
+        if rest == 0 {
+            break;
+        }
+    }
+    PhpString::from(&digits[at..])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -98,6 +124,24 @@ mod tests {
             let mut out = b"x".to_vec();
             push_integer(&mut out, number);
             assert_eq!(out, format!("x{number}").into_bytes());
+        }
+    }
+
+    #[test]
+    fn powers_of_two_are_written_as_the_formatter_writes_them() {
+        for number in [0u64, 1, 7, 8, 15, 16, 255, 256, u64::MAX, 1 << 63] {
+            assert_eq!(
+                power_of_two_digits(number, 4).as_bytes(),
+                format!("{number:x}").as_bytes()
+            );
+            assert_eq!(
+                power_of_two_digits(number, 3).as_bytes(),
+                format!("{number:o}").as_bytes()
+            );
+            assert_eq!(
+                power_of_two_digits(number, 1).as_bytes(),
+                format!("{number:b}").as_bytes()
+            );
         }
     }
 }

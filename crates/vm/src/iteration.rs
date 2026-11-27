@@ -79,6 +79,7 @@ impl Vm {
                 source: if object_iteration { None } else { place },
                 position: None,
                 started: false,
+                bulk_resume: false,
             },
         );
 
@@ -112,6 +113,7 @@ impl Vm {
                 source: Some(place),
                 position: None,
                 started: false,
+                bulk_resume: false,
             },
         );
 
@@ -406,6 +408,11 @@ pub(crate) enum KeyedAddStep {
     Fallback,
 }
 
+/// A bulk keyed add is a few machine instructions per entry, against a
+/// full loop round on the general path: a bulk run gets this many entries
+/// per step of the caller's budget, and is charged for them at that rate.
+pub(crate) const BULK_ADDS_PER_WORK: usize = 4;
+
 /// Bulk keyed-foreach accumulate fast path for:
 /// `foreach ($src as $k => $v) { $dst[$k] += $v; }`.
 #[inline(never)]
@@ -435,17 +442,30 @@ pub(crate) fn keyed_add_loop_step(
     let Some(state) = iterators.get_mut(iterator.0) else {
         return KeyedAddStep::Fallback;
     };
-    if state.started || state.source.is_some() {
+    if state.source.is_some() {
         return KeyedAddStep::Fallback;
     }
+    // A fresh loop starts at the first entry. One that a bulk run left at
+    // its budget goes on after the entry it stands on, whose body has run.
+    // Any other started loop stays on the general path, which already met
+    // an entry the bulk run cannot add.
+    let from = match (state.started, state.position) {
+        (false, _) => 0,
+        (true, Some(position)) if state.bulk_resume => position + 1,
+        _ => return KeyedAddStep::Fallback,
+    };
+    state.bulk_resume = false;
     let Some(src_rc) = state.snapshot.clone() else {
         return KeyedAddStep::Fallback;
     };
     let Some(Some(Value::Array(dst_rc))) = slots.get_mut(dst_arr.index()) else {
         return KeyedAddStep::Fallback;
     };
-    let outcome =
-        std::rc::Rc::make_mut(dst_rc).add_matching_map_entries_from(&src_rc, budget.max(1));
+    let outcome = std::rc::Rc::make_mut(dst_rc).add_matching_map_entries_from(
+        &src_rc,
+        from,
+        budget.max(1).saturating_mul(BULK_ADDS_PER_WORK),
+    );
     let write_last = |slots: &mut [Option<Value>], last_pos: usize, last_sum: i64| {
         if let Some((element_key, val)) = src_rc.entry_at(last_pos) {
             let element_key = match element_key {
@@ -483,6 +503,7 @@ pub(crate) fn keyed_add_loop_step(
             write_last(slots, last_pos, last_sum);
             state.started = true;
             state.position = Some(last_pos);
+            state.bulk_resume = yielded;
             *ip = iter_next_ip;
             if yielded {
                 KeyedAddStep::Yield

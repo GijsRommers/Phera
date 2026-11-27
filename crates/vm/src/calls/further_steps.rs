@@ -18,12 +18,13 @@
 //! them). Each answers [`Step::Slow`], having changed nothing, when its
 //! case is not the plain one, and the VM runs the instruction.
 
-use phera_bytecode::{FetchMode, Instruction, PathBase, PathId, Reg};
+use phera_bytecode::{FetchMode, Instruction, NameId, PathBase, PathId, Reg, SymbolId};
 use phera_value::Value;
 
 use crate::calls::execution_loop::{Machine, Position, Step};
 use crate::fast::{ScalarStep, store};
 use crate::fast_values::value_step;
+use crate::unit_caches::GlobalBinding;
 
 impl Machine<'_> {
     /// Runs `instruction` if it is one of the cases above. Marked cold so
@@ -160,6 +161,15 @@ impl Machine<'_> {
             Instruction::FetchClassConstant { dst, class, name } => {
                 self.fetch_class_constant::<GUARDED>(position, dst, (class, name))
             }
+            Instruction::FetchConstant { dst, constant } => {
+                self.fetch_known_constant::<GUARDED>(position, dst, constant)
+            }
+            Instruction::Assign { local, src } => {
+                self.assign_through_reference::<GUARDED>(position, local, src)
+            }
+            Instruction::BindGlobal { local, name } => {
+                self.bind_known_global::<GUARDED>(position, local, name)
+            }
             Instruction::FetchClassName { dst, class } => {
                 self.fetch_class_name::<GUARDED>(position, dst, class)
             }
@@ -206,6 +216,112 @@ impl Machine<'_> {
         }
     }
 
+    /// `FetchConstant` of a scalar constant this site already read, while
+    /// no constant has been defined since (see
+    /// [`crate::unit_caches::CachedConstant`]).
+    fn fetch_known_constant<const GUARDED: bool>(
+        &mut self,
+        position: Position,
+        destination: Reg,
+        constant: SymbolId,
+    ) -> Step {
+        let Some(value) = self
+            .code
+            .cache(position.frame.function)
+            .known_constant(constant.index(), self.constant_epoch)
+        else {
+            return Step::Slow;
+        };
+        self.store_quiet::<GUARDED>(position, destination, value)
+    }
+
+    /// `global $name` of a variable this site bound before, while it is
+    /// where it was then (the same register of the same file-scope code, or
+    /// the same entry of the globals table) and already a PHP reference:
+    /// the local becomes another handle on it. The first binding, which
+    /// makes the reference, is the VM's.
+    fn bind_known_global<const GUARDED: bool>(
+        &mut self,
+        position: Position,
+        local: Reg,
+        name: NameId,
+    ) -> Step {
+        let Some(binding) = self
+            .code
+            .cache(position.frame.function)
+            .known_global(name.index())
+        else {
+            return Step::Slow;
+        };
+        let cell = match binding {
+            GlobalBinding::Register { function, register } => {
+                // The innermost of the file-scope frames at the bottom of
+                // the stack holds the global variables (`Vm::global_frame`).
+                let Some(file_scope) = self
+                    .stack
+                    .frames()
+                    .iter()
+                    .take_while(|frame| self.code.local(frame.function).is_none())
+                    .last()
+                else {
+                    return Step::Slow;
+                };
+                if file_scope.function != function {
+                    return Step::Slow;
+                }
+                let index = file_scope.base() + register.index();
+                match self.registers.window(index, 1).first() {
+                    Some(Some(Value::Reference(cell))) => cell,
+                    _ => return Step::Slow,
+                }
+            }
+            GlobalBinding::Table { index } => {
+                let names = &self.code.cache(position.frame.function).names;
+                let Some(name) = names.get(name.index()) else {
+                    return Step::Slow;
+                };
+                match self.globals.reference_at(index as usize, name.as_bytes()) {
+                    Some(cell) => cell,
+                    None => return Step::Slow,
+                }
+            }
+        };
+        let value = Value::Reference(cell.clone());
+        self.store_quiet::<GUARDED>(position, local, value)
+    }
+
+    /// `$global = $scalar` where the local is a PHP reference that holds a
+    /// scalar or a string: the value goes into the shared cell, as the
+    /// VM's `Assign` writes it. Nothing is released that could run PHP
+    /// code, no typed property constrains the reference, and no `foreach`
+    /// of the frame can be iterating it (the frame has no side table).
+    fn assign_through_reference<const GUARDED: bool>(
+        &mut self,
+        position: Position,
+        local: Reg,
+        source: Reg,
+    ) -> Step {
+        if GUARDED || self.typed_references || position.frame.has_extras() {
+            return Step::Slow;
+        }
+        let slots = self.registers.tail_mut(position.frame.base());
+        let value = match slots.get(source.index()) {
+            Some(Some(value)) if is_plain_scalar(value) => value.clone(),
+            _ => return Step::Slow,
+        };
+        let Some(Some(Value::Reference(cell))) = slots.get(local.index()) else {
+            return Step::Slow;
+        };
+        let Ok(mut target) = cell.try_borrow_mut() else {
+            return Step::Slow;
+        };
+        if !is_plain_scalar(&target) {
+            return Step::Slow;
+        }
+        *target = value;
+        Step::Done(position.ip)
+    }
+
     /// Stores what a quiet read found.
     pub(super) fn store_quiet<const GUARDED: bool>(
         &mut self,
@@ -239,4 +355,17 @@ impl Machine<'_> {
             ScalarStep::Complete | ScalarStep::Released => Step::Done(ip),
         }
     }
+}
+
+/// A value whose release never runs PHP code: no array, object or resource.
+fn is_plain_scalar(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Null
+            | Value::Bool(_)
+            | Value::Int(_)
+            | Value::Float(_)
+            | Value::InternedStr(_)
+            | Value::String(_)
+    )
 }

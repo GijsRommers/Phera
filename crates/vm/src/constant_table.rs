@@ -1,7 +1,14 @@
 //! Resolve constant symbols once, invalidating fallbacks when PHP defines names.
 
 use crate::code_table::FunctionIndex;
-use std::{cell::OnceCell, rc::Rc, sync::Arc};
+use std::{
+    cell::OnceCell,
+    rc::Rc,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+};
 
 use foldhash::{HashMap, HashMapExt};
 use phera_bytecode::{CompiledUnit, SymbolId};
@@ -34,6 +41,19 @@ pub(crate) struct ConstantTable {
     user_order: Rc<Vec<String>>,
     origins: Rc<HashMap<String, ConstantOrigin>>,
     resolved: HashMap<ConstantSite, ResolvedConstant>,
+    /// Names this table's contents: a new number at every definition, never
+    /// used by another table, so a value read at one epoch is still the
+    /// value of the same name while the epoch is unchanged (see
+    /// [`crate::unit_caches::CachedConstant`]). A fork's copy has the same
+    /// contents and keeps the number.
+    epoch: u64,
+}
+
+/// The source of every epoch of every constant table in the process.
+static NEXT_EPOCH: AtomicU64 = AtomicU64::new(1);
+
+fn next_epoch() -> u64 {
+    NEXT_EPOCH.fetch_add(1, Ordering::Relaxed)
 }
 
 pub(crate) struct NativeConstants {
@@ -107,7 +127,14 @@ impl ConstantTable {
             user_order: Rc::new(Vec::new()),
             origins: Rc::new(HashMap::new()),
             resolved: HashMap::new(),
+            epoch: next_epoch(),
         }
+    }
+
+    /// Changes whenever a constant is defined.
+    #[inline]
+    pub(crate) fn epoch(&self) -> u64 {
+        self.epoch
     }
 
     pub(crate) fn get(&self, name: &str) -> Option<&GlobalConstant> {
@@ -131,6 +158,7 @@ impl ConstantTable {
         deprecated: Option<String>,
     ) {
         self.resolved.clear();
+        self.epoch = next_epoch();
         Rc::make_mut(&mut self.user_order).push(name.clone());
         if let Some(origin) = origin {
             Rc::make_mut(&mut self.origins).insert(name.clone(), origin);
@@ -231,6 +259,7 @@ impl crate::snapshot::ForkCopy for ConstantTable {
             user_order: self.user_order.clone(),
             origins: self.origins.clone(),
             resolved: Default::default(),
+            epoch: self.epoch,
         }
     }
 }

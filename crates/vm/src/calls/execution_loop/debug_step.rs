@@ -27,6 +27,11 @@ impl Vm {
         stop: usize,
         work: &mut usize,
     ) -> Result<Option<BatchExit>, NativeError> {
+        let (constant_epoch, typed_references) =
+            (self.constants.epoch(), self.has_typed_references());
+        if let Some(fast_stack) = self.fast_stack.as_deref_mut() {
+            fast_stack.echo_open = false;
+        }
         let mut machine = Machine {
             code: &self.code,
             classes: &mut self.classes,
@@ -41,6 +46,9 @@ impl Vm {
             registry: &self.registry,
             class_states: &self.class_states,
             enum_cases: &self.enum_cases,
+            globals: &self.globals,
+            constant_epoch,
+            typed_references,
         };
         let progress = machine.debug_step(instruction)?;
         *work = machine.work;

@@ -1,6 +1,7 @@
 //! Numbers in other bases: `dechex`, `hexdec`, `base_convert` and their
 //! relatives, and `fpow`.
 
+use phera_extension_api::value::power_of_two_digits;
 use phera_extension_api::{
     Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Value, args,
 };
@@ -33,7 +34,7 @@ const DECHEX: FunctionEntry =
 
 fn dechex(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let number = args::int(arguments, 0).unwrap_or_default();
-    Ok(integer_digits_value(number as u64, 16))
+    Ok(Value::String(power_of_two_digits(number as u64, 4)))
 }
 
 /// `decbin(int $num): string`
@@ -46,7 +47,7 @@ const DECBIN: FunctionEntry =
 
 fn decbin(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let number = args::int(arguments, 0).unwrap_or_default();
-    Ok(integer_digits_value(number as u64, 2))
+    Ok(Value::String(power_of_two_digits(number as u64, 1)))
 }
 
 /// `decoct(int $num): string`
@@ -59,7 +60,7 @@ const DECOCT: FunctionEntry =
 
 fn decoct(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let number = args::int(arguments, 0).unwrap_or_default();
-    Ok(integer_digits_value(number as u64, 8))
+    Ok(Value::String(power_of_two_digits(number as u64, 3)))
 }
 
 /// `hexdec(string $hex_string): int|float`, a float once the number passes

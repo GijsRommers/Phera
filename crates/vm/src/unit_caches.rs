@@ -30,6 +30,15 @@ pub(crate) struct UnitCache {
     /// How many function symbols the file has.
     symbol_count: usize,
     pub(crate) direct_natives: OnceCell<Box<[Cell<Option<crate::calls::sync_native::NativeLink>>]>>,
+    /// What each constant symbol of the file (`FetchConstant`) last read,
+    /// when that was a plain scalar: one cell per symbol, made at the
+    /// file's first constant read in a request. Never copied from the
+    /// snapshot.
+    pub(crate) global_constants: OnceCell<Box<[Cell<Option<CachedConstant>>]>>,
+    /// Where each name of the file that a `global $name` bound was found:
+    /// the file-scope code and its register for the variable. One cell
+    /// per name, made at the file's first `global` in a request.
+    global_bindings: OnceCell<Box<[Cell<Option<GlobalBinding>>]>>,
     pub(crate) constants: Rc<[phera_value::Value]>,
     pub(crate) class_names: Rc<[phera_value::Value]>,
     /// Keyed by immutable unit TypeId and made at first unit use; spelling cannot
@@ -52,6 +61,109 @@ pub(crate) struct UnitCache {
     /// first needed, never copied before. `None` in the snapshot's own
     /// cache and in a cache that was never forked.
     base: Option<Rc<UnitCache>>,
+}
+
+/// A global constant's value as one `FetchConstant` site read it, valid
+/// while the constant table is at the same epoch
+/// ([`crate::constant_table::ConstantTable::epoch`]): no constant was
+/// defined since, so the name still means the same constant. Only scalars
+/// and interned strings, which are copied without a reference count, and
+/// only constants without a deprecation, which PHP reports at every read.
+#[derive(Clone, Copy)]
+pub(crate) struct CachedConstant {
+    pub(crate) epoch: u64,
+    pub(crate) value: ScalarConstant,
+}
+
+/// A constant value the loop can store without touching a reference count.
+#[derive(Clone, Copy)]
+pub(crate) enum ScalarConstant {
+    Null,
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+    Interned(&'static phera_value::InternedStr),
+}
+
+impl ScalarConstant {
+    pub(crate) fn of(value: &Value) -> Option<Self> {
+        Some(match value {
+            Value::Null => Self::Null,
+            Value::Bool(value) => Self::Bool(*value),
+            Value::Int(value) => Self::Int(*value),
+            Value::Float(value) => Self::Float(*value),
+            Value::InternedStr(value) => Self::Interned(value),
+            _ => return None,
+        })
+    }
+
+    #[inline]
+    pub(crate) fn value(self) -> Value {
+        match self {
+            Self::Null => Value::Null,
+            Self::Bool(value) => Value::Bool(value),
+            Self::Int(value) => Value::Int(value),
+            Self::Float(value) => Value::Float(value),
+            Self::Interned(value) => Value::InternedStr(value),
+        }
+    }
+}
+
+impl UnitCache {
+    /// Remembers what constant symbol `symbol` of this file read at `epoch`.
+    pub(crate) fn remember_constant(&self, symbol: usize, epoch: u64, value: &Value) {
+        let Some(value) = ScalarConstant::of(value) else {
+            return;
+        };
+        let cells = self
+            .global_constants
+            .get_or_init(|| (0..self.symbol_count).map(|_| Cell::new(None)).collect());
+        if let Some(cell) = cells.get(symbol) {
+            cell.set(Some(CachedConstant { epoch, value }));
+        }
+    }
+
+    /// The value constant symbol `symbol` read at `epoch`, if it is known.
+    #[inline]
+    pub(crate) fn known_constant(&self, symbol: usize, epoch: u64) -> Option<Value> {
+        let cached = self.global_constants.get()?.get(symbol)?.get()?;
+        (cached.epoch == epoch).then(|| cached.value.value())
+    }
+}
+
+/// Where a global variable lives, as a `global $name` found it.
+#[derive(Clone, Copy)]
+pub(crate) enum GlobalBinding {
+    /// A declared variable of file-scope code, which keeps its register for
+    /// as long as the code runs. Valid while the innermost file-scope frame
+    /// at the bottom of the stack runs `function`.
+    Register {
+        function: crate::code_table::FunctionIndex,
+        register: phera_bytecode::Reg,
+    },
+    /// An entry of the request's globals table that no frame holds: valid
+    /// while the entry at `index` is still the variable's and holds its
+    /// value (`crate::globals::Globals::reference_at`).
+    Table { index: u32 },
+}
+
+impl UnitCache {
+    /// Remembers where `global $name` (name `name` of this file) found the
+    /// variable.
+    pub(crate) fn remember_global(&self, name: usize, binding: GlobalBinding) {
+        let cells = self
+            .global_bindings
+            .get_or_init(|| (0..self.names.len()).map(|_| Cell::new(None)).collect());
+        if let Some(cell) = cells.get(name) {
+            cell.set(Some(binding));
+        }
+    }
+
+    /// Where `global $name` last found the variable, if it ran before.
+    #[inline]
+    pub(crate) fn known_global(&self, name: usize) -> Option<GlobalBinding> {
+        self.global_bindings.get()?.get(name)?.get()
+    }
 }
 
 /// A native getter's direct handler (`MethodEntry::direct`).
@@ -244,6 +356,8 @@ impl UnitCache {
             symbols: RefCell::new(Vec::new()),
             symbol_count: unit.symbols.len(),
             direct_natives: OnceCell::new(),
+            global_constants: OnceCell::new(),
+            global_bindings: OnceCell::new(),
             constants: unit
                 .constants
                 .iter()
@@ -320,6 +434,8 @@ impl UnitCache {
             symbols.clear();
         }
         self.records.take();
+        self.global_constants.take();
+        self.global_bindings.take();
         let closures = self.closure_signatures.get_mut();
         if !closures.is_empty() {
             closures.clear();
@@ -335,6 +451,8 @@ impl UnitCache {
             symbols: RefCell::new(Vec::new()),
             symbol_count: self.symbol_count,
             direct_natives: OnceCell::new(),
+            global_constants: OnceCell::new(),
+            global_bindings: OnceCell::new(),
             constants: self.constants.clone(),
             class_names: self.class_names.clone(),
             type_scopes: self.type_scopes.clone(),

@@ -131,6 +131,14 @@ pub(super) struct Machine<'a> {
     /// The request's validated enum cases, read by class constants and
     /// `Enum::from`/`Enum::tryFrom`.
     pub(super) enum_cases: &'a crate::classes::enums::EnumCases,
+    /// The request's global variables that no frame holds, read by
+    /// `global $name`.
+    pub(super) globals: &'a crate::globals::Globals,
+    /// The constant table's epoch: which cached constant reads still hold.
+    pub(super) constant_epoch: u64,
+    /// Whether some PHP reference is bound to a typed property, whose
+    /// type every assignment through the reference must check.
+    pub(super) typed_references: bool,
 }
 
 /// Where the loop is: which function, its registers, its next instruction.
@@ -167,6 +175,14 @@ impl Vm {
         work: &mut usize,
     ) -> Result<BatchExit, NativeError> {
         loop {
+            let (constant_epoch, typed_references) =
+                (self.constants.epoch(), self.has_typed_references());
+            if self.fast_stack.is_some() {
+                let open = self.fast_echo_allowed();
+                if let Some(fast_stack) = self.fast_stack.as_deref_mut() {
+                    fast_stack.echo_open = open;
+                }
+            }
             let mut machine = Machine {
                 code: &self.code,
                 classes: &mut self.classes,
@@ -181,6 +197,9 @@ impl Vm {
                 registry: &self.registry,
                 class_states: &self.class_states,
                 enum_cases: &self.enum_cases,
+                globals: &self.globals,
+                constant_epoch,
+                typed_references,
             };
             // While no live object has a destructor due, no release can
             // make one due, and the loop is the plain one (see
@@ -193,6 +212,13 @@ impl Vm {
             };
             *work = machine.work;
             self.executed_instructions += machine.executed;
+            if self
+                .fast_stack
+                .as_deref()
+                .is_some_and(|fast_stack| !fast_stack.echo.is_empty())
+            {
+                self.write_fast_echo();
+            }
             let instruction = match exit {
                 LoopExit::Slow(instruction) => instruction,
                 LoopExit::Yield => {
@@ -771,9 +797,10 @@ impl Machine<'_> {
             | Instruction::SendPath { .. }
             | Instruction::IterStart { .. }
             | Instruction::IterEnd { .. }
-            | Instruction::FetchNamedClassConstant { .. } => {
-                self.further_step::<GUARDED>(*instruction, position)
-            }
+            | Instruction::FetchNamedClassConstant { .. }
+            | Instruction::FetchConstant { .. }
+            | Instruction::BindGlobal { .. }
+            | Instruction::Assign { .. } => self.further_step::<GUARDED>(*instruction, position),
             _ => Step::Slow,
         }
     }
@@ -811,7 +838,7 @@ impl Machine<'_> {
             budget,
         ) {
             crate::iteration::KeyedAddStep::Done(spent) => {
-                self.work += spent;
+                self.work += spent.div_ceil(crate::iteration::BULK_ADDS_PER_WORK);
                 self.executed += (spent * 3) as u64;
                 Some(Step::Done(*ip))
             }

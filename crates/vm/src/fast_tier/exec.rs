@@ -1652,6 +1652,8 @@ pub(crate) fn run_fast(
         let free_heap = &mut fast_stack.free_heap;
         let list_buf_i64 = &mut fast_stack.list_buf_i64;
         let list_buf_f64 = &mut fast_stack.list_buf_f64;
+        let echo = &mut fast_stack.echo;
+        let echo_open = fast_stack.echo_open;
 
         loop {
             let Some(&op) = cur_ops.get(ip) else {
@@ -1719,7 +1721,9 @@ pub(crate) fn run_fast(
                                 ip = next_fast_ip;
                                 continue;
                             }
-                            crate::fast_tier::list_loop::ListExit::Yield { resume_fast_ip } => {
+                            crate::fast_tier::list_loop::ListExit::Yield {
+                                resume_fast_ip, ..
+                            } => {
                                 ip = resume_fast_ip;
                                 work = 0;
                                 yield_now = true;
@@ -3023,6 +3027,28 @@ pub(crate) fn run_fast(
                     ) {
                         break 'frame_loop;
                     }
+                    ip += 1;
+                }
+                // A string goes to the collected output. Anything else, or
+                // output the VM did not open, runs in the VM, as a
+                // structural deopt: it says nothing about the code's types.
+                Op::Echo => {
+                    let tag = t[op.a as usize];
+                    let index = v[op.a as usize] as usize;
+                    let bytes = match tag {
+                        _ if !echo_open => None,
+                        TAG_CONST => unit_consts.get(index).and_then(Value::as_str_bytes),
+                        TAG_HEAP => heap
+                            .get(index)
+                            .and_then(Option::as_ref)
+                            .and_then(Value::as_str_bytes),
+                        _ => None,
+                    };
+                    let Some(bytes) = bytes else {
+                        structural_deopt = true;
+                        break 'frame_loop;
+                    };
+                    echo.extend_from_slice(bytes);
                     ip += 1;
                 }
                 Op::IncLocalFast => {

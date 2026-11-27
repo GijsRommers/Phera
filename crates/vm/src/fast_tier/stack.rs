@@ -37,6 +37,14 @@ pub(crate) struct FastStack {
     pub(crate) list_buf_i64: Vec<i64>,
     /// Reusable unboxed `f64` scratch slice for `list_loop::try_run_list_loop`.
     pub(crate) list_buf_f64: Vec<f64>,
+    /// What `echo` wrote during one run of the interpreter loop, which the
+    /// VM sends to the request's output when the loop hands back, before
+    /// anything else can write (`Vm::write_fast_echo`).
+    pub(crate) echo: Vec<u8>,
+    /// Whether `echo` may collect output in this run: the VM sets it when
+    /// a later write of the same bytes is the same as writing them now (see
+    /// `Vm::fast_echo_allowed`).
+    pub(crate) echo_open: bool,
 }
 
 impl FastStack {
@@ -51,6 +59,8 @@ impl FastStack {
             rec_frames: Vec::new(),
             list_buf_i64: Vec::new(),
             list_buf_f64: Vec::new(),
+            echo: Vec::new(),
+            echo_open: false,
         }
     }
 

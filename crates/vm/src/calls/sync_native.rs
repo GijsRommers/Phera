@@ -43,6 +43,9 @@ pub(crate) enum PureNative {
     ArrayValues,
     ArrayMerge,
     Strtoupper,
+    Dechex,
+    Decbin,
+    Decoct,
 }
 
 impl PureNative {
@@ -69,6 +72,9 @@ impl PureNative {
             "array_values" => Self::ArrayValues,
             "array_merge" => Self::ArrayMerge,
             "strtoupper" => Self::Strtoupper,
+            "dechex" => Self::Dechex,
+            "decbin" => Self::Decbin,
+            "decoct" => Self::Decoct,
             _ => return None,
         })
     }

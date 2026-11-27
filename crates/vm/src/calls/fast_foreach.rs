@@ -51,6 +51,7 @@ impl Machine<'_> {
                 source: None,
                 position: None,
                 started: false,
+                bulk_resume: false,
             },
         );
         let Some(&frame) = self.stack.frames().last() else {

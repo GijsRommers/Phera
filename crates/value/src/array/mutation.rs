@@ -97,10 +97,12 @@ impl PhpArray {
     /// `src` (a `Storage::Map`), adds `v` into `self[k]` when `self[k]` already
     /// exists as an `Int` (fast-pathing matching slot indices with zero hashing
     /// and zero key clones). Stops cleanly before any missing key, non-int,
-    /// reference, overflow, or budget limit.
+    /// reference, overflow, or budget limit. Starts at entry position `from`
+    /// of `src`, which is where a run that stopped at its budget goes on.
     pub fn add_matching_map_entries_from(
         &mut self,
         src: &PhpArray,
+        from: usize,
         budget: usize,
     ) -> MapAddOutcome {
         let Storage::Map(src_map) = &src.storage else {
@@ -121,7 +123,7 @@ impl PhpArray {
         let mut last: Option<(usize, i64)> = None;
         let mut count: usize = 0;
 
-        for (pos, src_entry) in src_map.entries.iter().enumerate() {
+        for (pos, src_entry) in src_map.entries.iter().enumerate().skip(from) {
             let Some(src_val) = &src_entry.value else {
                 continue;
             };
