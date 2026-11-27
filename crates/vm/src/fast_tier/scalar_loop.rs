@@ -19,11 +19,13 @@ pub(crate) const MAX_SCALAR_SLOTS: usize = 32;
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SOp {
-    // 1-op fused counter + accumulator inner loops (`simple`, `nestedloop`)
+    // 1-op fused counter + accumulator inner loops (`simple`, `nestedloop`, `simpleucall`)
     IncIncLoopLtImm,
     IncIncLoopLeImm,
     IncIncLoopLtReg,
     IncIncLoopLeReg,
+    IncOnlyLoopLtImm,
+    IncOnlyLoopLeImm,
 
     // Unboxed float arithmetic & general 3-op fusions
     AddF64,
@@ -58,6 +60,9 @@ pub(crate) enum SOp {
     CmpF64Exit,    // if cmp(fv[a], fv[b]) { exit imm }
     CmpI64ImmExit, // if cmp(iv[a], imm) { exit target in (b | c<<8) }
     CmpI64Exit,    // if cmp(iv[a], iv[b]) { exit imm }
+    CmpI64ImmBack, // if cmp(iv[a], imm) == when { goto 0 (budget) } else { exit fallthrough }
+    CmpI64Back,    // if cmp(iv[a], iv[b]) == when { goto 0 (budget) } else { exit fallthrough }
+    CmpF64Back,    // if cmp(fv[a], fv[b]) == when { goto 0 (budget) } else { exit fallthrough }
     IncLoopLtImm,  // iv[a] += 1; if iv[a] < imm { goto 0 (budget) } else { exit b|c<<8 }
     IncLoopLeImm,
     DecLoopGeImm,
@@ -417,6 +422,60 @@ fn run_scalar_kernel(
                     }
                 }
             }
+            SOp::IncOnlyLoopLtImm => {
+                let i_idx = (op.a & 31) as usize;
+                let lim = i64::from(op.imm);
+                let mut i = iv[i_idx];
+                loop {
+                    let Some(ni) = i.checked_add(1) else {
+                        iv[i_idx] = i;
+                        return ScalarExit::Fallback {
+                            fallback_fast_ip: fast_ips[ip] as usize,
+                            spent: budget_start.saturating_sub(budget),
+                        };
+                    };
+                    i = ni;
+                    if i >= lim {
+                        iv[i_idx] = i;
+                        return ScalarExit::Exit {
+                            next_fast_ip: usize::MAX,
+                            spent: budget_start.saturating_sub(budget),
+                        };
+                    }
+                    budget -= 1;
+                    if budget == 0 {
+                        iv[i_idx] = i;
+                        return ScalarExit::Yield;
+                    }
+                }
+            }
+            SOp::IncOnlyLoopLeImm => {
+                let i_idx = (op.a & 31) as usize;
+                let lim = i64::from(op.imm);
+                let mut i = iv[i_idx];
+                loop {
+                    let Some(ni) = i.checked_add(1) else {
+                        iv[i_idx] = i;
+                        return ScalarExit::Fallback {
+                            fallback_fast_ip: fast_ips[ip] as usize,
+                            spent: budget_start.saturating_sub(budget),
+                        };
+                    };
+                    i = ni;
+                    if i > lim {
+                        iv[i_idx] = i;
+                        return ScalarExit::Exit {
+                            next_fast_ip: usize::MAX,
+                            spent: budget_start.saturating_sub(budget),
+                        };
+                    }
+                    budget -= 1;
+                    if budget == 0 {
+                        iv[i_idx] = i;
+                        return ScalarExit::Yield;
+                    }
+                }
+            }
 
             // =================================================================
             // UNBOXED FLOAT ARITHMETIC & GENERAL 3-OP FUSIONS
@@ -639,6 +698,57 @@ fn run_scalar_kernel(
                     };
                 }
                 ip += 1;
+            }
+            SOp::CmpI64ImmBack => {
+                let reg = (op.a & 31) as usize;
+                let cmp = (op.a >> 5) & 7;
+                let when = (op.c & 0x80) != 0;
+                if eval_i64_cmp(cmp, iv[reg], i64::from(op.imm)) == when {
+                    budget -= 1;
+                    if budget == 0 {
+                        return ScalarExit::Yield;
+                    }
+                    ip = 0;
+                } else {
+                    return ScalarExit::Exit {
+                        next_fast_ip: usize::MAX,
+                        spent: budget_start.saturating_sub(budget),
+                    };
+                }
+            }
+            SOp::CmpI64Back => {
+                let flags = op.c;
+                let cmp = flags & 0x0f;
+                let when = (flags & 0x10) != 0;
+                if eval_i64_cmp(cmp, iv[(op.a & 31) as usize], iv[(op.b & 31) as usize]) == when {
+                    budget -= 1;
+                    if budget == 0 {
+                        return ScalarExit::Yield;
+                    }
+                    ip = 0;
+                } else {
+                    return ScalarExit::Exit {
+                        next_fast_ip: usize::MAX,
+                        spent: budget_start.saturating_sub(budget),
+                    };
+                }
+            }
+            SOp::CmpF64Back => {
+                let flags = op.c;
+                let cmp = flags & 0x0f;
+                let when = (flags & 0x10) != 0;
+                if eval_f64_cmp(cmp, fv[(op.a & 31) as usize], fv[(op.b & 31) as usize]) == when {
+                    budget -= 1;
+                    if budget == 0 {
+                        return ScalarExit::Yield;
+                    }
+                    ip = 0;
+                } else {
+                    return ScalarExit::Exit {
+                        next_fast_ip: usize::MAX,
+                        spent: budget_start.saturating_sub(budget),
+                    };
+                }
             }
             SOp::IncLoopLtImm => {
                 let idx = (op.a & 31) as usize;
@@ -1077,7 +1187,9 @@ pub(crate) fn try_compile_scalar_loop(
                 );
             }
             Op::Move | Op::Assign | Op::AssignTake | Op::NegNum => {
-                let k = if float_hints.get(op.b as usize).copied().unwrap_or(false) {
+                let k = if kinds[op.b as usize] == RegKind::Float
+                    || float_hints.get(op.b as usize).copied().unwrap_or(false)
+                {
                     RegKind::Float
                 } else {
                     RegKind::Int
@@ -1093,7 +1205,9 @@ pub(crate) fn try_compile_scalar_loop(
                 );
             }
             Op::CastFloat => {
-                let k = if float_hints.get(op.b as usize).copied().unwrap_or(false) {
+                let k = if kinds[op.b as usize] == RegKind::Float
+                    || float_hints.get(op.b as usize).copied().unwrap_or(false)
+                {
                     RegKind::Float
                 } else {
                     RegKind::Int
@@ -1128,8 +1242,15 @@ pub(crate) fn try_compile_scalar_loop(
                     seen_branch,
                 );
             }
-            Op::BranchCmp if !is_last => {
-                let k = if float_hints.get(op.b as usize).copied().unwrap_or(false)
+            Op::Clear if op.a >= local_count => {}
+            Op::CallNoop
+                if op.c == 0
+                    && op.a >= local_count
+                    && temp_dead_in_loop(body, &skip_mask, off, op.a) => {}
+            Op::BranchCmp => {
+                let k = if kinds[op.b as usize] == RegKind::Float
+                    || kinds[op.c as usize] == RegKind::Float
+                    || float_hints.get(op.b as usize).copied().unwrap_or(false)
                     || float_hints.get(op.c as usize).copied().unwrap_or(false)
                 {
                     RegKind::Float
@@ -1138,7 +1259,9 @@ pub(crate) fn try_compile_scalar_loop(
                 };
                 mark_read(op.b, k, &mut kinds, &mut read_before_write, &written);
                 mark_read(op.c, k, &mut kinds, &mut read_before_write, &written);
-                seen_branch = true;
+                if !is_last {
+                    seen_branch = true;
+                }
             }
             Op::BranchLtImm
             | Op::BranchLeImm
@@ -1147,10 +1270,10 @@ pub(crate) fn try_compile_scalar_loop(
             | Op::BranchEqImm
             | Op::BranchNeImm
             | Op::BranchIdentImm
-            | Op::BranchNotIdentImm
-                if !is_last =>
-            {
-                let k = if float_hints.get(op.a as usize).copied().unwrap_or(false) {
+            | Op::BranchNotIdentImm => {
+                let k = if kinds[op.a as usize] == RegKind::Float
+                    || float_hints.get(op.a as usize).copied().unwrap_or(false)
+                {
                     if matches!(op.op, Op::BranchIdentImm | Op::BranchNotIdentImm) {
                         return None;
                     }
@@ -1159,7 +1282,9 @@ pub(crate) fn try_compile_scalar_loop(
                     RegKind::Int
                 };
                 mark_read(op.a, k, &mut kinds, &mut read_before_write, &written);
-                seen_branch = true;
+                if !is_last {
+                    seen_branch = true;
+                }
             }
             Op::Jump if is_last => {}
             Op::IncLoopLtImm | Op::IncLoopLeImm | Op::DecLoopGeImm | Op::DecLoopGtImm
@@ -1211,9 +1336,9 @@ pub(crate) fn try_compile_scalar_loop(
         }
     }
 
-    // Ensure no type conflicts and that every written named local is either
-    // live-in or written before the first branch (so write-back on early exit
-    // is 100% sound!).
+    // Ensure no type conflicts. If a named local is written AFTER a branch
+    // without being read before write (`$t` in `mandel2`), mark it live-in so
+    // an early exit before the write restores its exact entry value!
     for r in 0..256 {
         if kinds[r] == RegKind::Conflict {
             return None;
@@ -1223,7 +1348,7 @@ pub(crate) fn try_compile_scalar_loop(
             && !read_before_write[r]
             && !written_before_branch[r]
         {
-            return None;
+            read_before_write[r] = true;
         }
     }
 
@@ -1360,6 +1485,36 @@ pub(crate) fn try_compile_scalar_loop(
         }
     }
 
+    // 3b. Special case: pure counter / dead-noop loop (`simpleucall`, `simpleudcall`).
+    if body.len() >= 2
+        && body[..body.len() - 1].iter().all(|op| {
+            (op.op == Op::CallNoop && op.c == 0 && op.a >= local_count)
+                || (op.op == Op::Clear && op.a >= local_count)
+        })
+        && matches!(body[body.len() - 1].op, Op::IncLoopLtImm | Op::IncLoopLeImm)
+    {
+        let last = body[body.len() - 1];
+        let i_slot = int_slot[last.a as usize];
+        let sop = if last.op == Op::IncLoopLtImm {
+            ScalarOp::new(SOp::IncOnlyLoopLtImm, i_slot, 0, 0, last.imm)
+        } else {
+            ScalarOp::new(SOp::IncOnlyLoopLeImm, i_slot, 0, 0, last.imm)
+        };
+        return Some(ScalarLoop {
+            ops: vec![sop].into_boxed_slice(),
+            fast_ips: vec![body_start as u16].into_boxed_slice(),
+            fallthrough_fast_ip: (end + 1) as u16,
+            int_regs: int_regs.into_boxed_slice(),
+            f64_regs: f64_regs.into_boxed_slice(),
+            live_in_ints: live_in_ints.into_boxed_slice(),
+            live_in_f64s: live_in_f64s.into_boxed_slice(),
+            written_ints: written_ints.into_boxed_slice(),
+            written_f64s: written_f64s.into_boxed_slice(),
+            f64_consts: f64_consts.into_boxed_slice(),
+            i64_consts: i64_consts.into_boxed_slice(),
+        });
+    }
+
     // 4. Lower body with general 2-op and 3-op peephole fusions using FINAL FastOp indices!
     let mut sops: Vec<ScalarOp> = Vec::with_capacity(body.len());
     let mut fast_ips: Vec<u16> = Vec::with_capacity(body.len());
@@ -1416,11 +1571,11 @@ pub(crate) fn try_compile_scalar_loop(
             && op1.op == Op::MulF64
             && (op1.b == op.a || op1.c == op.a)
             && (op1.a as usize) >= local_count as usize
-            && temp_dead_in_loop(body, &skip_mask, k + 1, op.a)
+            && (op1.a == op.a || temp_dead_in_loop(body, &skip_mask, k + 1, op.a))
             && let Some(op2) = next2
             && op2.op == Op::AddF64
             && (op2.b == op1.a || op2.c == op1.a)
-            && temp_dead_in_loop(body, &skip_mask, k + 2, op1.a)
+            && (op2.a == op1.a || temp_dead_in_loop(body, &skip_mask, k + 2, op1.a))
         {
             let x = op.b;
             let y = if op1.b == op.a { op1.c } else { op1.b };
@@ -1430,6 +1585,33 @@ pub(crate) fn try_compile_scalar_loop(
                 f64_slot[op2.a as usize],
                 f64_slot[x as usize],
                 f64_slot[y as usize],
+                i32::from(f64_slot[z as usize]),
+            ));
+            fast_ips.push(op_fast_ip);
+            k += 3;
+            continue;
+        }
+
+        // Fusion B2: `MulF64(t1, x, y) + MulF64Imm(t2, t1, 2) + AddF64(dst, t2, z)` -> `Mul2MulAddF64`!
+        if op.op == Op::MulF64
+            && (op.a as usize) >= local_count as usize
+            && let Some(op1) = next
+            && op1.op == Op::MulF64Imm
+            && op1.imm == 2
+            && op1.b == op.a
+            && (op1.a as usize) >= local_count as usize
+            && (op1.a == op.a || temp_dead_in_loop(body, &skip_mask, k + 1, op.a))
+            && let Some(op2) = next2
+            && op2.op == Op::AddF64
+            && (op2.b == op1.a || op2.c == op1.a)
+            && (op2.a == op1.a || temp_dead_in_loop(body, &skip_mask, k + 2, op1.a))
+        {
+            let z = if op2.b == op1.a { op2.c } else { op2.b };
+            sops.push(ScalarOp::new(
+                SOp::Mul2MulAddF64,
+                f64_slot[op2.a as usize],
+                f64_slot[op.b as usize],
+                f64_slot[op.c as usize],
                 i32::from(f64_slot[z as usize]),
             ));
             fast_ips.push(op_fast_ip);
@@ -1879,7 +2061,34 @@ pub(crate) fn try_compile_scalar_loop(
             },
             Op::IncLocalFast => ScalarOp::new(SOp::IncI64, int_slot[op.a as usize], 0, 0, 0),
             Op::DecLocalFast => ScalarOp::new(SOp::DecI64, int_slot[op.a as usize], 0, 0, 0),
+            Op::Clear | Op::CallNoop => {
+                k += 1;
+                continue;
+            }
             Op::BranchCmp => {
+                if k + 1 == body.len() {
+                    let sop = match kinds[op.b as usize] {
+                        RegKind::Float => ScalarOp::new(
+                            SOp::CmpF64Back,
+                            f64_slot[op.b as usize],
+                            f64_slot[op.c as usize],
+                            op.a,
+                            0,
+                        ),
+                        RegKind::Int => ScalarOp::new(
+                            SOp::CmpI64Back,
+                            int_slot[op.b as usize],
+                            int_slot[op.c as usize],
+                            op.a,
+                            0,
+                        ),
+                        _ => return None,
+                    };
+                    sops.push(sop);
+                    fast_ips.push(op_fast_ip);
+                    k += 1;
+                    continue;
+                }
                 let (exit_ip, flags, next_k) = if let Some((skip_off, early_ip)) =
                     inline_early_exit(body, body_start, end, k)
                 {
@@ -1919,6 +2128,27 @@ pub(crate) fn try_compile_scalar_loop(
             | Op::BranchNotIdentImm => {
                 let cmp = branch_imm_cmp_code(op.op)?;
                 let when = (op.c & 0x80) != 0;
+                if k + 1 == body.len() {
+                    let sop = match kinds[op.a as usize] {
+                        RegKind::Float => {
+                            let cs = alloc_f64_const(op.imm as f64, &mut f64_consts)?;
+                            let flags = cmp | if when { 0x10 } else { 0 };
+                            ScalarOp::new(SOp::CmpF64Back, f64_slot[op.a as usize], cs, flags, 0)
+                        }
+                        RegKind::Int => ScalarOp::new(
+                            SOp::CmpI64ImmBack,
+                            (int_slot[op.a as usize] & 31) | ((cmp & 7) << 5),
+                            0,
+                            if when { 0x80 } else { 0 },
+                            op.imm,
+                        ),
+                        _ => return None,
+                    };
+                    sops.push(sop);
+                    fast_ips.push(op_fast_ip);
+                    k += 1;
+                    continue;
+                }
                 let (target, eff_when, next_k) = if let Some((skip_off, early_ip)) =
                     inline_early_exit(body, body_start, end, k)
                 {

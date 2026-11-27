@@ -323,11 +323,11 @@ impl Machine<'_> {
             frame,
             ip: frame.ip(),
         };
-        if !GUARDED
-            && self.code.facts(frame.function).fast_candidate
-            && let Some(exit) = self.try_run_fast_chain(&mut position)
-        {
-            return exit;
+        if !GUARDED && self.code.facts(frame.function).fast_candidate {
+            match self.try_run_fast_chain(position) {
+                Ok(next) => position = next,
+                Err(exit) => return exit,
+            }
         }
         let mut instructions = self.code.instructions(position.frame.function);
         // Whether the frame's registers fit a window (see
@@ -361,11 +361,11 @@ impl Machine<'_> {
                     let same_function = next.frame.function == position.frame.function;
                     position = next;
                     if !same_function {
-                        if !GUARDED
-                            && self.code.facts(position.frame.function).fast_candidate
-                            && let Some(exit) = self.try_run_fast_chain(&mut position)
-                        {
-                            return exit;
+                        if !GUARDED && self.code.facts(position.frame.function).fast_candidate {
+                            match self.try_run_fast_chain(position) {
+                                Ok(after) => position = after,
+                                Err(exit) => return exit,
+                            }
                         }
                         instructions = self.code.instructions(position.frame.function);
                         windowed = self.windowed(position.frame);
@@ -576,34 +576,36 @@ impl Machine<'_> {
         self.code.facts(frame.function).registers as usize <= WINDOW
     }
 
-    /// Try running a chain of Tier-2 candidate frames without adding any code
-    /// or register pressure to `Machine::run`'s hot loop.
+    /// Try running a chain of Tier-2 candidate frames without taking `&mut position`
+    /// so `position` stays 100% register-allocated inside `Machine::run`.
     #[cold]
     #[inline(never)]
-    fn try_run_fast_chain(&mut self, position: &mut Position) -> Option<LoopExit> {
+    fn try_run_fast_chain(&mut self, mut position: Position) -> Result<Position, LoopExit> {
         loop {
-            let exit = self.try_run_fast(*position)?;
+            let Some(exit) = self.try_run_fast(position) else {
+                return Ok(position);
+            };
             match exit {
                 crate::fast_tier::FastExit::Returned(next) => {
-                    *position = next;
+                    position = next;
                     if self.code.facts(next.frame.function).fast_candidate {
                         continue;
                     }
-                    return None;
+                    return Ok(position);
                 }
                 crate::fast_tier::FastExit::Deopt {
                     position: next,
                     yield_now,
                     disable_fn,
                 } => {
-                    *position = next;
+                    position = next;
                     if let Some(fn_idx) = disable_fn {
                         self.code.mark_fast_ineligible(fn_idx);
                     }
                     if yield_now {
-                        return Some(LoopExit::Yield);
+                        return Err(LoopExit::Yield);
                     }
-                    return None;
+                    return Ok(position);
                 }
             }
         }

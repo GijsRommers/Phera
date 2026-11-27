@@ -169,10 +169,12 @@ pub(crate) enum Op {
     ArrGetInt,
     Arr2DGetInt,
     ArrSetInt,
+    Arr2DSetInt,
     ArrAddAssignInt,
     ArrAddFromArr,
     ArrAddFromArrLoop,
     ArrUnsetStepLoop,
+    ArrSetRegStepLoop,
     ArrPush,
     ArrUnsetInt,
 

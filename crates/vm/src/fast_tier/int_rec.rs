@@ -342,265 +342,263 @@ pub(crate) fn run_int_rec_entry(
     let caller_vm = *stack.caller()?;
     let destination = entry_frame.destination()?;
 
-    rec_frames.clear();
-    let min_regs = (stride * 64).max(4096);
-    if rec_regs.len() < min_regs {
-        rec_regs.resize(min_regs, 0);
+    // Pre-size flat buffers ONCE so the inner loop has zero re-slicing, zero
+    // `try_into().expect()`, and zero `Vec::push` capacity checks!
+    let cap_frames = max_frames.min(4096);
+    let needed_regs = (cap_frames + 2) * stride + 32;
+    if rec_regs.len() < needed_regs {
+        rec_regs.resize(needed_regs, 0);
     }
+    rec_frames.clear();
+    if rec_frames.capacity() < cap_frames + 1 {
+        rec_frames.reserve(cap_frames + 1 - rec_frames.capacity());
+    }
+    rec_frames.resize(
+        cap_frames + 1,
+        RecFrame {
+            base: 0,
+            ret_dst: 0,
+            ret_ip: 0,
+        },
+    );
     rec_regs[..param_count].copy_from_slice(&entry_args[..param_count]);
 
     let ops = &rec.ops[..];
+    let regs = &mut rec_regs[..needed_regs];
+    let frames = &mut rec_frames[..cap_frames + 1];
+    let mut sp: usize = 0;
     let mut base: usize = 0;
     let mut ip: usize = 0;
     let mut budget = budget_start.max(1);
     let mut yield_now = false;
 
-    'outer: loop {
-        if base + 32 > rec_regs.len() {
-            let new_len = (rec_regs.len() * 2).max(base + 1024);
-            rec_regs.resize(new_len, 0);
-        }
-        let r: &mut [i64; 32] = (&mut rec_regs[base..base + 32])
-            .try_into()
-            .expect("32-i64 window");
-
-        loop {
-            let Some(&op) = ops.get(ip) else {
-                break 'outer;
-            };
-            match op.op {
-                ROp::BranchLtImm
-                | ROp::BranchLeImm
-                | ROp::BranchGtImm
-                | ROp::BranchGeImm
-                | ROp::BranchEqImm
-                | ROp::BranchNeImm => {
-                    let a = r[(op.a & 31) as usize];
-                    let imm = i64::from(op.imm);
-                    let res = match op.op {
-                        ROp::BranchLtImm => a < imm,
-                        ROp::BranchLeImm => a <= imm,
-                        ROp::BranchGtImm => a > imm,
-                        ROp::BranchGeImm => a >= imm,
-                        ROp::BranchEqImm => a == imm,
-                        ROp::BranchNeImm => a != imm,
-                        _ => unreachable!(),
-                    };
-                    let when = (op.c & 0x80) != 0;
-                    if res == when {
-                        let target = (op.b as usize) | (((op.c & 0x7f) as usize) << 8);
-                        if target <= ip {
-                            budget -= 1;
-                            if budget == 0 {
-                                ip = target;
-                                yield_now = true;
-                                break 'outer;
-                            }
+    while let Some(&op) = ops.get(ip) {
+        match op.op {
+            ROp::BranchLtImm
+            | ROp::BranchLeImm
+            | ROp::BranchGtImm
+            | ROp::BranchGeImm
+            | ROp::BranchEqImm
+            | ROp::BranchNeImm => {
+                let a = regs[base + (op.a as usize)];
+                let imm = i64::from(op.imm);
+                let res = match op.op {
+                    ROp::BranchLtImm => a < imm,
+                    ROp::BranchLeImm => a <= imm,
+                    ROp::BranchGtImm => a > imm,
+                    ROp::BranchGeImm => a >= imm,
+                    ROp::BranchEqImm => a == imm,
+                    ROp::BranchNeImm => a != imm,
+                    _ => unreachable!(),
+                };
+                let when = (op.c & 0x80) != 0;
+                if res == when {
+                    let target = (op.b as usize) | (((op.c & 0x7f) as usize) << 8);
+                    if target <= ip {
+                        budget -= 1;
+                        if budget == 0 {
+                            ip = target;
+                            yield_now = true;
+                            break;
                         }
-                        ip = target;
-                    } else {
-                        ip += 1;
                     }
+                    ip = target;
+                } else {
+                    ip += 1;
                 }
-                ROp::BranchCmp => {
-                    let a = r[(op.b & 31) as usize];
-                    let b = r[(op.c & 31) as usize];
-                    let cmp = op.a & 0x0f;
-                    let when = (op.a & 0x10) != 0;
-                    let res = match cmp {
-                        CMP_EQ | CMP_IDENT => a == b,
-                        CMP_NE | CMP_NOT_IDENT => a != b,
-                        CMP_LT => a < b,
-                        CMP_LE => a <= b,
-                        CMP_GT => a > b,
-                        CMP_GE => a >= b,
-                        _ => break 'outer,
-                    };
-                    if res == when {
-                        let target = op.imm as usize;
-                        if target <= ip {
-                            budget -= 1;
-                            if budget == 0 {
-                                ip = target;
-                                yield_now = true;
-                                break 'outer;
-                            }
-                        }
-                        ip = target;
-                    } else {
-                        ip += 1;
-                    }
-                }
-                ROp::Jump => {
+            }
+            ROp::BranchCmp => {
+                let a = regs[base + (op.b as usize)];
+                let b = regs[base + (op.c as usize)];
+                let cmp = op.a & 0x0f;
+                let when = (op.a & 0x10) != 0;
+                let res = match cmp {
+                    CMP_EQ | CMP_IDENT => a == b,
+                    CMP_NE | CMP_NOT_IDENT => a != b,
+                    CMP_LT => a < b,
+                    CMP_LE => a <= b,
+                    CMP_GT => a > b,
+                    CMP_GE => a >= b,
+                    _ => break,
+                };
+                if res == when {
                     let target = op.imm as usize;
                     if target <= ip {
                         budget -= 1;
                         if budget == 0 {
                             ip = target;
                             yield_now = true;
-                            break 'outer;
+                            break;
                         }
                     }
                     ip = target;
-                }
-                ROp::AddI64 => {
-                    let Some(s) = r[(op.b & 31) as usize].checked_add(r[(op.c & 31) as usize])
-                    else {
-                        break 'outer;
-                    };
-                    r[(op.a & 31) as usize] = s;
+                } else {
                     ip += 1;
                 }
-                ROp::SubI64 => {
-                    let Some(s) = r[(op.b & 31) as usize].checked_sub(r[(op.c & 31) as usize])
-                    else {
-                        break 'outer;
-                    };
-                    r[(op.a & 31) as usize] = s;
-                    ip += 1;
-                }
-                ROp::MulI64 => {
-                    let Some(s) = r[(op.b & 31) as usize].checked_mul(r[(op.c & 31) as usize])
-                    else {
-                        break 'outer;
-                    };
-                    r[(op.a & 31) as usize] = s;
-                    ip += 1;
-                }
-                ROp::AddImm => {
-                    let Some(s) = r[(op.b & 31) as usize].checked_add(i64::from(op.imm)) else {
-                        break 'outer;
-                    };
-                    r[(op.a & 31) as usize] = s;
-                    ip += 1;
-                }
-                ROp::SubImm => {
-                    let Some(s) = r[(op.b & 31) as usize].checked_sub(i64::from(op.imm)) else {
-                        break 'outer;
-                    };
-                    r[(op.a & 31) as usize] = s;
-                    ip += 1;
-                }
-                ROp::MulImm => {
-                    let Some(s) = r[(op.b & 31) as usize].checked_mul(i64::from(op.imm)) else {
-                        break 'outer;
-                    };
-                    r[(op.a & 31) as usize] = s;
-                    ip += 1;
-                }
-                ROp::LoadInt => {
-                    r[(op.a & 31) as usize] = i64::from(op.imm);
-                    ip += 1;
-                }
-                ROp::Mov => {
-                    r[(op.a & 31) as usize] = r[(op.b & 31) as usize];
-                    ip += 1;
-                }
-                ROp::CallSelf1Sub => {
-                    let Some(arg0) = r[(op.b & 31) as usize].checked_sub(i64::from(op.imm)) else {
-                        break 'outer;
-                    };
-                    if rec_frames.len() >= max_frames {
-                        break 'outer;
-                    }
-                    rec_frames.push(RecFrame {
-                        base: base as u32,
-                        ret_dst: op.a,
-                        ret_ip: (ip + 1) as u16,
-                    });
-                    let new_base = base + stride;
-                    if new_base + 32 > rec_regs.len() {
-                        rec_regs.resize((rec_regs.len() * 2).max(new_base + 1024), 0);
-                    }
-                    rec_regs[new_base] = arg0;
-                    base = new_base;
-                    ip = 0;
+            }
+            ROp::Jump => {
+                let target = op.imm as usize;
+                if target <= ip {
                     budget -= 1;
                     if budget == 0 {
+                        ip = target;
                         yield_now = true;
-                        break 'outer;
+                        break;
                     }
-                    continue 'outer;
                 }
-                ROp::CallSelf1 => {
-                    if rec_frames.len() >= max_frames {
-                        break 'outer;
-                    }
-                    let arg0 = r[(op.b & 31) as usize];
-                    rec_frames.push(RecFrame {
-                        base: base as u32,
-                        ret_dst: op.a,
-                        ret_ip: (ip + 1) as u16,
-                    });
-                    let new_base = base + stride;
-                    if new_base + 32 > rec_regs.len() {
-                        rec_regs.resize((rec_regs.len() * 2).max(new_base + 1024), 0);
-                    }
-                    rec_regs[new_base] = arg0;
-                    base = new_base;
-                    ip = 0;
-                    budget -= 1;
-                    if budget == 0 {
-                        yield_now = true;
-                        break 'outer;
-                    }
-                    continue 'outer;
+                ip = target;
+            }
+            ROp::AddI64 => {
+                let Some(s) =
+                    regs[base + (op.b as usize)].checked_add(regs[base + (op.c as usize)])
+                else {
+                    break;
+                };
+                regs[base + (op.a as usize)] = s;
+                ip += 1;
+            }
+            ROp::SubI64 => {
+                let Some(s) =
+                    regs[base + (op.b as usize)].checked_sub(regs[base + (op.c as usize)])
+                else {
+                    break;
+                };
+                regs[base + (op.a as usize)] = s;
+                ip += 1;
+            }
+            ROp::MulI64 => {
+                let Some(s) =
+                    regs[base + (op.b as usize)].checked_mul(regs[base + (op.c as usize)])
+                else {
+                    break;
+                };
+                regs[base + (op.a as usize)] = s;
+                ip += 1;
+            }
+            ROp::AddImm => {
+                let Some(s) = regs[base + (op.b as usize)].checked_add(i64::from(op.imm)) else {
+                    break;
+                };
+                regs[base + (op.a as usize)] = s;
+                ip += 1;
+            }
+            ROp::SubImm => {
+                let Some(s) = regs[base + (op.b as usize)].checked_sub(i64::from(op.imm)) else {
+                    break;
+                };
+                regs[base + (op.a as usize)] = s;
+                ip += 1;
+            }
+            ROp::MulImm => {
+                let Some(s) = regs[base + (op.b as usize)].checked_mul(i64::from(op.imm)) else {
+                    break;
+                };
+                regs[base + (op.a as usize)] = s;
+                ip += 1;
+            }
+            ROp::LoadInt => {
+                regs[base + (op.a as usize)] = i64::from(op.imm);
+                ip += 1;
+            }
+            ROp::Mov => {
+                regs[base + (op.a as usize)] = regs[base + (op.b as usize)];
+                ip += 1;
+            }
+            ROp::CallSelf1Sub => {
+                let Some(arg0) = regs[base + (op.b as usize)].checked_sub(i64::from(op.imm)) else {
+                    break;
+                };
+                if sp >= cap_frames {
+                    break;
                 }
-                ROp::CallSelf2 => {
-                    if rec_frames.len() >= max_frames {
-                        break 'outer;
-                    }
-                    let arg0 = r[(op.b & 31) as usize];
-                    let arg1 = r[(op.c & 31) as usize];
-                    rec_frames.push(RecFrame {
-                        base: base as u32,
-                        ret_dst: op.a,
-                        ret_ip: (ip + 1) as u16,
-                    });
-                    let new_base = base + stride;
-                    if new_base + 32 > rec_regs.len() {
-                        rec_regs.resize((rec_regs.len() * 2).max(new_base + 1024), 0);
-                    }
-                    rec_regs[new_base] = arg0;
-                    rec_regs[new_base + 1] = arg1;
-                    base = new_base;
-                    ip = 0;
-                    budget -= 1;
-                    if budget == 0 {
-                        yield_now = true;
-                        break 'outer;
-                    }
-                    continue 'outer;
+                frames[sp] = RecFrame {
+                    base: base as u32,
+                    ret_dst: op.a,
+                    ret_ip: (ip + 1) as u16,
+                };
+                sp += 1;
+                base += stride;
+                regs[base] = arg0;
+                ip = 0;
+                budget -= 1;
+                if budget == 0 {
+                    yield_now = true;
+                    break;
                 }
-                ROp::RetImm | ROp::RetReg => {
-                    let ret = if op.op == ROp::RetImm {
-                        i64::from(op.imm)
-                    } else {
-                        r[(op.a & 31) as usize]
-                    };
-                    if let Some(caller) = rec_frames.pop() {
-                        let caller_base = caller.base as usize;
-                        rec_regs[caller_base + caller.ret_dst as usize] = ret;
-                        base = caller_base;
-                        ip = caller.ret_ip as usize;
-                        continue 'outer;
-                    }
-                    // Entry frame returned cleanly!
-                    let spent = budget_start.saturating_sub(budget);
-                    *work_io = (*work_io).saturating_add(spent);
-                    *executed_io += spent.max(1) as u64;
-                    stack.pop_for_return();
-                    registers.truncate(entry_frame.start());
-                    registers.put(caller_vm.base() + destination.index(), Value::Int(ret));
-                    return Some(FastExit::Returned(Position {
-                        frame: caller_vm,
-                        ip: caller_vm.ip(),
-                    }));
+            }
+            ROp::CallSelf1 => {
+                if sp >= cap_frames {
+                    break;
                 }
+                let arg0 = regs[base + (op.b as usize)];
+                frames[sp] = RecFrame {
+                    base: base as u32,
+                    ret_dst: op.a,
+                    ret_ip: (ip + 1) as u16,
+                };
+                sp += 1;
+                base += stride;
+                regs[base] = arg0;
+                ip = 0;
+                budget -= 1;
+                if budget == 0 {
+                    yield_now = true;
+                    break;
+                }
+            }
+            ROp::CallSelf2 => {
+                if sp >= cap_frames {
+                    break;
+                }
+                let arg0 = regs[base + (op.b as usize)];
+                let arg1 = regs[base + (op.c as usize)];
+                frames[sp] = RecFrame {
+                    base: base as u32,
+                    ret_dst: op.a,
+                    ret_ip: (ip + 1) as u16,
+                };
+                sp += 1;
+                base += stride;
+                regs[base] = arg0;
+                regs[base + 1] = arg1;
+                ip = 0;
+                budget -= 1;
+                if budget == 0 {
+                    yield_now = true;
+                    break;
+                }
+            }
+            ROp::RetImm | ROp::RetReg => {
+                let ret = if op.op == ROp::RetImm {
+                    i64::from(op.imm)
+                } else {
+                    regs[base + (op.a as usize)]
+                };
+                if sp > 0 {
+                    sp -= 1;
+                    let caller = frames[sp];
+                    base = caller.base as usize;
+                    regs[base + caller.ret_dst as usize] = ret;
+                    ip = caller.ret_ip as usize;
+                    continue;
+                }
+                // Entry frame returned cleanly!
+                let spent = budget_start.saturating_sub(budget);
+                *work_io = (*work_io).saturating_add(spent);
+                *executed_io += spent.max(1) as u64;
+                rec_frames.clear();
+                stack.pop_for_return();
+                registers.truncate(entry_frame.start());
+                registers.put(caller_vm.base() + destination.index(), Value::Int(ret));
+                return Some(FastExit::Returned(Position {
+                    frame: caller_vm,
+                    ip: caller_vm.ip(),
+                }));
             }
         }
     }
 
+    rec_frames.truncate(sp);
     // Materialize active `RecFrame`s cleanly back to `Vm::registers` + `CallStack`!
     Some(materialize_int_rec(
         rec,

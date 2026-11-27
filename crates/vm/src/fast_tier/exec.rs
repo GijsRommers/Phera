@@ -697,21 +697,45 @@ fn arr_2d_get_int_helper(
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
 fn arr_set_int_helper(
-    t: &[u8; 256],
-    v: &[u64; 256],
+    t: &mut [u8; 256],
+    v: &mut [u64; 256],
     arr_r: usize,
     idx_r: usize,
     src_r: usize,
-    heap: &mut [Option<Value>],
+    has_heap: &mut bool,
+    heap: &mut Vec<Option<Value>>,
+    free_heap: &mut Vec<u32>,
     consts: &[Value],
 ) -> bool {
-    if t[arr_r] != TAG_HEAP || t[idx_r] != TAG_INT {
+    if t[idx_r] != TAG_INT {
         return false;
     }
     let key = v[idx_r] as i64;
     let Some(val) = read_owned_value(t[src_r], v[src_r], heap, consts) else {
         return false;
     };
+    // PHP auto-vivification: `$arr[$i] = $v` on undefined / `null` creates a new array!
+    if t[arr_r] == TAG_UNINIT || t[arr_r] == TAG_NULL {
+        let mut arr = PhpArray::new();
+        if arr.insert_int_if_not_ref(key, val).is_err() {
+            return false;
+        }
+        let slot = if let Some(free) = free_heap.pop() {
+            heap[free as usize] = Some(Value::Array(Rc::new(arr)));
+            free
+        } else {
+            let s = heap.len() as u32;
+            heap.push(Some(Value::Array(Rc::new(arr))));
+            s
+        };
+        t[arr_r] = TAG_HEAP;
+        v[arr_r] = u64::from(slot);
+        *has_heap = true;
+        return true;
+    }
+    if t[arr_r] != TAG_HEAP {
+        return false;
+    }
     let set_in = |rc: &mut Rc<PhpArray>, val: Value| -> bool {
         let arr = Rc::make_mut(rc);
         if let Some((start, slots)) = arr.list_slots_mut() {
@@ -742,6 +766,101 @@ fn arr_set_int_helper(
             }
         }
         _ => false,
+    }
+}
+
+/// 2D integer-indexed array write `$arr[$i1][$i2] = $src` (with auto-vivification).
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn arr_2d_set_int_helper(
+    t: &mut [u8; 256],
+    v: &mut [u64; 256],
+    arr_r: usize,
+    i1_r: usize,
+    i2_r: usize,
+    src_r: usize,
+    has_heap: &mut bool,
+    heap: &mut Vec<Option<Value>>,
+    free_heap: &mut Vec<u32>,
+    consts: &[Value],
+) -> bool {
+    if t[i1_r] != TAG_INT || t[i2_r] != TAG_INT {
+        return false;
+    }
+    let k1 = v[i1_r] as i64;
+    let k2 = v[i2_r] as i64;
+    let Some(val) = read_owned_value(t[src_r], v[src_r], heap, consts) else {
+        return false;
+    };
+    if t[arr_r] == TAG_UNINIT || t[arr_r] == TAG_NULL {
+        let mut inner = PhpArray::new();
+        if inner.insert_int_if_not_ref(k2, val).is_err() {
+            return false;
+        }
+        let mut outer = PhpArray::new();
+        if outer
+            .insert_int_if_not_ref(k1, Value::Array(Rc::new(inner)))
+            .is_err()
+        {
+            return false;
+        }
+        let slot = if let Some(free) = free_heap.pop() {
+            heap[free as usize] = Some(Value::Array(Rc::new(outer)));
+            free
+        } else {
+            let s = heap.len() as u32;
+            heap.push(Some(Value::Array(Rc::new(outer))));
+            s
+        };
+        t[arr_r] = TAG_HEAP;
+        v[arr_r] = u64::from(slot);
+        *has_heap = true;
+        return true;
+    }
+    if t[arr_r] != TAG_HEAP {
+        return false;
+    }
+    let Some(Some(Value::Array(outer_rc))) = heap.get_mut(v[arr_r] as usize) else {
+        return false;
+    };
+    let outer = Rc::make_mut(outer_rc);
+    if let Some(slot) = outer.get_mut_int(k1) {
+        match slot {
+            Value::Array(inner_rc) => {
+                let inner = Rc::make_mut(inner_rc);
+                if let Some((start, slots)) = inner.list_slots_mut() {
+                    let off = k2.wrapping_sub(start);
+                    if off >= 0
+                        && (off as usize) < slots.len()
+                        && let Some(existing) = &mut slots[off as usize]
+                    {
+                        if !existing.is_reference() {
+                            *existing = val;
+                            return true;
+                        }
+                        return false;
+                    }
+                }
+                inner.insert_int_if_not_ref(k2, val).is_ok()
+            }
+            Value::Null => {
+                let mut inner = PhpArray::new();
+                if inner.insert_int_if_not_ref(k2, val).is_err() {
+                    return false;
+                }
+                *slot = Value::Array(Rc::new(inner));
+                true
+            }
+            _ => false,
+        }
+    } else {
+        let mut inner = PhpArray::new();
+        if inner.insert_int_if_not_ref(k2, val).is_err() {
+            return false;
+        }
+        outer
+            .insert_int_if_not_ref(k1, Value::Array(Rc::new(inner)))
+            .is_ok()
     }
 }
 
@@ -1020,6 +1139,77 @@ fn arr_unset_step_loop_helper(
                 if off >= 0 && (off as usize) < slots.len() && slots[off as usize].take().is_some()
                 {
                     *dead += 1;
+                }
+                let Some(next_k) = k.checked_add(step) else {
+                    v[k_r] = k as u64;
+                    return ArrayLoopExit::Bail(budget_start.saturating_sub(budget));
+                };
+                k = next_k;
+                if k > lim {
+                    v[k_r] = k as u64;
+                    return ArrayLoopExit::Done(budget_start.saturating_sub(budget));
+                }
+                budget -= 1;
+                if budget == 0 {
+                    v[k_r] = k as u64;
+                    return ArrayLoopExit::Yield;
+                }
+            }
+        }
+    }
+    ArrayLoopExit::Bail(0)
+}
+
+/// Hoisted-slice inner loop for `for ($k = ...; $k <= lim; $k += $step) $arr[$k] = $val`.
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn arr_set_reg_step_loop_helper(
+    t: &[u8; 256],
+    v: &mut [u64; 256],
+    arr_r: usize,
+    k_r: usize,
+    step_r: usize,
+    packed_imm: i32,
+    heap: &mut [Option<Value>],
+    consts: &[Value],
+    budget_start: usize,
+) -> ArrayLoopExit {
+    if t[arr_r] != TAG_HEAP || t[k_r] != TAG_INT || t[step_r] != TAG_INT {
+        return ArrayLoopExit::Bail(0);
+    }
+    let lim = i64::from(packed_imm & 0x003f_ffff);
+    let is_const = (packed_imm & (1 << 23)) != 0;
+    let payload = ((packed_imm >> 24) & 0xff) as u8;
+    let val = if is_const {
+        Value::Int(i64::from(payload as i8))
+    } else {
+        let r = payload as usize;
+        let Some(v_owned) = read_owned_value(t[r], v[r], heap, consts) else {
+            return ArrayLoopExit::Bail(0);
+        };
+        v_owned
+    };
+    let step = v[step_r] as i64;
+    let mut k = v[k_r] as i64;
+    let mut budget = budget_start.max(1);
+
+    if let Some(Some(Value::Array(rc))) = heap.get_mut(v[arr_r] as usize) {
+        let arr = Rc::make_mut(rc);
+        if let Some((start, slots)) = arr.list_slots_mut() {
+            loop {
+                let off = k.wrapping_sub(start);
+                if off < 0 || (off as usize) >= slots.len() {
+                    v[k_r] = k as u64;
+                    return ArrayLoopExit::Bail(budget_start.saturating_sub(budget));
+                }
+                match &mut slots[off as usize] {
+                    Some(existing) if !existing.is_reference() => {
+                        *existing = val.clone();
+                    }
+                    _ => {
+                        v[k_r] = k as u64;
+                        return ArrayLoopExit::Bail(budget_start.saturating_sub(budget));
+                    }
                 }
                 let Some(next_k) = k.checked_add(step) else {
                     v[k_r] = k as u64;
@@ -2991,7 +3181,26 @@ pub(crate) fn run_fast(
                         op.a as usize,
                         op.b as usize,
                         op.c as usize,
+                        &mut cur_has_heap,
                         heap,
+                        free_heap,
+                        unit_consts,
+                    ) {
+                        break 'frame_loop;
+                    }
+                    ip += 1;
+                }
+                Op::Arr2DSetInt => {
+                    if !arr_2d_set_int_helper(
+                        t,
+                        v,
+                        op.a as usize,
+                        op.b as usize,
+                        op.c as usize,
+                        op.imm as usize,
+                        &mut cur_has_heap,
+                        heap,
+                        free_heap,
                         unit_consts,
                     ) {
                         break 'frame_loop;
@@ -3061,6 +3270,34 @@ pub(crate) fn run_fast(
                         op.c as usize,
                         i64::from(op.imm),
                         heap,
+                        budget,
+                    ) {
+                        ArrayLoopExit::Done(spent) => {
+                            work += spent;
+                            ip += 1;
+                        }
+                        ArrayLoopExit::Yield => {
+                            work = 0;
+                            yield_now = true;
+                            break 'frame_loop;
+                        }
+                        ArrayLoopExit::Bail(spent) => {
+                            work += spent;
+                            break 'frame_loop;
+                        }
+                    }
+                }
+                Op::ArrSetRegStepLoop => {
+                    let budget = YIELD_AFTER_STEPS.saturating_sub(work).max(1);
+                    match arr_set_reg_step_loop_helper(
+                        t,
+                        v,
+                        op.a as usize,
+                        op.b as usize,
+                        op.c as usize,
+                        op.imm,
+                        heap,
+                        unit_consts,
                         budget,
                     ) {
                         ArrayLoopExit::Done(spent) => {

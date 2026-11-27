@@ -127,12 +127,17 @@ fn is_supported_in_loop(function: &Function, inst: I) -> bool {
         }
         I::FetchIndex { mode, .. } => mode != FetchMode::Destructure,
         I::Fetch { path, mode, .. } => lower_fetch_2d(function, 0, path, mode).is_some(),
-        I::AssignPath { path, .. } | I::UnsetPath { path } => {
-            function.paths.get(path.index()).is_some_and(|def| {
-                matches!(def.base, PathBase::Register(_))
-                    && matches!(def.steps.as_slice(), [Step::Index(_)])
-            })
-        }
+        I::AssignPath { path, .. } => function.paths.get(path.index()).is_some_and(|def| {
+            matches!(def.base, PathBase::Register(_))
+                && matches!(
+                    def.steps.as_slice(),
+                    [Step::Index(_)] | [Step::Index(_), Step::Index(_)]
+                )
+        }),
+        I::UnsetPath { path } => function.paths.get(path.index()).is_some_and(|def| {
+            matches!(def.base, PathBase::Register(_))
+                && matches!(def.steps.as_slice(), [Step::Index(_)])
+        }),
         I::AssignOpPath {
             op: BinaryOp::Add,
             path,
@@ -200,9 +205,10 @@ fn lower_body(
     }
     let _ = &reads;
 
-    // Simple 2-pass float-hint propagation so float-dominated loops (`mandel`,
-    // `mandel2`, `heapsort`) emit float-first `AddF64`/`SubF64`/`MulF64` ops!
-    let float_regs = infer_float_hints(function, unit);
+    // Flow-sensitive float-hint propagation so float-dominated loops (`mandel`,
+    // `mandel2`, `heapsort`) emit float-first `AddF64`/`SubF64`/`MulF64` ops
+    // without temp-register reuse poisoning integer locals like `$color`!
+    let (local_float, inst_float) = infer_float_hints(function, unit);
 
     let mut ops: Vec<FastOp> = Vec::with_capacity(len);
     let mut bc_ip: Vec<u32> = Vec::with_capacity(len);
@@ -266,7 +272,7 @@ fn lower_body(
                 || temp_dead_after(instructions, &is_target, i + 1, ld_dst, function))
         {
             let other = if lhs == ld_dst { rhs } else { lhs };
-            let flt = float_regs[other.index()];
+            let flt = inst_float[i + 1];
             if let Some(fast) = lower_binary_int(op, dst.0 as u8, other.0 as u8, value, flt) {
                 ops.push(fast);
                 bc_ip.push(i as u32);
@@ -426,7 +432,7 @@ fn lower_body(
                 assign_local,
                 function,
                 unit,
-                &float_regs,
+                inst_float[i],
                 &mut f64_consts,
             )
         {
@@ -510,7 +516,7 @@ fn lower_body(
                 bc_ip.push(i as u32);
             }
             I::Binary { op, dst, lhs, rhs } => {
-                let flt = float_regs[lhs.index()] || float_regs[rhs.index()];
+                let flt = inst_float[i];
                 if let Some(fast) = lower_binary(op, dst.0 as u8, lhs.0 as u8, rhs.0 as u8, flt) {
                     ops.push(fast);
                 } else {
@@ -519,7 +525,7 @@ fn lower_body(
                 bc_ip.push(i as u32);
             }
             I::BinaryInt { op, dst, lhs, rhs } => {
-                let flt = float_regs[lhs.index()];
+                let flt = inst_float[i];
                 if let Some(fast) = lower_binary_int(op, dst.0 as u8, lhs.0 as u8, rhs, flt) {
                     ops.push(fast);
                 } else {
@@ -718,15 +724,24 @@ fn lower_body(
             I::AssignPath { path, src } => {
                 if let Some(def) = function.paths.get(path.index())
                     && let PathBase::Register(arr) = def.base
-                    && let [Step::Index(idx)] = def.steps.as_slice()
                 {
-                    ops.push(FastOp::new(
-                        Op::ArrSetInt,
-                        arr.0 as u8,
-                        idx.0 as u8,
-                        src.0 as u8,
-                        0,
-                    ));
+                    match def.steps.as_slice() {
+                        [Step::Index(idx)] => ops.push(FastOp::new(
+                            Op::ArrSetInt,
+                            arr.0 as u8,
+                            idx.0 as u8,
+                            src.0 as u8,
+                            0,
+                        )),
+                        [Step::Index(i1), Step::Index(i2)] => ops.push(FastOp::new(
+                            Op::Arr2DSetInt,
+                            arr.0 as u8,
+                            i1.0 as u8,
+                            i2.0 as u8,
+                            i32::from(src.0 as u8),
+                        )),
+                        _ => ops.push(FastOp::new(Op::Deopt, 0, 0, 0, 0)),
+                    }
                 } else {
                     ops.push(FastOp::new(Op::Deopt, 0, 0, 0, 0));
                 }
@@ -873,6 +888,10 @@ fn lower_body(
     let is_empty_return_null = instructions.as_ref() == [I::ReturnNull];
     let local_count = locals.min(255) as u8;
 
+    // Post-pass -1: Thread trampoline jumps (`Branch -> Jump(X)` -> `Branch(X)`)
+    // so compound `while (a && b)` back-edges target the loop header directly!
+    thread_jumps(&mut ops);
+
     // Post-pass 0: Peel rotated-loop entry `Jump(cond)` into an inverted guard
     // branch so `cond` is no longer a jump target, unlocking `IncLoop*`/`DecLoop*`
     // and all inner-loop fusions!
@@ -888,7 +907,7 @@ fn lower_body(
         &mut bc_to_fast,
         local_count,
         &f64_consts,
-        &float_regs,
+        &local_float,
     );
 
     // Post-pass 3: Compile pure-`i64` self-recursion kernel (`fibo_r`, `Ack`).
@@ -925,6 +944,66 @@ fn lower_body(
         },
         direct_callees,
     ))
+}
+
+/// Thread trampoline jumps: if any branch or jump targets an unconditional
+/// `Op::Jump`, redirect it straight to the final destination (up to 8 hops).
+fn thread_jumps(ops: &mut [FastOp]) {
+    let n = ops.len();
+    for i in 0..n {
+        let Some(mut target) = crate::fast_tier::scalar_loop::fast_op_branch_target(ops[i]) else {
+            continue;
+        };
+        let orig = target;
+        for _ in 0..8 {
+            if target < n && ops[target].op == Op::Jump {
+                let next = ops[target].imm as usize;
+                if next == target || next >= 32_768 {
+                    break;
+                }
+                target = next;
+            } else {
+                break;
+            }
+        }
+        if target != orig {
+            set_fast_op_branch_target(&mut ops[i], target);
+        }
+    }
+}
+
+fn set_fast_op_branch_target(op: &mut FastOp, target: usize) {
+    match op.op {
+        Op::Jump
+        | Op::JumpIf
+        | Op::JumpIfNot
+        | Op::JumpIfNull
+        | Op::JumpIfNotNull
+        | Op::BranchCmp
+        | Op::IncLoopLtReg
+        | Op::IncLoopLeReg
+        | Op::DecLoopGeReg
+        | Op::DecLoopGtReg => {
+            op.imm = target as i32;
+        }
+        Op::IncLoopLtImm | Op::IncLoopLeImm | Op::DecLoopGeImm | Op::DecLoopGtImm => {
+            op.b = (target & 0xff) as u8;
+            op.c = ((target >> 8) & 0xff) as u8;
+        }
+        Op::BranchLtImm
+        | Op::BranchLeImm
+        | Op::BranchGtImm
+        | Op::BranchGeImm
+        | Op::BranchEqImm
+        | Op::BranchNeImm
+        | Op::BranchIdentImm
+        | Op::BranchNotIdentImm => {
+            let when = op.c & 0x80;
+            op.b = (target & 0xff) as u8;
+            op.c = (((target >> 8) & 0x7f) as u8) | when;
+        }
+        _ => {}
+    }
 }
 
 /// Peel `Jump(cond)` -> inverted guard at entry of bottom-tested rotated loops,
@@ -1121,6 +1200,34 @@ fn fuse_array_inner_loops(
             i = end_idx + 1;
             continue;
         }
+
+        // Pattern 3: `[LoadInt(t, c)] + ArrSetInt(flags, k, t|v) + [Clear* ] + AddAssign(k, step) + [Clear* ] + BranchLeImm(k, when=true, target=i, lim)`
+        if let Some((arr_reg, k_reg, step_reg, end_idx, packed_imm)) =
+            match_arr_set_step_loop(ops, &is_target, i, local_count)
+        {
+            ops[i] = FastOp::new(Op::ArrSetRegStepLoop, arr_reg, k_reg, step_reg, packed_imm);
+            skip[(i + 1)..=end_idx].fill(true);
+            changed = true;
+            i = end_idx + 1;
+            continue;
+        }
+
+        // Pattern 4: `LoadConstRef(t, id) + CallNoop(dead_dst, t, 1)` -> `CallNoop(dead_dst, 0, 0)`
+        if i + 1 < n
+            && !is_target[i + 1]
+            && ops[i].op == Op::LoadConstRef
+            && ops[i].a >= local_count
+            && ops[i + 1].op == Op::CallNoop
+            && ops[i + 1].c == 1
+            && ops[i + 1].b == ops[i].a
+            && ops[i + 1].a >= local_count
+        {
+            ops[i] = FastOp::new(Op::CallNoop, ops[i + 1].a, 0, 0, 0);
+            skip[i + 1] = true;
+            changed = true;
+            i += 2;
+            continue;
+        }
         i += 1;
     }
 
@@ -1249,6 +1356,68 @@ fn match_arr_unset_step_loop(
         && ((ops[p].b as usize) | (((ops[p].c & 0x7f) as usize) << 8)) == start
     {
         Some((arr_reg, k_reg, step_reg, p, ops[p].imm))
+    } else {
+        None
+    }
+}
+
+fn match_arr_set_step_loop(
+    ops: &[FastOp],
+    is_target: &[bool],
+    start: usize,
+    local_count: u8,
+) -> Option<(u8, u8, u8, usize, i32)> {
+    let n = ops.len();
+    let mut p = start;
+    // Optional `LoadInt(t, small_i8)` right before `ArrSetInt(arr, k, t)`
+    let const_pair = if p + 1 < n
+        && !is_target[p + 1]
+        && ops[p].op == Op::LoadInt
+        && ops[p].a >= local_count
+        && (-128..=127).contains(&ops[p].imm)
+    {
+        let pair = (ops[p].a, ops[p].imm as i8);
+        p += 1;
+        Some(pair)
+    } else {
+        None
+    };
+
+    if p >= n || ops[p].op != Op::ArrSetInt {
+        return None;
+    }
+    let arr_reg = ops[p].a;
+    let k_reg = ops[p].b;
+    let val_reg = ops[p].c;
+    let (is_const, payload_u8) = match const_pair {
+        Some((t_reg, c_val)) if t_reg == val_reg => (true, c_val as u8),
+        None => (false, val_reg),
+        _ => return None,
+    };
+    p += 1;
+    while p < n && !is_target[p] && ops[p].op == Op::Clear && ops[p].a >= local_count {
+        p += 1;
+    }
+    if p >= n || is_target[p] || ops[p].op != Op::AddAssign || ops[p].a != k_reg {
+        return None;
+    }
+    let step_reg = ops[p].b;
+    p += 1;
+    while p < n && !is_target[p] && ops[p].op == Op::Clear && ops[p].a >= local_count {
+        p += 1;
+    }
+    if p < n
+        && !is_target[p]
+        && ops[p].op == Op::BranchLeImm
+        && ops[p].a == k_reg
+        && (ops[p].c & 0x80) != 0
+        && ((ops[p].b as usize) | (((ops[p].c & 0x7f) as usize) << 8)) == start
+        && ops[p].imm >= 0
+        && ops[p].imm <= 0x003f_ffff
+    {
+        let packed =
+            ops[p].imm | if is_const { 1 << 23 } else { 0 } | (i32::from(payload_u8) << 24);
+        Some((arr_reg, k_reg, step_reg, p, packed))
     } else {
         None
     }
@@ -1401,42 +1570,65 @@ fn remap_fast_op_target(op: &mut FastOp, old_to_new: &[usize]) {
     }
 }
 
-/// Propagate float-type hints across two linear passes so float arithmetic
+/// Propagate float-type hints across three linear passes so float arithmetic
 /// (`mandel`, `mandel2`, `heapsort`) uses float-first `AddF64`/`SubF64`/`MulF64`.
+///
+/// Named locals (`r < locals`) are tracked monotonically across passes, while
+/// temporary registers (`r >= locals`) are tracked flow-sensitively per
+/// instruction so reusing a temp register across float and integer statements
+/// never taints integer locals like `$color`, `$x`, `$y`.
 /// Soundness never depends on this hint: every float-first op still handles
 /// ints and mixed operands via its out-of-line slow helper!
-fn infer_float_hints(function: &Function, unit: &CompiledUnit) -> Vec<bool> {
-    let mut is_float = vec![false; function.registers as usize];
+fn infer_float_hints(function: &Function, unit: &CompiledUnit) -> (Vec<bool>, Vec<bool>) {
+    let regs = function.registers as usize;
+    let locals = function.locals.len();
+    let mut local_float = vec![false; regs];
+    let mut inst_float = vec![false; function.instructions.len()];
     for _ in 0..3 {
+        let mut cur_float = local_float.clone();
         let mut changed = false;
-        for &inst in function.instructions.iter() {
-            let mark = |is_float: &mut [bool], dst: Reg, val: bool, changed: &mut bool| {
-                if val
-                    && let Some(slot) = is_float.get_mut(dst.index())
-                    && !*slot
-                {
-                    *slot = true;
-                    *changed = true;
-                }
-            };
+        for (idx, &inst) in function.instructions.iter().enumerate() {
+            let set_reg =
+                |cur: &mut [bool], loc: &mut [bool], dst: Reg, val: bool, changed: &mut bool| {
+                    let d = dst.index();
+                    if d < locals {
+                        if val && !loc[d] {
+                            loc[d] = true;
+                            *changed = true;
+                        }
+                        cur[d] = loc[d];
+                    } else if d < cur.len() {
+                        cur[d] = val;
+                    }
+                };
             match inst {
                 I::LoadConst { dst, constant }
                 | I::AssignConst {
                     local: dst,
                     constant,
                 } => {
-                    if matches!(
+                    let is_f = matches!(
                         unit.constants.get(constant.index()),
                         Some(Constant::Float(_))
-                    ) {
-                        mark(&mut is_float, dst, true, &mut changed);
-                    }
+                    );
+                    set_reg(&mut cur_float, &mut local_float, dst, is_f, &mut changed);
                 }
-                I::Cast {
-                    to: CastKind::Float,
-                    dst,
-                    ..
-                } => mark(&mut is_float, dst, true, &mut changed),
+                I::LoadInt { dst, .. }
+                | I::LoadBool { dst, .. }
+                | I::LoadNull { dst }
+                | I::NewArray { dst, .. }
+                | I::Clear { reg: dst } => {
+                    set_reg(&mut cur_float, &mut local_float, dst, false, &mut changed);
+                }
+                I::Cast { to, dst, .. } => {
+                    set_reg(
+                        &mut cur_float,
+                        &mut local_float,
+                        dst,
+                        to == CastKind::Float,
+                        &mut changed,
+                    );
+                }
                 I::Move { dst, src }
                 | I::Assign { local: dst, src }
                 | I::AssignTake { local: dst, src }
@@ -1445,27 +1637,47 @@ fn infer_float_hints(function: &Function, unit: &CompiledUnit) -> Vec<bool> {
                     dst,
                     src,
                 } => {
-                    let f = is_float.get(src.index()).copied().unwrap_or(false);
-                    mark(&mut is_float, dst, f, &mut changed);
+                    let f = cur_float.get(src.index()).copied().unwrap_or(false);
+                    set_reg(&mut cur_float, &mut local_float, dst, f, &mut changed);
                 }
                 I::Binary { op, dst, lhs, rhs } => {
-                    let lf = is_float.get(lhs.index()).copied().unwrap_or(false);
-                    let rf = is_float.get(rhs.index()).copied().unwrap_or(false);
-                    if op == BinaryOp::Divide
+                    let lf = cur_float.get(lhs.index()).copied().unwrap_or(false);
+                    let rf = cur_float.get(rhs.index()).copied().unwrap_or(false);
+                    let flt = op == BinaryOp::Divide
                         || (matches!(op, BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply)
-                            && (lf || rf))
-                    {
-                        mark(&mut is_float, dst, true, &mut changed);
-                    }
+                            && (lf || rf));
+                    inst_float[idx] = flt;
+                    set_reg(&mut cur_float, &mut local_float, dst, flt, &mut changed);
                 }
                 I::BinaryInt { op, dst, lhs, .. } => {
-                    let lf = is_float.get(lhs.index()).copied().unwrap_or(false);
-                    if op == BinaryOp::Divide
+                    let lf = cur_float.get(lhs.index()).copied().unwrap_or(false);
+                    let flt = op == BinaryOp::Divide
                         || (matches!(op, BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply)
-                            && lf)
+                            && lf);
+                    inst_float[idx] = flt;
+                    set_reg(&mut cur_float, &mut local_float, dst, flt, &mut changed);
+                }
+                I::AssignOp { op, local, src } => {
+                    let lf = cur_float.get(local.index()).copied().unwrap_or(false);
+                    let sf = cur_float.get(src.index()).copied().unwrap_or(false);
+                    if matches!(op, BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply)
+                        && (lf || sf)
                     {
-                        mark(&mut is_float, dst, true, &mut changed);
+                        set_reg(&mut cur_float, &mut local_float, local, true, &mut changed);
                     }
+                }
+                I::IncDecLocal { dst, local, .. } => {
+                    let lf = cur_float.get(local.index()).copied().unwrap_or(false);
+                    set_reg(&mut cur_float, &mut local_float, dst, lf, &mut changed);
+                }
+                I::FetchIndex { dst, .. }
+                | I::Fetch { dst, .. }
+                | I::CallDirect { dst, .. }
+                | I::CallNativeDirect { dst, .. }
+                | I::CallMethod { dst, .. }
+                | I::Call { dst, .. }
+                | I::BuiltinUnary { dst, .. } => {
+                    set_reg(&mut cur_float, &mut local_float, dst, false, &mut changed);
                 }
                 _ => {}
             }
@@ -1474,7 +1686,7 @@ fn infer_float_hints(function: &Function, unit: &CompiledUnit) -> Vec<bool> {
             break;
         }
     }
-    is_float
+    (local_float, inst_float)
 }
 
 #[derive(Clone, Copy)]
@@ -1490,7 +1702,7 @@ fn try_lower_producer(
     target_local: Reg,
     function: &Function,
     unit: &CompiledUnit,
-    float_regs: &[bool],
+    inst_is_float: bool,
     f64_consts: &mut Vec<f64>,
 ) -> Option<FastOp> {
     let dst_u8 = target_local.0 as u8;
@@ -1507,13 +1719,14 @@ fn try_lower_producer(
         I::LoadConst { dst, constant } if dst == expected_dst => {
             Some(lower_load_const(dst_u8, constant.0, unit, f64_consts))
         }
+        I::Move { dst, src } if dst == expected_dst => {
+            Some(FastOp::new(Op::Assign, dst_u8, src.0 as u8, 0, 0))
+        }
         I::Binary { op, dst, lhs, rhs } if dst == expected_dst => {
-            let flt = float_regs[lhs.index()] || float_regs[rhs.index()];
-            lower_binary(op, dst_u8, lhs.0 as u8, rhs.0 as u8, flt)
+            lower_binary(op, dst_u8, lhs.0 as u8, rhs.0 as u8, inst_is_float)
         }
         I::BinaryInt { op, dst, lhs, rhs } if dst == expected_dst => {
-            let flt = float_regs[lhs.index()];
-            lower_binary_int(op, dst_u8, lhs.0 as u8, rhs, flt)
+            lower_binary_int(op, dst_u8, lhs.0 as u8, rhs, inst_is_float)
         }
         I::Unary {
             op: UnaryOp::Negate,
@@ -1741,42 +1954,56 @@ fn jump_target(inst: I) -> Option<Target> {
 
 fn temp_dead_after(
     instructions: &[I],
-    is_target: &[bool],
+    _is_target: &[bool],
     after_idx: usize,
     reg: Reg,
     function: &Function,
 ) -> bool {
-    let mut k = after_idx + 1;
-    while k < instructions.len() {
-        if is_target[k] {
-            // Stop conservatively at merge points unless never read anywhere.
-            return !reg_read_anywhere(instructions, function, reg);
+    let len = instructions.len();
+    if after_idx + 1 >= len {
+        return true;
+    }
+    // Exact forward CFG liveness: `reg` is dead right after `after_idx` iff no
+    // reachable path from `after_idx + 1` reads `reg` before overwriting it.
+    let mut visited = vec![false; len];
+    let mut stack = Vec::with_capacity(16);
+    stack.push(after_idx + 1);
+    while let Some(mut k) = stack.pop() {
+        while k < len {
+            if visited[k] {
+                break;
+            }
+            visited[k] = true;
+            let inst = instructions[k];
+            if inst_reads_reg(function, inst, reg) {
+                return false;
+            }
+            if inst_overwrites_reg(inst, reg) {
+                break;
+            }
+            if matches!(
+                inst,
+                I::Return { .. }
+                    | I::ReturnNull
+                    | I::Throw { .. }
+                    | I::Exit { .. }
+                    | I::FinallyReturn { .. }
+            ) {
+                break;
+            }
+            if let I::Jump { target } = inst {
+                k = target.index();
+                continue;
+            }
+            if let Some(target) = jump_target(inst)
+                && target.index() < len
+            {
+                stack.push(target.index());
+            }
+            k += 1;
         }
-        let inst = instructions[k];
-        if inst_reads_reg(function, inst, reg) {
-            return false;
-        }
-        if inst_overwrites_reg(inst, reg) {
-            return true;
-        }
-        if matches!(
-            inst,
-            I::Return { .. } | I::ReturnNull | I::Throw { .. } | I::Exit { .. }
-        ) {
-            return true;
-        }
-        if jump_target(inst).is_some() {
-            return !reg_read_anywhere(instructions, function, reg);
-        }
-        k += 1;
     }
     true
-}
-
-fn reg_read_anywhere(instructions: &[I], function: &Function, reg: Reg) -> bool {
-    instructions
-        .iter()
-        .any(|&inst| inst_reads_reg(function, inst, reg))
 }
 
 fn inst_reads_reg(function: &Function, inst: I, reg: Reg) -> bool {
@@ -2059,6 +2286,143 @@ mod tests {
             sieve.ops.iter().any(|o| o.op == Op::ArrUnsetStepLoop),
             "sieve should fuse ArrUnsetStepLoop; ops={:?}",
             sieve.ops
+        );
+
+        let zend_mandel = lower_fn(
+            r#"<?php
+            function mandel() {
+                $w1=50; $h1=150; $recen=-.45; $imcen=0.0; $r=0.7; $s=0; $rec=0; $imc=0; $re=0; $im=0; $re2=0; $im2=0;
+                $x=0; $y=0; $w2=0; $h2=0; $color=0; $s=2*$r/$w1; $w2=40; $h2=12;
+                for ($y=0 ; $y<=$w1; $y=$y+1) {
+                    $imc=$s*($y-$h2)+$imcen;
+                    for ($x=0 ; $x<=$h1; $x=$x+1) {
+                        $rec=$s*($x-$w2)+$recen;
+                        $re=$rec; $im=$imc; $color=1000; $re2=$re*$re; $im2=$im*$im;
+                        while(((($re2+$im2)<1000000) && $color>0)) {
+                            $im=$re*$im*2+$imc;
+                            $re=$re2-$im2+$rec;
+                            $re2=$re*$re;
+                            $im2=$im*$im;
+                            $color=$color-1;
+                        }
+                    }
+                }
+            }
+            "#,
+            "mandel",
+        );
+        assert!(
+            !zend_mandel.scalar_loops.is_empty(),
+            "Zend mandel should extract ScalarLoop; ops={:?}",
+            zend_mandel.ops
+        );
+
+        let zend_mandel2 = lower_fn(
+            r#"<?php
+            function mandel2() {
+                $b = " .:,;!/>)|&IH%*#";
+                for ($y=30; printf("\n"), $C = $y*0.1 - 1.5, $y--;){
+                    for ($x=0; $c = $x*0.04 - 2, $z=0, $Z=0, $x++ < 75;){
+                        for ($r=$c, $i=$C, $k=0; $t = $z*$z - $Z*$Z + $r, $Z = 2*$z*$Z + $i, $z=$t, $k<5000; $k++)
+                            if ($z*$z + $Z*$Z > 500000) break;
+                        echo $b[$k%16];
+                    }
+                }
+            }
+            "#,
+            "mandel2",
+        );
+        assert!(
+            !zend_mandel2.scalar_loops.is_empty(),
+            "Zend mandel2 should extract ScalarLoop; ops={:?}",
+            zend_mandel2.ops
+        );
+
+        let zend_sieve = lower_fn(
+            r#"<?php
+            function sieve($n) {
+                $count = 0;
+                while ($n-- > 0) {
+                    $count = 0;
+                    $flags = range(0, 8192);
+                    for ($i=2; $i<8193; $i++) {
+                        if ($flags[$i] > 0) {
+                            for ($k=$i+$i; $k <= 8192; $k+=$i) {
+                                $flags[$k] = 0;
+                            }
+                            $count++;
+                        }
+                    }
+                }
+                return $count;
+            }
+            "#,
+            "sieve",
+        );
+        assert!(
+            zend_sieve.ops.iter().any(|o| o.op == Op::ArrSetRegStepLoop),
+            "Zend sieve should fuse ArrSetRegStepLoop; ops={:?}",
+            zend_sieve.ops
+        );
+
+        let zend_mkmatrix = lower_fn(
+            r#"<?php
+            function mkmatrix($rows, $cols) {
+                $count = 1;
+                $mx = array();
+                for ($i=0; $i<$rows; $i++) {
+                    for ($j=0; $j<$cols; $j++) {
+                        $mx[$i][$j] = $count++;
+                    }
+                }
+                return $mx;
+            }
+            "#,
+            "mkmatrix",
+        );
+        assert!(
+            zend_mkmatrix.ops.iter().any(|o| o.op == Op::Arr2DSetInt),
+            "Zend mkmatrix should emit Arr2DSetInt; ops={:?}",
+            zend_mkmatrix.ops
+        );
+
+        let zend_ary3 = lower_fn(
+            r#"<?php
+            function ary3($n) {
+                for ($i=0; $i<$n; $i++) {
+                    $X[$i] = $i + 1;
+                    $Y[$i] = 0;
+                }
+                $last = $n - 1;
+                for ($k=0; $k<1000; $k++) {
+                    for ($i=$last; $i>=0; $i--) {
+                        $Y[$i] += $X[$i];
+                    }
+                }
+                return $Y[0];
+            }
+            "#,
+            "ary3",
+        );
+        assert!(
+            zend_ary3.ops.iter().any(|o| o.op == Op::ArrAddFromArrLoop),
+            "Zend ary3 should fuse ArrAddFromArrLoop; ops={:?}",
+            zend_ary3.ops
+        );
+
+        let zend_ucall = lower_fn(
+            r#"<?php
+            function hallo($a) {}
+            function simpleucall() {
+                for ($i = 0; $i < 1000000; $i++) hallo("hallo");
+            }
+            "#,
+            "simpleucall",
+        );
+        assert!(
+            !zend_ucall.scalar_loops.is_empty(),
+            "Zend simpleucall should extract ScalarLoop; ops={:?}",
+            zend_ucall.ops
         );
     }
 }

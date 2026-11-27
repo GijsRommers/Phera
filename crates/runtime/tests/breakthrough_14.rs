@@ -289,3 +289,123 @@ echo rec_with_heap_arg([10, 20, 30, 40]) . "\n";
         "100:40:ababab\n140737488355330,-140737488355331,281474976710656\n8,16,24,32\n100\n"
     );
 }
+
+#[test]
+fn zend_exact_shapes_runtime_parity() {
+    let out = run(r#"<?php
+function hallo($a) {}
+function zend_ucall(): int {
+    for ($i = 0; $i < 1000; $i++) hallo("hallo");
+    return $i;
+}
+
+function zend_mandel_sum(): int {
+    $w1=10; $h1=15; $recen=-.45; $imcen=0.0; $r=0.7; $s=0; $rec=0; $imc=0; $re=0; $im=0; $re2=0; $im2=0;
+    $x=0; $y=0; $w2=0; $h2=0; $color=0; $s=2*$r/$w1; $w2=8; $h2=5;
+    $sum = 0;
+    for ($y=0 ; $y<=$w1; $y=$y+1) {
+        $imc=$s*($y-$h2)+$imcen;
+        for ($x=0 ; $x<=$h1; $x=$x+1) {
+            $rec=$s*($x-$w2)+$recen;
+            $re=$rec; $im=$imc; $color=100; $re2=$re*$re; $im2=$im*$im;
+            while(((($re2+$im2)<1000000) && $color>0)) {
+                $im=$re*$im*2+$imc;
+                $re=$re2-$im2+$rec;
+                $re2=$re*$re;
+                $im2=$im*$im;
+                $color=$color-1;
+            }
+            $sum += $color;
+        }
+    }
+    return $sum;
+}
+
+function zend_mandel2_line(): string {
+    $b = " .:,;!/>)|&IH%*#";
+    $out = "";
+    for ($y=5; $C = $y*0.2 - 0.5, $y--;){
+        for ($x=0; $c = $x*0.1 - 1.5, $z=0, $Z=0, $x++ < 15;){
+            for ($r=$c, $i=$C, $k=0; $t = $z*$z - $Z*$Z + $r, $Z = 2*$z*$Z + $i, $z=$t, $k<100; $k++)
+                if ($z*$z + $Z*$Z > 500000) break;
+            $out .= $b[$k%16];
+        }
+        $out .= "|";
+    }
+    return $out;
+}
+
+function zend_sieve_range($n): int {
+    $count = 0;
+    while ($n-- > 0) {
+        $count = 0;
+        $flags = range(0, 200);
+        for ($i=2; $i<201; $i++) {
+            if ($flags[$i] > 0) {
+                for ($k=$i+$i; $k <= 200; $k+=$i) {
+                    $flags[$k] = 0;
+                }
+                $count++;
+            }
+        }
+    }
+    return $count;
+}
+
+function zend_ary3_autoviv($n): string {
+    for ($i=0; $i<$n; $i++) {
+        $X[$i] = $i + 1;
+        $Y[$i] = 0;
+    }
+    $last = $n - 1;
+    for ($k=0; $k<5; $k++) {
+        for ($i=$last; $i>=0; $i--) {
+            $Y[$i] += $X[$i];
+        }
+    }
+    return $Y[0] . "," . $Y[$last];
+}
+
+function zend_mkmatrix($rows, $cols) {
+    $count = 1;
+    $mx = array();
+    for ($i=0; $i<$rows; $i++) {
+        for ($j=0; $j<$cols; $j++) {
+            $mx[$i][$j] = $count++;
+        }
+    }
+    return $mx;
+}
+
+function zend_mmult($rows, $cols, $m1, $m2) {
+    $m3 = array();
+    for ($i=0; $i<$rows; $i++) {
+        for ($j=0; $j<$cols; $j++) {
+            $x = 0;
+            for ($k=0; $k<$cols; $k++) {
+                $x += $m1[$i][$k] * $m2[$k][$j];
+            }
+            $m3[$i][$j] = $x;
+        }
+    }
+    return $m3;
+}
+
+echo zend_ucall() . "\n";
+echo zend_mandel_sum() . "\n";
+echo strlen(zend_mandel2_line()) . "\n";
+echo zend_sieve_range(3) . "\n";
+echo zend_ary3_autoviv(30) . "\n";
+$m1 = zend_mkmatrix(4, 4);
+$m2 = zend_mkmatrix(4, 4);
+$m3 = zend_mmult(4, 4, $m1, $m2);
+echo $m3[0][0] . "," . $m3[3][3] . "\n";
+"#);
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(lines[0], "1000");
+    assert!(lines[1].parse::<i64>().unwrap() > 0);
+    assert_eq!(lines[2], "80");
+    assert_eq!(lines[3], "46");
+    assert_eq!(lines[4], "5,150");
+    assert_eq!(lines[5], "90,600");
+}
