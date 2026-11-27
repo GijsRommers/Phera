@@ -1,15 +1,15 @@
 //! Zero-idle-buffer HTTP/1.1 fast path powered by `httparse`.
 //!
-//! Idle keep-alive connections retain no read or write buffers: each connection
-//! sleeps directly on `TcpStream::readable()` and borrows a reusable 16 KiB
-//! buffer from its worker's [`WorkerScratch`] only while parsing a request or
-//! flushing a response. Complex cases (HTTP/2 prior-knowledge `h2c`, WebSocket
-//! upgrades, `Transfer-Encoding`, `Expect: 100-continue`, large/oversized
-//! bodies, or non-origin targets) hand off seamlessly to Hyper via
-//! [`PrefixedIo`] without re-reading from the socket.
+//! Idle keep-alive connections retain no read or write buffers and keep their
+//! async task future compact (< 2 KiB): cold fallbacks (`handle_hyper_connection`,
+//! streaming/file responses) are boxed off the hot future so they never bloat
+//! idle keep-alive sockets. Each connection sleeps directly on
+//! `TcpStream::readable()` and borrows a reusable 16 KiB buffer from its
+//! worker's [`WorkerScratch`] only while parsing a request or flushing a
+//! response.
 
 use std::cell::{Cell, RefCell};
-use std::future::poll_fn;
+use std::future::{Future, poll_fn};
 use std::io::{self, IoSlice};
 use std::net::SocketAddr;
 use std::pin::Pin;
@@ -234,13 +234,37 @@ impl AsyncWrite for PrefixedIo {
     }
 }
 
+/// Boxed off the hot `serve_connection` future so Hyper's ~18 KiB HTTP/1+HTTP/2
+/// state machine is never allocated for ordinary HTTP/1.1 keep-alive sockets.
+#[cold]
+fn handoff_to_hyper(
+    buf: Vec<u8>,
+    stream: TcpStream,
+    peer: SocketAddr,
+    shutdown: watch::Receiver<bool>,
+    work: Rc<ConnectionWork>,
+    worker: &Rc<WorkerContext>,
+) -> Pin<Box<dyn Future<Output = ()>>> {
+    let params = ConnectionParams {
+        io: PrefixedIo::new(buf, stream),
+        peer,
+        local_addr: worker.local_addr,
+        handler: worker.handler.clone(),
+        shutdown,
+        limits: worker.limits,
+        work,
+        ws: worker.ws.clone(),
+    };
+    Box::pin(handle_hyper_connection(params))
+}
+
 /// Serve one TCP connection on the zero-idle-buffer HTTP/1.1 fast path,
 /// transparently delegating HTTP/2, WebSockets, and complex HTTP/1.1 framing
-/// to Hyper.
+/// to Hyper via a boxed cold handoff.
 pub(crate) async fn serve_connection(
     mut stream: TcpStream,
     peer: SocketAddr,
-    mut shutdown: watch::Receiver<bool>,
+    shutdown: watch::Receiver<bool>,
     work: Rc<ConnectionWork>,
     worker: Rc<WorkerContext>,
 ) {
@@ -250,24 +274,50 @@ pub(crate) async fn serve_connection(
     let mut first_request = true;
     let mut pending: Option<Vec<u8>> = None;
 
+    // Pin ONE shutdown waiter per connection so keep-alive requests never pay
+    // per-request `watch::changed` subscribe/unsubscribe overhead.
+    let mut shutdown_waiter = shutdown.clone();
+    let shutdown_fut = wait_for_shutdown(&mut shutdown_waiter);
+    tokio::pin!(shutdown_fut);
+
     loop {
         if *shutdown.borrow() {
             return;
         }
 
-        // Step 1: When no pipelined bytes are waiting, park with ZERO heap
-        // buffer allocated until the socket becomes readable or idle-expires.
+        // Step 1: Try an immediate non-blocking read before arming an idle
+        // timer or polling shutdown. When no bytes are ready, release the
+        // scratch buffer immediately and park with ZERO heap buffer held.
         let mut buf = if let Some(leftover) = pending.take() {
             leftover
         } else {
-            let idle_ready = tokio::select! {
-                biased;
-                _ = wait_for_shutdown(&mut shutdown) => return,
-                ready = tokio::time::timeout(read_limit, stream.readable()) => ready,
-            };
-            match idle_ready {
-                Ok(Ok(())) => worker.scratch.take_read_buf(),
-                Ok(Err(_)) | Err(_) => return,
+            let mut scratch_buf = worker.scratch.take_read_buf();
+            match stream.try_read_buf(&mut scratch_buf) {
+                Ok(0) => {
+                    worker.scratch.return_read_buf(scratch_buf);
+                    return;
+                }
+                Ok(_) => scratch_buf,
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                    worker.scratch.return_read_buf(scratch_buf);
+                    let idle_ready = tokio::select! {
+                        biased;
+                        ready = tokio::time::timeout(read_limit, stream.readable()) => ready,
+                        _ = &mut shutdown_fut => return,
+                    };
+                    match idle_ready {
+                        Ok(Ok(())) => worker.scratch.take_read_buf(),
+                        Ok(Err(_)) | Err(_) => return,
+                    }
+                }
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => {
+                    worker.scratch.return_read_buf(scratch_buf);
+                    continue;
+                }
+                Err(_) => {
+                    worker.scratch.return_read_buf(scratch_buf);
+                    return;
+                }
             }
         };
 
@@ -277,13 +327,13 @@ pub(crate) async fn serve_connection(
         // Step 2: Read and parse the HTTP/1.x request head (or sniff HTTP/2 preface).
         let parsed = loop {
             if buf.is_empty() {
-                match read_chunk(&mut stream, &mut buf, head_deadline, &mut shutdown).await {
+                match read_chunk(&mut stream, &mut buf, head_deadline, shutdown_fut.as_mut()).await
+                {
                     ReadOutcome::GotBytes => {}
-                    ReadOutcome::Eof | ReadOutcome::Shutdown | ReadOutcome::IoError => {
-                        worker.scratch.return_read_buf(buf);
-                        return;
-                    }
-                    ReadOutcome::TimedOut => {
+                    ReadOutcome::Eof
+                    | ReadOutcome::Shutdown
+                    | ReadOutcome::IoError
+                    | ReadOutcome::TimedOut => {
                         worker.scratch.return_read_buf(buf);
                         return;
                     }
@@ -292,21 +342,11 @@ pub(crate) async fn serve_connection(
 
             if first_request && starts_like_h2_preface(&buf) {
                 if buf.len() >= H2_PREFACE.len() {
-                    // Confirmed HTTP/2 prior-knowledge preface: hand off to Hyper.
-                    handle_hyper_connection(ConnectionParams {
-                        io: PrefixedIo::new(buf, stream),
-                        peer,
-                        local_addr: worker.local_addr,
-                        handler: worker.handler.clone(),
-                        shutdown,
-                        limits,
-                        work,
-                        ws: worker.ws.clone(),
-                    })
-                    .await;
+                    handoff_to_hyper(buf, stream, peer, shutdown, work, &worker).await;
                     return;
                 }
-                match read_chunk(&mut stream, &mut buf, head_deadline, &mut shutdown).await {
+                match read_chunk(&mut stream, &mut buf, head_deadline, shutdown_fut.as_mut()).await
+                {
                     ReadOutcome::GotBytes => continue,
                     // Partial HTTP/2 preface that stalls must close silently
                     // without sending an HTTP/1.1 408 response.
@@ -320,35 +360,22 @@ pub(crate) async fn serve_connection(
                 }
             }
 
-            match parse_head(&buf) {
+            match parse_head_meta(&buf) {
                 ParseResult::Complete(info) => break info,
                 ParseResult::Partial => {
                     if buf.len() >= MAX_FAST_HEAD_BYTES {
-                        drop(_active);
-                        handle_hyper_connection(ConnectionParams {
-                            io: PrefixedIo::new(buf, stream),
-                            peer,
-                            local_addr: worker.local_addr,
-                            handler: worker.handler.clone(),
-                            shutdown,
-                            limits,
-                            work,
-                            ws: worker.ws.clone(),
-                        })
-                        .await;
+                        handoff_to_hyper(buf, stream, peer, shutdown, work, &worker).await;
                         return;
                     }
-                    match read_chunk(&mut stream, &mut buf, head_deadline, &mut shutdown).await {
+                    match read_chunk(&mut stream, &mut buf, head_deadline, shutdown_fut.as_mut())
+                        .await
+                    {
                         ReadOutcome::GotBytes => continue,
                         ReadOutcome::TimedOut => {
                             worker.scratch.return_read_buf(buf);
                             if limits.request_read_timeout <= limits.idle_timeout {
                                 const TIMEOUT_408: &[u8] = b"HTTP/1.1 408 Request Timeout\r\nConnection: close\r\nContent-Length: 0\r\n\r\n";
-                                let _ = tokio::time::timeout(
-                                    Duration::from_secs(1),
-                                    stream.write_all(TIMEOUT_408),
-                                )
-                                .await;
+                                let _ = write_error_and_close(&mut stream, TIMEOUT_408).await;
                             }
                             return;
                         }
@@ -359,25 +386,14 @@ pub(crate) async fn serve_connection(
                     }
                 }
                 ParseResult::FallbackToHyper => {
-                    handle_hyper_connection(ConnectionParams {
-                        io: PrefixedIo::new(buf, stream),
-                        peer,
-                        local_addr: worker.local_addr,
-                        handler: worker.handler.clone(),
-                        shutdown,
-                        limits,
-                        work,
-                        ws: worker.ws.clone(),
-                    })
-                    .await;
+                    handoff_to_hyper(buf, stream, peer, shutdown, work, &worker).await;
                     return;
                 }
                 ParseResult::BadRequest => {
                     worker.scratch.return_read_buf(buf);
                     const BAD_400: &[u8] =
                         b"HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Length: 0\r\n\r\n";
-                    let _ = tokio::time::timeout(Duration::from_secs(1), stream.write_all(BAD_400))
-                        .await;
+                    let _ = write_error_and_close(&mut stream, BAD_400).await;
                     return;
                 }
             }
@@ -386,19 +402,9 @@ pub(crate) async fn serve_connection(
         first_request = false;
 
         // Check body size & framing fallback before reading body bytes.
-        let content_length = parsed.content_length.unwrap_or(0);
+        let content_length = parsed.content_length;
         if content_length > limits.max_body_bytes || content_length > MAX_FAST_BODY_BYTES {
-            handle_hyper_connection(ConnectionParams {
-                io: PrefixedIo::new(buf, stream),
-                peer,
-                local_addr: worker.local_addr,
-                handler: worker.handler.clone(),
-                shutdown,
-                limits,
-                work,
-                ws: worker.ws.clone(),
-            })
-            .await;
+            handoff_to_hyper(buf, stream, peer, shutdown, work, &worker).await;
             return;
         }
 
@@ -419,7 +425,8 @@ pub(crate) async fn serve_connection(
                     return;
                 }
                 let step_deadline = Instant::now() + remaining.min(limits.body_idle_timeout);
-                match read_chunk(&mut stream, &mut buf, step_deadline, &mut shutdown).await {
+                match read_chunk(&mut stream, &mut buf, step_deadline, shutdown_fut.as_mut()).await
+                {
                     ReadOutcome::GotBytes => {}
                     ReadOutcome::TimedOut => {
                         worker.scratch.return_read_buf(buf);
@@ -443,7 +450,7 @@ pub(crate) async fn serve_connection(
             HttpVersion::Http10 => parsed.connection_keep_alive,
             HttpVersion::Http2 => false,
         };
-        let request = build_request(&buf, &parsed, content_length, peer, worker.local_addr);
+        let request = build_request(&buf, parsed, peer, worker.local_addr);
         if buf.len() > total_needed {
             pending = Some(buf[total_needed..].to_vec());
         }
@@ -520,11 +527,11 @@ enum ReadOutcome {
     IoError,
 }
 
-async fn read_chunk(
+async fn read_chunk<F: Future<Output = ()>>(
     stream: &mut TcpStream,
     buf: &mut Vec<u8>,
     deadline: Instant,
-    shutdown: &mut watch::Receiver<bool>,
+    mut shutdown_fut: Pin<&mut F>,
 ) -> ReadOutcome {
     loop {
         match stream.try_read_buf(buf) {
@@ -536,8 +543,8 @@ async fn read_chunk(
         }
         let waited = tokio::select! {
             biased;
-            _ = wait_for_shutdown(shutdown) => return ReadOutcome::Shutdown,
             ready = tokio::time::timeout_at(deadline, stream.readable()) => ready,
+            _ = shutdown_fut.as_mut() => return ReadOutcome::Shutdown,
         };
         match waited {
             Ok(Ok(())) => {}
@@ -547,33 +554,27 @@ async fn read_chunk(
     }
 }
 
-struct ParsedHead {
+/// Compact `Copy` metadata extracted from a complete HTTP/1.x request head.
+/// Zero heap allocations and tiny enough to live across body reads without
+/// bloating the connection future.
+#[derive(Clone, Copy)]
+struct HeadMeta {
     head_len: usize,
-    method: (usize, usize),
-    target: (usize, usize),
-    path: (usize, usize),
-    query: (usize, usize),
+    content_length: usize,
     version: HttpVersion,
-    headers: Vec<((usize, usize), (usize, usize))>,
-    content_length: Option<usize>,
     connection_close: bool,
     connection_keep_alive: bool,
     is_head: bool,
 }
 
 enum ParseResult {
-    Complete(ParsedHead),
+    Complete(HeadMeta),
     Partial,
     FallbackToHyper,
     BadRequest,
 }
 
-fn slice_range(base: usize, slice: &[u8]) -> (usize, usize) {
-    let start = slice.as_ptr() as usize - base;
-    (start, start + slice.len())
-}
-
-fn parse_head(buf: &[u8]) -> ParseResult {
+fn parse_head_meta(buf: &[u8]) -> ParseResult {
     let mut raw_headers = [httparse::EMPTY_HEADER; MAX_FAST_HEADERS];
     let mut req = httparse::Request::new(&mut raw_headers);
     let head_len = match req.parse(buf) {
@@ -602,19 +603,10 @@ fn parse_head(buf: &[u8]) -> ParseResult {
         return ParseResult::FallbackToHyper;
     }
 
-    let base = buf.as_ptr() as usize;
-    let method = slice_range(base, method_str.as_bytes());
-    let target = slice_range(base, target_str.as_bytes());
-    let (path, query) = match target_str.as_bytes().iter().position(|&b| b == b'?') {
-        Some(q) => ((target.0, target.0 + q), (target.0 + q + 1, target.1)),
-        None => (target, (target.1, target.1)),
-    };
-
     let mut content_length: Option<usize> = None;
     let mut has_host = false;
     let mut connection_close = false;
     let mut connection_keep_alive = false;
-    let mut headers = Vec::with_capacity(req.headers.len());
 
     for header in req.headers.iter() {
         let name = header.name;
@@ -654,67 +646,53 @@ fn parse_head(buf: &[u8]) -> ParseResult {
                 return ParseResult::FallbackToHyper;
             }
         }
-        headers.push((slice_range(base, name.as_bytes()), slice_range(base, value)));
     }
 
     if version == HttpVersion::Http11 && !has_host {
         return ParseResult::BadRequest;
     }
 
-    ParseResult::Complete(ParsedHead {
+    ParseResult::Complete(HeadMeta {
         head_len,
-        method,
-        target,
-        path,
-        query,
+        content_length: content_length.unwrap_or(0),
         version,
-        headers,
-        content_length,
         connection_close,
         connection_keep_alive,
         is_head: method_str == "HEAD",
     })
 }
 
-fn build_request(
-    buf: &[u8],
-    parsed: &ParsedHead,
-    content_length: usize,
-    peer: SocketAddr,
-    local_addr: SocketAddr,
-) -> Request {
-    let method = String::from_utf8_lossy(&buf[parsed.method.0..parsed.method.1]).into_owned();
-    let target = String::from_utf8_lossy(&buf[parsed.target.0..parsed.target.1]).into_owned();
-    let path = if parsed.path == parsed.target {
-        target.clone()
-    } else {
-        String::from_utf8_lossy(&buf[parsed.path.0..parsed.path.1]).into_owned()
+fn build_request(buf: &[u8], meta: HeadMeta, peer: SocketAddr, local_addr: SocketAddr) -> Request {
+    let mut raw_headers = [httparse::EMPTY_HEADER; MAX_FAST_HEADERS];
+    let mut req = httparse::Request::new(&mut raw_headers);
+    let _ = req.parse(&buf[..meta.head_len]);
+    let method_str = req.method.unwrap_or("GET");
+    let target_str = req.path.unwrap_or("/");
+    let (path, query) = match target_str.split_once('?') {
+        Some((p, q)) => (p.to_owned(), q.to_owned()),
+        None => (target_str.to_owned(), String::new()),
     };
-    let query = if parsed.query.0 == parsed.query.1 {
-        String::new()
+    let target = if query.is_empty() && target_str.len() == path.len() {
+        path.clone()
     } else {
-        String::from_utf8_lossy(&buf[parsed.query.0..parsed.query.1]).into_owned()
+        target_str.to_owned()
     };
-    let mut headers = Vec::with_capacity(parsed.headers.len());
-    for &(name_range, value_range) in &parsed.headers {
-        let raw_name = &buf[name_range.0..name_range.1];
-        let mut lower = String::with_capacity(raw_name.len());
-        for &byte in raw_name {
-            lower.push(byte.to_ascii_lowercase() as char);
-        }
-        headers.push((lower, buf[value_range.0..value_range.1].to_vec()));
+    let mut headers = Vec::with_capacity(req.headers.len());
+    for header in req.headers.iter() {
+        let lower = header.name.to_ascii_lowercase();
+        headers.push((lower, trim_ows(header.value).to_vec()));
     }
-    let body = if content_length == 0 {
+    let body = if meta.content_length == 0 {
         Vec::new()
     } else {
-        buf[parsed.head_len..parsed.head_len + content_length].to_vec()
+        buf[meta.head_len..meta.head_len + meta.content_length].to_vec()
     };
     Request {
-        method,
+        method: method_str.to_owned(),
         target,
         path,
         query,
-        version: parsed.version,
+        version: meta.version,
         headers,
         body,
         remote_addr: peer,
@@ -900,11 +878,22 @@ async fn write_all_fast(stream: &mut TcpStream, bytes: &[u8]) -> bool {
     true
 }
 
-async fn write_stalled_408(stream: &mut TcpStream) -> bool {
+#[cold]
+fn write_error_and_close<'a>(
+    stream: &'a mut TcpStream,
+    bytes: &'static [u8],
+) -> Pin<Box<dyn Future<Output = bool> + 'a>> {
+    Box::pin(async move {
+        tokio::time::timeout(Duration::from_secs(1), stream.write_all(bytes))
+            .await
+            .is_ok_and(|res| res.is_ok())
+    })
+}
+
+#[cold]
+fn write_stalled_408<'a>(stream: &'a mut TcpStream) -> Pin<Box<dyn Future<Output = bool> + 'a>> {
     const STALLED_408: &[u8] = b"HTTP/1.1 408 Request Timeout\r\ncontent-type: text/plain; charset=utf-8\r\nconnection: close\r\ncontent-length: 21\r\n\r\nrequest read timeout\n";
-    tokio::time::timeout(Duration::from_secs(1), stream.write_all(STALLED_408))
-        .await
-        .is_ok_and(|res| res.is_ok())
+    write_error_and_close(stream, STALLED_408)
 }
 
 /// Resolves once the peer closes its half of the TCP connection (EOF or reset).
@@ -966,110 +955,160 @@ async fn write_response(
             scratch.return_write_buf(out);
             ok
         }
-        Body::File(slice) => {
-            let content_length = (!bodyless_status).then_some(slice.length);
-            let mut out = scratch.take_write_buf();
-            write_status_and_headers(
-                &mut out,
+        other => {
+            write_non_bytes_response(
+                stream,
                 status,
-                &response.headers,
-                HeadFraming {
-                    content_length,
-                    chunked: false,
-                    version,
-                    keep_alive,
-                },
+                response.headers,
+                other,
+                bodyless_status,
+                omit_body,
+                version,
+                keep_alive,
+                watch_disconnect,
                 scratch,
-            );
-            let head_ok = write_all_fast(stream, &out).await;
-            scratch.return_write_buf(out);
-            if !head_ok {
-                return false;
-            }
-            if omit_body || slice.length == 0 {
-                return true;
-            }
-            let mut file = File::from_std(slice.file);
-            let mut remaining = slice.length;
-            let mut chunk = vec![0u8; remaining.min(FILE_CHUNK_BYTES as u64) as usize];
-            while remaining > 0 {
-                let want = remaining.min(chunk.len() as u64) as usize;
-                let read = match file.read(&mut chunk[..want]).await {
-                    Ok(0) => {
-                        // File truncated while sending: close the connection
-                        // so the client sees an incomplete transfer.
-                        return false;
-                    }
-                    Ok(n) => n,
-                    Err(_) => return false,
-                };
-                if stream.write_all(&chunk[..read]).await.is_err() {
+            )
+            .await
+        }
+    }
+}
+
+#[cold]
+#[allow(clippy::too_many_arguments)]
+fn write_non_bytes_response<'a>(
+    stream: &'a mut TcpStream,
+    status: u16,
+    headers: Vec<(String, Vec<u8>)>,
+    body: Body,
+    bodyless_status: bool,
+    omit_body: bool,
+    version: HttpVersion,
+    keep_alive: bool,
+    watch_disconnect: bool,
+    scratch: &'a WorkerScratch,
+) -> Pin<Box<dyn Future<Output = bool> + 'a>> {
+    Box::pin(async move {
+        match body {
+            Body::Bytes(_) => true,
+            Body::File(slice) => {
+                let content_length = (!bodyless_status).then_some(slice.length);
+                let mut out = scratch.take_write_buf();
+                write_status_and_headers(
+                    &mut out,
+                    status,
+                    &headers,
+                    HeadFraming {
+                        content_length,
+                        chunked: false,
+                        version,
+                        keep_alive,
+                    },
+                    scratch,
+                );
+                let head_ok = write_all_fast(stream, &out).await;
+                scratch.return_write_buf(out);
+                if !head_ok {
                     return false;
                 }
-                remaining -= read as u64;
-            }
-            true
-        }
-        Body::Stream(mut stream_body) => {
-            let chunked = !omit_body && version == HttpVersion::Http11;
-            let mut out = scratch.take_write_buf();
-            write_status_and_headers(
-                &mut out,
-                status,
-                &response.headers,
-                HeadFraming {
-                    content_length: None,
-                    chunked,
-                    version,
-                    keep_alive: keep_alive && chunked,
-                },
-                scratch,
-            );
-            let head_ok = write_all_fast(stream, &out).await;
-            scratch.return_write_buf(out);
-            if !head_ok {
-                return false;
-            }
-            if omit_body {
-                return true;
-            }
-            loop {
-                let next = if watch_disconnect {
-                    tokio::select! {
-                        biased;
-                        next = poll_fn(|cx| stream_body.poll_chunk(cx)) => next,
-                        _ = wait_peer_closed(stream) => return false,
+                if omit_body || slice.length == 0 {
+                    return true;
+                }
+                let mut file = File::from_std(slice.file);
+                let mut remaining = slice.length;
+                let mut chunk = vec![0u8; remaining.min(FILE_CHUNK_BYTES as u64) as usize];
+                while remaining > 0 {
+                    let want = remaining.min(chunk.len() as u64) as usize;
+                    let read = match file.read(&mut chunk[..want]).await {
+                        Ok(0) => return false,
+                        Ok(n) => n,
+                        Err(_) => return false,
+                    };
+                    if stream.write_all(&chunk[..read]).await.is_err() {
+                        return false;
                     }
-                } else {
-                    poll_fn(|cx| stream_body.poll_chunk(cx)).await
-                };
-                let Some(next) = next else {
-                    break;
-                };
-                let Ok(bytes) = next else {
+                    remaining -= read as u64;
+                }
+                true
+            }
+            Body::Stream(mut stream_body) => {
+                let chunked = !omit_body && version == HttpVersion::Http11;
+                let mut out = scratch.take_write_buf();
+                write_status_and_headers(
+                    &mut out,
+                    status,
+                    &headers,
+                    HeadFraming {
+                        content_length: None,
+                        chunked,
+                        version,
+                        keep_alive: keep_alive && chunked,
+                    },
+                    scratch,
+                );
+                let head_ok = write_all_fast(stream, &out).await;
+                scratch.return_write_buf(out);
+                if !head_ok {
                     return false;
-                };
-                if bytes.is_empty() {
-                    continue;
+                }
+                if omit_body {
+                    return true;
+                }
+                loop {
+                    let next = if watch_disconnect {
+                        tokio::select! {
+                            biased;
+                            next = poll_fn(|cx| stream_body.poll_chunk(cx)) => next,
+                            _ = wait_peer_closed(stream) => return false,
+                        }
+                    } else {
+                        poll_fn(|cx| stream_body.poll_chunk(cx)).await
+                    };
+                    let Some(next) = next else {
+                        break;
+                    };
+                    let Ok(bytes) = next else {
+                        return false;
+                    };
+                    if bytes.is_empty() {
+                        continue;
+                    }
+                    if chunked {
+                        let header = format!("{:x}\r\n", bytes.len());
+                        if stream.write_all(header.as_bytes()).await.is_err()
+                            || stream.write_all(&bytes).await.is_err()
+                            || stream.write_all(b"\r\n").await.is_err()
+                        {
+                            return false;
+                        }
+                    } else if stream.write_all(&bytes).await.is_err() {
+                        return false;
+                    }
                 }
                 if chunked {
-                    let header = format!("{:x}\r\n", bytes.len());
-                    if stream.write_all(header.as_bytes()).await.is_err()
-                        || stream.write_all(&bytes).await.is_err()
-                        || stream.write_all(b"\r\n").await.is_err()
-                    {
-                        return false;
-                    }
-                } else if stream.write_all(&bytes).await.is_err() {
-                    return false;
+                    stream.write_all(b"0\r\n\r\n").await.is_ok()
+                } else {
+                    false
                 }
             }
-            if chunked {
-                stream.write_all(b"0\r\n\r\n").await.is_ok()
-            } else {
-                // HTTP/1.0 unknown-length stream ends at EOF.
-                false
-            }
         }
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Guard against accidentally embedding Hyper's ~18 KiB `auto::Connection`
+    /// state machine back inside `serve_connection`'s async future.
+    #[test]
+    fn serve_connection_future_stays_compact() {
+        fn future_size<A, B, C, D, E, F: Future>(_: fn(A, B, C, D, E) -> F) -> usize {
+            std::mem::size_of::<F>()
+        }
+        let size = future_size(serve_connection);
+        assert!(
+            size <= 2048,
+            "serve_connection future grew to {size} bytes (expected <= 2048)"
+        );
     }
 }
