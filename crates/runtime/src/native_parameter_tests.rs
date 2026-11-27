@@ -8,13 +8,22 @@ use phera_extension_api::{Param, Registry, native_parameters::signature};
 #[test]
 fn native_parameter_tables_match_php_stubs() {
     let runtime = super::Runtime::new();
-    let ws_stubs = websocket_stubs();
+    let grpc = stubs(phera_ext_grpc::STUBS, "grpc/stubs.php");
+    let phera_stubs = [
+        (
+            "Phera\\WebSocket\\",
+            "websocket/stubs.php",
+            stubs(include_str!("websocket/stubs.php"), "websocket/stubs.php"),
+        ),
+        ("Phera\\Grpc\\", "grpc/stubs.php", grpc.clone()),
+        ("Phera\\Protobuf\\", "grpc/stubs.php", grpc),
+    ];
     let mut audit = Audit {
         functions: 0,
         methods: 0,
         missing: Vec::new(),
         messages: Vec::new(),
-        ws_stubs: &ws_stubs,
+        phera_stubs: &phera_stubs,
     };
     audit.registry(&runtime.web_registry);
     for function in runtime.registry.functions() {
@@ -54,12 +63,16 @@ fn native_parameter_tables_match_php_stubs() {
 
 type StubSignature = Vec<(String, bool, bool, bool)>;
 
-fn websocket_stubs() -> std::collections::HashMap<String, StubSignature> {
-    let unit = phera_compiler::compile(
-        include_str!("websocket/stubs.php"),
-        "crates/runtime/src/websocket/stubs.php",
-    )
-    .expect("websocket stubs compile");
+/// The declarations of one of Phera's own namespaces, which PHP's stubs do
+/// not have: the name prefix, the stub file, and its signatures.
+type PheraStubs = (
+    &'static str,
+    &'static str,
+    std::collections::HashMap<String, StubSignature>,
+);
+
+fn stubs(source: &str, file: &str) -> std::collections::HashMap<String, StubSignature> {
+    let unit = phera_compiler::compile(source, file).expect("Phera stubs compile");
     let extract = |params: &[phera_bytecode::Parameter]| -> StubSignature {
         params
             .iter()
@@ -98,7 +111,7 @@ struct Audit<'a> {
     methods: usize,
     missing: Vec<String>,
     messages: Vec<String>,
-    ws_stubs: &'a std::collections::HashMap<String, StubSignature>,
+    phera_stubs: &'a [PheraStubs],
 }
 
 impl Audit<'_> {
@@ -118,11 +131,14 @@ impl Audit<'_> {
     }
 
     fn compare(&mut self, name: &str, parameters: &[Param]) -> bool {
-        if name.starts_with("Phera\\WebSocket\\") {
-            let Some(declared) = self.ws_stubs.get(name) else {
-                self.messages.push(format!(
-                    "{name}: missing declaration in websocket/stubs.php"
-                ));
+        if let Some((_, file, stubs)) = self
+            .phera_stubs
+            .iter()
+            .find(|(prefix, _, _)| name.starts_with(prefix))
+        {
+            let Some(declared) = stubs.get(name) else {
+                self.messages
+                    .push(format!("{name}: missing declaration in {file}"));
                 return false;
             };
             let actual: StubSignature = parameters
@@ -138,7 +154,7 @@ impl Audit<'_> {
                 .collect();
             if &actual != declared {
                 self.messages.push(format!(
-                    "{name} (websocket/stubs.php):\n  registered {actual:?}\n  stubs      {declared:?}"
+                    "{name} ({file}):\n  registered {actual:?}\n  stubs      {declared:?}"
                 ));
             }
             return true;

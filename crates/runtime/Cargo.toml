@@ -10,6 +10,7 @@ phera-ast.workspace = true
 phera-parser.workspace = true
 phera-ext-reflection.workspace = true
 phera-ext-redis.workspace = true
+phera-ext-grpc.workspace = true
 phera-dotenv.workspace = true
 phera-bytecode.workspace = true
 phera-compiler.workspace = true
@@ -58,6 +59,7 @@ tempfile.workspace = true
 memchr.workspace = true
 
 [dev-dependencies]
+rcgen.workspace = true
 tokio = { workspace = true, features = ["rt", "macros"] }
 
 [lints]

@@ -367,6 +367,18 @@ event runs strictly in arrival order inside an isolated PHP fork:
   `--ws-max-message-size`, `--ws-idle-timeout`, `--ws-ping-interval`,
   `--ws-send-queue`, and `--ws-allowed-origins`.
 
+### gRPC
+
+`Phera\Grpc\Server` serves gRPC over HTTP/2 (cleartext or TLS) from a plain
+`phera server.php`, calling PHP handlers directly in the script's thread:
+unary, server-streaming (a `Generator` streams as it yields) and
+client-streaming methods, metadata and trailers, `grpc-timeout`, gzip, and
+the standard health service. `Phera\Grpc\Client` calls any gRPC server over
+pooled HTTP/2 connections and throws `Phera\Grpc\StatusException` for a
+failed status. Messages are PHP arrays, encoded by `Phera\Protobuf\Schema`
+from a `protoc --descriptor_set_out` file or from a schema written as an
+array. See [the gRPC README](crates/extensions/grpc/README.md).
+
 ## 🧩 Extensions
 
 Built in, each checked call by call against real PHP: core, standard, ctype,

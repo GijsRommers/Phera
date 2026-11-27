@@ -343,6 +343,13 @@ pub trait Context {
         matches!(error, NativeError::Throw { .. })
     }
 
+    /// The PHP object of an exception that a callback threw, for native code
+    /// that handles it instead of passing it on: a server answers a failed
+    /// call with the exception's status and keeps serving.
+    fn thrown_object(&self, _error: &NativeError) -> Option<Rc<Object>> {
+        None
+    }
+
     /// Link a new exception to the PHP exception that was already pending.
     fn chain_exception(&mut self, error: NativeError, _previous: NativeError) -> NativeError {
         error
