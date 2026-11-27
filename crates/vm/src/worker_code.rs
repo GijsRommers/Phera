@@ -24,6 +24,74 @@ use std::sync::{Arc, Weak};
 
 use phera_bytecode::CompiledUnit;
 
+/// Cached per-function Tier-2 eligibility flags for one compiled unit revision,
+/// computed once when the worker first numbers that revision so subsequent web
+/// requests pay zero bytecode scanning cost in `CodeTable::load`.
+#[derive(Clone, Default)]
+pub(crate) enum FastCandidates {
+    /// No function in this unit is a Tier-2 candidate.
+    #[default]
+    None,
+    /// Bitmask for units with at most 64 functions (`main` + declared functions).
+    Small(u64),
+    /// Fallback bitmap for units with more than 64 functions.
+    Large(Rc<[bool]>),
+}
+
+impl FastCandidates {
+    #[cold]
+    #[inline(never)]
+    fn scan(unit: &CompiledUnit) -> Self {
+        let total = 1 + unit.functions.len();
+        if total <= 64 {
+            let mut mask = 0u64;
+            if crate::fast_tier::lower::is_fast_candidate(&unit.main, None) {
+                mask |= 1;
+            }
+            for (idx, func) in unit.functions.iter().enumerate() {
+                if crate::fast_tier::lower::is_fast_candidate(func, Some(idx as u32)) {
+                    mask |= 1u64 << (idx + 1);
+                }
+            }
+            if mask == 0 {
+                Self::None
+            } else {
+                Self::Small(mask)
+            }
+        } else {
+            let mut any = false;
+            let mut flags = Vec::with_capacity(total);
+            let main_fast = crate::fast_tier::lower::is_fast_candidate(&unit.main, None);
+            any |= main_fast;
+            flags.push(main_fast);
+            for (idx, func) in unit.functions.iter().enumerate() {
+                let is_fast = crate::fast_tier::lower::is_fast_candidate(func, Some(idx as u32));
+                any |= is_fast;
+                flags.push(is_fast);
+            }
+            if any {
+                Self::Large(Rc::from(flags))
+            } else {
+                Self::None
+            }
+        }
+    }
+
+    #[inline(always)]
+    pub(crate) fn is_none(&self) -> bool {
+        matches!(self, Self::None)
+    }
+
+    #[inline(always)]
+    pub(crate) fn get(&self, offset: usize) -> bool {
+        match self {
+            Self::None => false,
+            Self::Small(mask) => offset < 64 && (mask >> offset) & 1 != 0,
+            Self::Large(flags) => flags.get(offset).copied().unwrap_or(false),
+        }
+    }
+}
+
 /// The worker's numbering, shared by its requests (see the module comment).
 #[derive(Default)]
 pub(crate) struct WorkerCode {
@@ -35,6 +103,8 @@ struct Numbering {
     /// The first number of each numbered file revision plus one, by the
     /// revision's process number (`UnitMetadata::id`); 0: not numbered.
     firsts: Vec<u32>,
+    /// Cached Tier-2 eligibility flags per `UnitMetadata::id`.
+    fast_candidates: Vec<FastCandidates>,
     /// The numbered revisions, to give back the numbers of those nothing
     /// holds any more.
     revisions: Vec<Revision>,
@@ -88,12 +158,24 @@ impl WorkerCode {
     /// The first number of `unit`'s `count` functions. A file revision from
     /// the code cache keeps its numbers for every request; other code leases
     /// them into `leases`.
+    #[cfg(test)]
     pub(crate) fn number(&self, unit: &Arc<CompiledUnit>, count: u32, leases: &Leases) -> u32 {
+        self.number_with_fast(unit, count, leases).0
+    }
+
+    /// Like `number`, also returning cached per-function Tier-2 eligibility
+    /// flags computed once per file revision.
+    pub(crate) fn number_with_fast(
+        &self,
+        unit: &Arc<CompiledUnit>,
+        count: u32,
+        leases: &Leases,
+    ) -> (u32, FastCandidates) {
         let mut numbering = self.numbering.borrow_mut();
         let Some(metadata) = &unit.metadata else {
             let first = numbering.take(count);
             leases.ranges.borrow_mut().push((first, count));
-            return first;
+            return (first, FastCandidates::None);
         };
         let id = metadata.id as usize;
         if let Some(first) = numbering
@@ -101,20 +183,25 @@ impl WorkerCode {
             .get(id)
             .and_then(|first| first.checked_sub(1))
         {
-            return first;
+            return (first, numbering.fast_candidates[id].clone());
         }
         numbering.give_back_dead_revisions();
         let first = numbering.take(count);
         if numbering.firsts.len() <= id {
             numbering.firsts.resize(id + 1, 0);
+            numbering
+                .fast_candidates
+                .resize(id + 1, FastCandidates::None);
         }
+        let candidates = FastCandidates::scan(unit);
         numbering.firsts[id] = first + 1;
+        numbering.fast_candidates[id] = candidates.clone();
         numbering.revisions.push(Revision {
             id: metadata.id,
             unit: Arc::downgrade(unit),
             range: (first, count),
         });
-        first
+        (first, candidates)
     }
 
     /// One number for a request's own function (a method composed from a
@@ -155,6 +242,9 @@ impl Numbering {
             let dead = self.revisions.swap_remove(position);
             if let Some(first) = self.firsts.get_mut(dead.id as usize) {
                 *first = 0;
+            }
+            if let Some(candidates) = self.fast_candidates.get_mut(dead.id as usize) {
+                *candidates = FastCandidates::None;
             }
             self.free.push(dead.range);
         }
@@ -208,5 +298,28 @@ mod tests {
         drop(old);
         let new = unit("<?php function f() {} function g() {}");
         assert_eq!(worker.number(&new, 3, &leases), old_first);
+    }
+
+    #[test]
+    fn caches_fast_candidates_per_revision_and_resets_on_reclaim() {
+        let worker = Rc::new(WorkerCode::default());
+        let leases = Leases::new(&worker);
+        let plain = unit("<?php function f() { return 1; }");
+        let (first, fc1) = worker.number_with_fast(&plain, 2, &leases);
+        assert!(fc1.is_none());
+        let (second, fc2) = worker.number_with_fast(&plain, 2, &leases);
+        assert_eq!(first, second);
+        assert!(fc2.is_none());
+
+        let hot = unit(
+            "<?php function sum($n) { $s = 0; for ($i = 0; $i < $n; $i++) { $s += $i; } return $s; }",
+        );
+        let (hot_first, hot_fc1) = worker.number_with_fast(&hot, 2, &leases);
+        assert!(!hot_fc1.get(0));
+        assert!(hot_fc1.get(1));
+        let (hot_second, hot_fc2) = worker.number_with_fast(&hot, 2, &leases);
+        assert_eq!(hot_first, hot_second);
+        assert!(!hot_fc2.get(0));
+        assert!(hot_fc2.get(1));
     }
 }

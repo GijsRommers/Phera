@@ -292,21 +292,26 @@ impl CodeTable {
             self.slots[id] = index.0 + 1;
         }
         let count = 1 + unit.functions.len() as u32;
-        let first = FunctionIndex(self.worker.number(unit, count, self.own_leases()));
+        let (first_num, fast_candidates) =
+            self.worker.number_with_fast(unit, count, self.own_leases());
+        let first = FunctionIndex(first_num);
         let mut facts = Vec::with_capacity(count as usize);
         let (name_keys, prop_keys, symbol_keys, class_keys) = if let Some(metadata) = &unit.metadata
         {
+            let has_fast = !fast_candidates.is_none();
             facts.extend(metadata.functions.iter().cloned().enumerate().map(
                 |(offset, signature)| {
                     let local = offset.checked_sub(1).map(|local| local as u32);
-                    let fn_body = body(unit, local.map(|local| local as usize));
                     let mut entry = FunctionFacts::bind(
                         (index, first, local),
                         signature,
-                        fn_body.instructions.clone(),
+                        body(unit, local.map(|local| local as usize))
+                            .instructions
+                            .clone(),
                     );
-                    entry.fast_candidate =
-                        crate::fast_tier::lower::is_fast_candidate(fn_body, local);
+                    if has_fast {
+                        entry.fast_candidate = fast_candidates.get(offset);
+                    }
                     entry
                 },
             ));
