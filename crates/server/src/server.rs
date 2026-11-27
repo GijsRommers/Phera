@@ -45,7 +45,7 @@ impl Server {
         factory: impl HandlerFactory,
         ws_hub: Arc<WebSocketHub>,
     ) -> io::Result<Server> {
-        let listener = worker::bind_listener(config.addr)?;
+        let listener = worker::bind_listener(config.addr, config.backlog)?;
         let local_addr = listener.local_addr()?;
         let (shutdown, _) = watch::channel(false);
         Ok(Server {

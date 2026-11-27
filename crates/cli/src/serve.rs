@@ -242,6 +242,18 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
     if let Some(workers) = options.workers {
         config.workers = workers;
     }
+    if let Some(max_connections) = options.max_connections.or(settings.max_connections) {
+        config.max_connections_per_worker = max_connections;
+    }
+    if let Some(backlog) = options.backlog.or(settings.backlog) {
+        config.backlog = backlog;
+    }
+    if let Some(idle_timeout) = options.idle_timeout.or(settings.idle_timeout) {
+        config.idle_timeout = idle_timeout;
+    }
+    if let Some(keepalive_shed_at) = options.keepalive_shed_at.or(settings.keepalive_shed_at) {
+        config.keepalive_shed_at = Some(keepalive_shed_at);
+    }
     if let Some(request_timeout) = options.request_timeout {
         config.request_timeout = request_timeout;
     }
@@ -266,6 +278,9 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
         .with_websocket_sink(Arc::new(HubSink(ws_hub.clone())));
     if let Some(image) = &image {
         runtime = runtime.with_image(image.clone());
+    }
+    if let Some(limit) = options.max_active_requests.or(settings.max_active_requests) {
+        runtime = runtime.with_max_concurrent_requests_per_worker(Some(limit));
     }
     if let Some(debug) = debug {
         runtime = runtime.with_debug(debug);

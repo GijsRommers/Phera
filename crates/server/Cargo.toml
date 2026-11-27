@@ -9,8 +9,11 @@ license.workspace = true
 bytes = { workspace = true }
 futures-util = { workspace = true }
 http-body-util = { workspace = true }
+httpdate = { workspace = true }
+httparse = { workspace = true }
 hyper = { workspace = true }
 hyper-util = { workspace = true }
+itoa = { workspace = true }
 socket2 = { workspace = true }
 tokio = { workspace = true, features = ["io-util"] }
 tokio-tungstenite = { workspace = true }
