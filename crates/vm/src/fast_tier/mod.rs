@@ -2,98 +2,39 @@
 //!
 //! Hot PHP functions (functions with a Tier-2-clean loop or clean direct
 //! recursion) are lazily lowered from 16-byte general bytecode into 8-byte
-//! `Copy` [`FastOp`] instructions running on a zero-drop 8-byte NaN-boxed
-//! `u64` register stack (`&mut [u64; 256]` fixed windows — zero bounds checks
-//! by type!) with an out-of-line `heap` table only for mutable arrays,
-//! non-const strings, and references.
-//!
-//! Any unsupported operation, overflow, division by zero, reference write, or
-//! type mismatch deoptimizes cleanly before mutating observable state,
-//! materializing all active nested [`FastFrame`]s back into `Vm::registers`
-//! and `Vm::call_stack` at the exact original bytecode instruction pointer.
+//! `Copy` [`FastOp`] instructions running on raw `(tags: [u8; 256], bits: [u64; 256])`
+//! register windows (zero bounds checks, raw 64-bit `i64`/`f64`, zero-alloc
+//! `TAG_CONST` constants). Pure-scalar inner loops are further specialized into
+//! tagless stack-array [`scalar_loop::ScalarLoop`] kernels, and pure-integer
+//! self-recursive functions into raw-`i64` [`int_rec::IntRecFunc`] kernels.
 
 pub(crate) mod exec;
+pub(crate) mod int_rec;
 pub(crate) mod lower;
+pub(crate) mod scalar_loop;
 pub(crate) mod stack;
 
 use std::sync::Arc;
+use std::sync::atomic::AtomicU8;
 
 use phera_bytecode::TypeMask;
 
 use crate::calls::execution_loop::Position;
+use crate::code_table::FunctionIndex;
 
 pub(crate) use stack::FastStack;
 
-// =============================================================================
-// 100% Safe-Rust 8-Byte NaN-Boxing Representation (`u64`)
-// =============================================================================
-// Any `w < TAG_BASE` is an IEEE-754 `f64` (including ±Inf and canonical NaN
-// `0x7ff8_0000_0000_0000`). Bit patterns `>= TAG_BASE` carry a 16-bit tag in
-// bits 48..64 and a 48-bit payload in bits 0..48.
-pub(crate) const CANON_NAN: u64 = 0x7ff8_0000_0000_0000;
-pub(crate) const TAG_BASE: u64 = 0xfff9_0000_0000_0000;
-pub(crate) const TAG_MASK: u64 = 0xffff_0000_0000_0000;
-pub(crate) const PAYLOAD_MASK: u64 = 0x0000_ffff_ffff_ffff;
-
-/// 48-bit signed integer (`[-140_737_488_355_328, +140_737_488_355_327]`).
-/// Integers outside 48 bits are stored in `TAG_HEAP` (`Value::Int(i64)`).
-pub(crate) const TAG_INT: u64 = 0xfff9_0000_0000_0000;
-/// PHP `null`.
-pub(crate) const TAG_NULL: u64 = 0xfffa_0000_0000_0000;
-/// PHP `bool` (payload bit 0 is `0` or `1`).
-pub(crate) const TAG_BOOL: u64 = 0xfffb_0000_0000_0000;
+/// Dense register tag values in `FastStack::tags`.
+pub(crate) const TAG_UNINIT: u8 = 0;
+pub(crate) const TAG_NULL: u8 = 1;
+pub(crate) const TAG_BOOL: u8 = 2;
+pub(crate) const TAG_INT: u8 = 3;
+pub(crate) const TAG_FLOAT: u8 = 4;
 /// Immutable unit constant by `(unit_cache_const_id: u32)` — zero alloc/drop!
-pub(crate) const TAG_CONST: u64 = 0xfffc_0000_0000_0000;
-/// Unassigned / undefined slot.
-pub(crate) const TAG_UNINIT: u64 = 0xfffd_0000_0000_0000;
+pub(crate) const TAG_CONST: u8 = 5;
 /// Heap slot index (`u32`) into `FastStack::heap` — ONLY tag that may own
 /// memory or hold a PHP reference!
-pub(crate) const TAG_HEAP: u64 = 0xfffe_0000_0000_0000;
-
-#[inline(always)]
-pub(crate) fn box_f64(f: f64) -> u64 {
-    let b = f.to_bits();
-    if b >= TAG_BASE { CANON_NAN } else { b }
-}
-
-#[inline(always)]
-pub(crate) fn is_f64(w: u64) -> bool {
-    w < TAG_BASE
-}
-
-#[inline(always)]
-pub(crate) fn unbox_f64(w: u64) -> f64 {
-    f64::from_bits(w)
-}
-
-#[inline(always)]
-pub(crate) fn is_int(w: u64) -> bool {
-    (w & TAG_MASK) == TAG_INT
-}
-
-#[inline(always)]
-pub(crate) fn unbox_int(w: u64) -> i64 {
-    ((w as i64) << 16) >> 16
-}
-
-#[inline(always)]
-pub(crate) fn box_int_checked(x: i64) -> Option<u64> {
-    if ((x << 16) >> 16) == x {
-        Some(TAG_INT | ((x as u64) & PAYLOAD_MASK))
-    } else {
-        None
-    }
-}
-
-#[inline(always)]
-pub(crate) fn box_i32(x: i32) -> u64 {
-    TAG_INT | ((i64::from(x) as u64) & PAYLOAD_MASK)
-}
-
-#[inline(always)]
-pub(crate) fn box_bool(b: bool) -> u64 {
-    TAG_BOOL | u64::from(b)
-}
+pub(crate) const TAG_HEAP: u8 = 6;
 
 /// Comparison sub-opcodes encoded in `FastOp::a` (low 4 bits) or `FastOp::imm`.
 pub(crate) const CMP_EQ: u8 = 0;
@@ -129,6 +70,9 @@ impl FastOp {
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Op {
+    // Specialized unboxed inner-loop entry (guarded fallback to tagged ops)
+    EnterScalarLoop,
+
     // Fused rotated-loop latches
     IncLoopLtImm,
     IncLoopLeImm,
@@ -139,7 +83,7 @@ pub(crate) enum Op {
     DecLoopGeReg,
     DecLoopGtReg,
 
-    // Float-first arithmetic (for float-typed expressions like mandel/mandel2/heapsort)
+    // Float-first arithmetic
     AddF64,
     SubF64,
     MulF64,
@@ -148,7 +92,7 @@ pub(crate) enum Op {
     AddF64Imm,
     SubF64Imm,
 
-    // Int-first arithmetic (with out-of-line float/overflow fallback)
+    // Int-first arithmetic
     AddNum,
     SubNum,
     MulNum,
@@ -160,7 +104,7 @@ pub(crate) enum Op {
     Shl,
     Shr,
 
-    // Immediate integer arithmetic (with out-of-line float/overflow fallback)
+    // Immediate integer arithmetic
     AddImm,
     SubImm,
     MulImm,
@@ -175,6 +119,7 @@ pub(crate) enum Op {
     AddAssign,
     SubAssign,
     MulAssign,
+    MulAddAssign,
     StrAppend,
 
     // Constants, moves, clears
@@ -220,12 +165,14 @@ pub(crate) enum Op {
     BranchIdentImm,
     BranchNotIdentImm,
 
-    // In-loop array operations (COW & reference-aware, out-of-line helpers)
+    // In-loop array operations (direct `Storage::List` fast paths + COW/ref safe)
     ArrGetInt,
     Arr2DGetInt,
     ArrSetInt,
     ArrAddAssignInt,
     ArrAddFromArr,
+    ArrAddFromArrLoop,
+    ArrUnsetStepLoop,
     ArrPush,
     ArrUnsetInt,
 
@@ -250,7 +197,13 @@ pub(crate) struct FastFunction {
     /// Original bytecode IP -> `FastOp` index (`u16::MAX` when fused/invalid).
     pub(crate) bc_to_fast: Box<[u16]>,
     /// Flat float constant pool indexed by `Op::LoadF64::imm`.
-    pub(crate) f64_consts: Box<[u64]>,
+    pub(crate) f64_consts: Box<[f64]>,
+    /// Specialized unboxed inner scalar loops referenced by `Op::EnterScalarLoop`.
+    pub(crate) scalar_loops: Box<[scalar_loop::ScalarLoop]>,
+    /// Optional pure-`i64` self-recursion kernel (`fibo_r`, `Ack`, etc.).
+    pub(crate) int_rec: Option<int_rec::IntRecFunc>,
+    /// Count of runtime type-deopts; after 2 strikes the function is disabled.
+    pub(crate) type_deopts: AtomicU8,
     pub(crate) reg_count: u8,
     pub(crate) local_count: u8,
     pub(crate) param_count: u8,
@@ -275,6 +228,11 @@ pub(crate) enum FastExit {
     /// Entry frame returned cleanly to its caller in `Machine::run`.
     Returned(Position),
     /// Deoptimized back to `Vm::registers`/`Vm::call_stack` at `position`.
-    /// When `yield_now` is true, `Machine::run` yields immediately.
-    Deopt { position: Position, yield_now: bool },
+    Deopt {
+        position: Position,
+        yield_now: bool,
+        /// When `Some`, `CodeTable::mark_fast_ineligible` should disable this
+        /// function after repeated runtime type-deopts.
+        disable_fn: Option<FunctionIndex>,
+    },
 }

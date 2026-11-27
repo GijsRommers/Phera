@@ -113,7 +113,7 @@ pub(super) struct Machine<'a> {
     pub(super) classes: &'a mut ClassTable,
     pub(super) stack: &'a mut CallStack,
     pub(super) registers: &'a mut Registers,
-    pub(super) fast_stack: &'a mut crate::fast_tier::FastStack,
+    pub(super) fast_stack: &'a mut Option<Box<crate::fast_tier::FastStack>>,
     /// Loop rounds and calls since the last hand-over.
     work: usize,
     /// Instructions run, for `Vm::executed_instructions`.
@@ -323,49 +323,18 @@ impl Machine<'_> {
             frame,
             ip: frame.ip(),
         };
-        let mut instructions = self.code.instructions(frame.function);
+        if !GUARDED
+            && self.code.facts(frame.function).fast_candidate
+            && let Some(exit) = self.try_run_fast_chain(&mut position)
+        {
+            return exit;
+        }
+        let mut instructions = self.code.instructions(position.frame.function);
         // Whether the frame's registers fit a window (see
         // `registers::WINDOW`): decided when the frame is entered, not per
         // instruction.
-        let mut windowed = self.windowed(frame);
-        let mut fast_candidate = !GUARDED && self.code.facts(frame.function).fast_candidate;
-        let mut skip_fast_at: Option<(crate::code_table::FunctionIndex, usize)> = None;
+        let mut windowed = self.windowed(position.frame);
         loop {
-            if !GUARDED
-                && fast_candidate
-                && skip_fast_at != Some((position.frame.function, position.ip))
-                && let Some(exit) = self.try_run_fast(position)
-            {
-                match exit {
-                    crate::fast_tier::FastExit::Returned(next) => {
-                        skip_fast_at = None;
-                        let same_function = next.frame.function == position.frame.function;
-                        position = next;
-                        if !same_function {
-                            instructions = self.code.instructions(next.frame.function);
-                            windowed = self.windowed(next.frame);
-                            fast_candidate = self.code.facts(next.frame.function).fast_candidate;
-                        }
-                        continue;
-                    }
-                    crate::fast_tier::FastExit::Deopt {
-                        position: next,
-                        yield_now,
-                    } => {
-                        let same_function = next.frame.function == position.frame.function;
-                        position = next;
-                        if !same_function {
-                            instructions = self.code.instructions(next.frame.function);
-                            windowed = self.windowed(next.frame);
-                            fast_candidate = self.code.facts(next.frame.function).fast_candidate;
-                        }
-                        if yield_now {
-                            return LoopExit::Yield;
-                        }
-                        skip_fast_at = Some((position.frame.function, position.ip));
-                    }
-                }
-            }
             let instruction =
                 match self.run_simple::<GUARDED>(instructions, &mut position, windowed) {
                     Ok(instruction) => instruction,
@@ -392,10 +361,14 @@ impl Machine<'_> {
                     let same_function = next.frame.function == position.frame.function;
                     position = next;
                     if !same_function {
-                        instructions = self.code.instructions(next.frame.function);
-                        windowed = self.windowed(next.frame);
-                        fast_candidate =
-                            !GUARDED && self.code.facts(next.frame.function).fast_candidate;
+                        if !GUARDED
+                            && self.code.facts(position.frame.function).fast_candidate
+                            && let Some(exit) = self.try_run_fast_chain(&mut position)
+                        {
+                            return exit;
+                        }
+                        instructions = self.code.instructions(position.frame.function);
+                        windowed = self.windowed(position.frame);
                     }
                 }
                 Step::Slow => {
@@ -603,9 +576,40 @@ impl Machine<'_> {
         self.code.facts(frame.function).registers as usize <= WINDOW
     }
 
+    /// Try running a chain of Tier-2 candidate frames without adding any code
+    /// or register pressure to `Machine::run`'s hot loop.
+    #[cold]
+    #[inline(never)]
+    fn try_run_fast_chain(&mut self, position: &mut Position) -> Option<LoopExit> {
+        loop {
+            let exit = self.try_run_fast(*position)?;
+            match exit {
+                crate::fast_tier::FastExit::Returned(next) => {
+                    *position = next;
+                    if self.code.facts(next.frame.function).fast_candidate {
+                        continue;
+                    }
+                    return None;
+                }
+                crate::fast_tier::FastExit::Deopt {
+                    position: next,
+                    yield_now,
+                    disable_fn,
+                } => {
+                    *position = next;
+                    if let Some(fn_idx) = disable_fn {
+                        self.code.mark_fast_ineligible(fn_idx);
+                    }
+                    if yield_now {
+                        return Some(LoopExit::Yield);
+                    }
+                    return None;
+                }
+            }
+        }
+    }
+
     /// Try to run the current unguarded frame on the Tier-2 compact register VM.
-    /// Kept `#[inline(never)]` so it adds zero code size or register pressure to
-    /// `Machine::run` and `run_simple`.
     #[inline(never)]
     fn try_run_fast(&mut self, position: Position) -> Option<crate::fast_tier::FastExit> {
         let frame = position.frame;
@@ -630,12 +634,15 @@ impl Machine<'_> {
         {
             return None;
         }
+        let fast_stack = self
+            .fast_stack
+            .get_or_insert_with(|| Box::new(crate::fast_tier::FastStack::new()));
         Some(crate::fast_tier::exec::run_fast(
             self.code,
             &table,
             self.stack,
             self.registers,
-            self.fast_stack,
+            fast_stack,
             position,
             entry_fast,
             fast_ip as usize,

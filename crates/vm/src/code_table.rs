@@ -101,6 +101,8 @@ pub(crate) struct CodeTable {
     imports: Option<Vec<crate::classes::worker_classes::Import>>,
     /// Lazily lowered Tier-2 compact functions indexed by `FunctionIndex`.
     fast_tier: std::cell::RefCell<Vec<crate::fast_tier::FastEntry>>,
+    /// Guard so HTTP forks/rollbacks never touch `fast_tier.borrow()`.
+    has_fast_tier: std::cell::Cell<bool>,
 }
 
 impl Default for CodeTable {
@@ -129,6 +131,7 @@ impl CodeTable {
             trait_method_names: Default::default(),
             imports: None,
             fast_tier: std::cell::RefCell::new(Vec::new()),
+            has_fast_tier: std::cell::Cell::new(false),
         }
     }
 
@@ -238,7 +241,7 @@ impl CodeTable {
         if self.functions.len() > functions_len {
             self.functions.truncate(functions_len);
         }
-        {
+        if self.has_fast_tier.get() {
             let mut fast = self.fast_tier.borrow_mut();
             if fast.len() > functions_len {
                 fast.truncate(functions_len);
@@ -270,6 +273,7 @@ impl CodeTable {
             trait_method_names: Default::default(),
             imports: None,
             fast_tier: std::cell::RefCell::new(Vec::new()),
+            has_fast_tier: std::cell::Cell::new(false),
         }
     }
 
@@ -697,6 +701,7 @@ impl CodeTable {
             if table.len() <= idx {
                 table.resize(idx + 1, FastEntry::Unchecked);
             }
+            self.has_fast_tier.set(true);
             match lowered {
                 Some((fast, callees)) => {
                     table[idx] = FastEntry::Compiled(fast);
@@ -710,6 +715,21 @@ impl CodeTable {
                 }
             }
         }
+    }
+
+    /// Permanently disable Tier-2 entry for a function that repeatedly hits
+    /// runtime type deopts (e.g. `SplFixedArray` or string-keyed maps).
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn mark_fast_ineligible(&self, function: FunctionIndex) {
+        use crate::fast_tier::FastEntry;
+        let idx = function.index();
+        let mut table = self.fast_tier.borrow_mut();
+        if table.len() <= idx {
+            table.resize(idx + 1, FastEntry::Unchecked);
+        }
+        table[idx] = FastEntry::Ineligible;
+        self.has_fast_tier.set(true);
     }
 }
 
@@ -807,7 +827,12 @@ impl crate::snapshot::ForkCopy for CodeTable {
             },
             trait_method_names: self.trait_method_names.clone(),
             imports: None,
-            fast_tier: std::cell::RefCell::new(self.fast_tier.borrow().clone()),
+            fast_tier: std::cell::RefCell::new(if self.has_fast_tier.get() {
+                self.fast_tier.borrow().clone()
+            } else {
+                Vec::new()
+            }),
+            has_fast_tier: std::cell::Cell::new(self.has_fast_tier.get()),
         }
     }
 }

@@ -1,12 +1,14 @@
 //! Tier-2 compact register VM execution engine (100% safe Rust).
 //!
-//! Runs 8-byte [`FastOp`] streams over a single `&mut [u64; 256]` NaN-boxed
-//! register window (zero bounds checks by type). All heap, array, string,
-//! mixed-type slow arithmetic, general call, and deoptimization paths are
-//! placed in `#[inline(never)]` helpers so the hot dispatch loop stays small
-//! and spill-free.
+//! Runs 8-byte [`FastOp`] streams over raw `(tags: &mut [u8; 256], bits: &mut [u64; 256])`
+//! windows (zero bounds checks, raw 64-bit `i64`/`f64`, zero-alloc `TAG_CONST`),
+//! dispatching pure-scalar inner loops to [`scalar_loop::try_run_scalar_loop`]
+//! and pure-integer self-recursion to [`int_rec::run_int_rec_entry`].
+//! All slow/heap/array/string/deopt paths live in out-of-line helpers and a
+//! single `materialize_deopt` exit at the end of `run_fast`.
 
 use std::rc::Rc;
+use std::sync::atomic::Ordering;
 
 use phera_bytecode::{Reg, TypeMask};
 use phera_value::{PhpArray, PhpString, Value};
@@ -17,11 +19,12 @@ use crate::calls::frame::Frame;
 use crate::calls::prepared_call::CallKind;
 use crate::calls::registers::Registers;
 use crate::code_table::{CodeTable, FunctionIndex};
+use crate::fast_tier::int_rec::run_int_rec_entry;
+use crate::fast_tier::scalar_loop::{ScalarExit, try_run_scalar_loop};
 use crate::fast_tier::stack::{FastFrame, FastStack};
 use crate::fast_tier::{
     CMP_EQ, CMP_GE, CMP_GT, CMP_IDENT, CMP_LE, CMP_LT, CMP_NE, CMP_NOT_IDENT, FastEntry, FastExit,
-    FastFunction, Op, PAYLOAD_MASK, TAG_BOOL, TAG_CONST, TAG_HEAP, TAG_INT, TAG_MASK, TAG_NULL,
-    TAG_UNINIT, box_bool, box_f64, box_i32, box_int_checked, is_f64, is_int, unbox_f64, unbox_int,
+    FastFunction, Op, TAG_BOOL, TAG_CONST, TAG_FLOAT, TAG_HEAP, TAG_INT, TAG_NULL, TAG_UNINIT,
 };
 
 const NUM_ADD: u8 = 0;
@@ -30,37 +33,32 @@ const NUM_MUL: u8 = 2;
 const NUM_DIV: u8 = 3;
 
 #[inline(always)]
-fn scalar_truthy(w: u64) -> Option<bool> {
-    if is_f64(w) {
-        return Some(unbox_f64(w) != 0.0);
-    }
-    match w & TAG_MASK {
+fn scalar_truthy(tag: u8, bit: u64) -> Option<bool> {
+    match tag {
         TAG_NULL => Some(false),
-        TAG_BOOL => Some((w & 1) != 0),
-        TAG_INT => Some((w & PAYLOAD_MASK) != 0),
+        TAG_BOOL | TAG_INT => Some(bit != 0),
+        TAG_FLOAT => Some(f64::from_bits(bit) != 0.0),
         _ => None,
     }
 }
 
 #[inline(always)]
-fn word_type_mask(w: u64, heap: &[Option<Value>], consts: &[Value]) -> Option<TypeMask> {
-    if is_f64(w) {
-        return Some(TypeMask::FLOAT);
-    }
-    match w & TAG_MASK {
+fn tag_type_mask(tag: u8, bit: u64, heap: &[Option<Value>], consts: &[Value]) -> Option<TypeMask> {
+    match tag {
         TAG_NULL => Some(TypeMask::NULL),
-        TAG_BOOL => Some(if (w & 1) != 0 {
+        TAG_BOOL => Some(if bit != 0 {
             TypeMask::TRUE
         } else {
             TypeMask::FALSE
         }),
         TAG_INT => Some(TypeMask::INT),
+        TAG_FLOAT => Some(TypeMask::FLOAT),
         TAG_CONST => {
-            let val = consts.get(w as u32 as usize)?;
+            let val = consts.get(bit as usize)?;
             Some(crate::types::own_type(val))
         }
         TAG_HEAP => {
-            let val = heap.get(w as u32 as usize)?.as_ref()?;
+            let val = heap.get(bit as usize)?.as_ref()?;
             if val.is_reference() {
                 None
             } else {
@@ -72,98 +70,106 @@ fn word_type_mask(w: u64, heap: &[Option<Value>], consts: &[Value]) -> Option<Ty
 }
 
 #[inline(always)]
-fn return_mask_fits(mask: TypeMask, w: u64, heap: &[Option<Value>], consts: &[Value]) -> bool {
-    if w == TAG_NULL && mask.intersects(TypeMask::VOID) {
+fn return_mask_fits(
+    mask: TypeMask,
+    tag: u8,
+    bit: u64,
+    heap: &[Option<Value>],
+    consts: &[Value],
+) -> bool {
+    if tag == TAG_NULL && mask.intersects(TypeMask::VOID) {
         return true;
     }
-    word_type_mask(w, heap, consts).is_some_and(|own| mask.intersects(own))
+    tag_type_mask(tag, bit, heap, consts).is_some_and(|own| mask.intersects(own))
 }
 
 #[inline(always)]
-fn compare_words(cmp: u8, a: u64, b: u64) -> Option<bool> {
-    if is_int(a) && is_int(b) {
-        let x = unbox_int(a);
-        let y = unbox_int(b);
+fn compare_nums(cmp: u8, lt: u8, lb: u64, rt: u8, rb: u64) -> Option<bool> {
+    if lt == TAG_INT && rt == TAG_INT {
+        let a = lb as i64;
+        let b = rb as i64;
         return Some(match cmp {
-            CMP_EQ | CMP_IDENT => x == y,
-            CMP_NE | CMP_NOT_IDENT => x != y,
-            CMP_LT => x < y,
-            CMP_LE => x <= y,
-            CMP_GT => x > y,
-            CMP_GE => x >= y,
+            CMP_EQ | CMP_IDENT => a == b,
+            CMP_NE | CMP_NOT_IDENT => a != b,
+            CMP_LT => a < b,
+            CMP_LE => a <= b,
+            CMP_GT => a > b,
+            CMP_GE => a >= b,
             _ => return None,
         });
     }
-    if is_f64(a) && is_f64(b) {
-        let x = unbox_f64(a);
-        let y = unbox_f64(b);
+    if lt == TAG_FLOAT && rt == TAG_FLOAT {
+        let a = f64::from_bits(lb);
+        let b = f64::from_bits(rb);
         return Some(match cmp {
-            CMP_EQ | CMP_IDENT => x == y,
-            CMP_NE | CMP_NOT_IDENT => x != y,
-            CMP_LT => x < y,
-            CMP_LE => x <= y,
-            CMP_GT => x > y,
-            CMP_GE => x >= y,
+            CMP_EQ | CMP_IDENT => a == b,
+            CMP_NE | CMP_NOT_IDENT => a != b,
+            CMP_LT => a < b,
+            CMP_LE => a <= b,
+            CMP_GT => a > b,
+            CMP_GE => a >= b,
             _ => return None,
         });
     }
-    compare_words_slow(cmp, a, b)
+    compare_nums_slow(cmp, lt, lb, rt, rb)
 }
 
 #[inline(never)]
-fn compare_words_slow(cmp: u8, a: u64, b: u64) -> Option<bool> {
-    let a_num = is_f64(a) || is_int(a);
-    let b_num = is_f64(b) || is_int(b);
-    if a_num && b_num {
+fn compare_nums_slow(cmp: u8, lt: u8, lb: u64, rt: u8, rb: u64) -> Option<bool> {
+    if (lt == TAG_INT || lt == TAG_FLOAT) && (rt == TAG_INT || rt == TAG_FLOAT) {
         if cmp == CMP_IDENT {
             return Some(false);
         }
         if cmp == CMP_NOT_IDENT {
             return Some(true);
         }
-        let x = if is_f64(a) {
-            unbox_f64(a)
+        let a = if lt == TAG_FLOAT {
+            f64::from_bits(lb)
         } else {
-            unbox_int(a) as f64
+            (lb as i64) as f64
         };
-        let y = if is_f64(b) {
-            unbox_f64(b)
+        let b = if rt == TAG_FLOAT {
+            f64::from_bits(rb)
         } else {
-            unbox_int(b) as f64
+            (rb as i64) as f64
         };
         return Some(match cmp {
-            CMP_EQ => x == y,
-            CMP_NE => x != y,
-            CMP_LT => x < y,
-            CMP_LE => x <= y,
-            CMP_GT => x > y,
-            CMP_GE => x >= y,
+            CMP_EQ => a == b,
+            CMP_NE => a != b,
+            CMP_LT => a < b,
+            CMP_LE => a <= b,
+            CMP_GT => a > b,
+            CMP_GE => a >= b,
             _ => return None,
         });
     }
-    if (cmp == CMP_IDENT || cmp == CMP_NOT_IDENT) && a < TAG_CONST && b < TAG_CONST {
-        let eq = if is_f64(a) || is_f64(b) {
-            is_f64(a) && is_f64(b) && unbox_f64(a) == unbox_f64(b)
-        } else {
-            a == b
-        };
+    if (cmp == CMP_IDENT || cmp == CMP_NOT_IDENT)
+        && lt != TAG_UNINIT
+        && rt != TAG_UNINIT
+        && lt < TAG_CONST
+        && rt < TAG_CONST
+    {
+        let eq = lt == rt
+            && match lt {
+                TAG_NULL => true,
+                TAG_BOOL | TAG_INT => lb == rb,
+                TAG_FLOAT => f64::from_bits(lb) == f64::from_bits(rb),
+                _ => false,
+            };
         return Some(if cmp == CMP_IDENT { eq } else { !eq });
     }
     None
 }
 
-/// Cold out-of-line release when overwriting a register that currently holds
-/// `TAG_HEAP`. Refuses to overwrite a PHP reference in a named local.
 #[cold]
 #[inline(never)]
 fn release_dst_slot(
-    old: u64,
+    idx: u32,
     dst: usize,
     local_count: u8,
     heap: &mut [Option<Value>],
     free_heap: &mut Vec<u32>,
 ) -> bool {
-    let idx = old as u32;
     if dst < local_count as usize
         && heap
             .get(idx as usize)
@@ -179,31 +185,31 @@ fn release_dst_slot(
     true
 }
 
-/// Write a scalar or `TAG_CONST` word into `r[dst]`, releasing any old heap
-/// slot out-of-line (and bailing if `dst` holds a PHP reference).
 #[inline(always)]
-fn write_word(
-    r: &mut [u64; 256],
+#[allow(clippy::too_many_arguments)]
+fn write_scalar(
+    t: &mut [u8; 256],
+    v: &mut [u64; 256],
     dst: usize,
-    word: u64,
+    tag: u8,
+    bit: u64,
     local_count: u8,
     heap: &mut [Option<Value>],
     free_heap: &mut Vec<u32>,
 ) -> bool {
-    let old = r[dst];
-    if old >= TAG_HEAP && !release_dst_slot(old, dst, local_count, heap, free_heap) {
+    if t[dst] == TAG_HEAP && !release_dst_slot(v[dst] as u32, dst, local_count, heap, free_heap) {
         return false;
     }
-    r[dst] = word;
+    t[dst] = tag;
+    v[dst] = bit;
     true
 }
 
-/// Write a heap `Value` into `r[dst]`, refusing to overwrite a PHP reference
-/// in a named local.
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
-fn write_heap_value(
-    r: &mut [u64; 256],
+fn write_heap(
+    t: &mut [u8; 256],
+    v: &mut [u64; 256],
     dst: usize,
     value: Value,
     local_count: u8,
@@ -211,9 +217,8 @@ fn write_heap_value(
     heap: &mut Vec<Option<Value>>,
     free_heap: &mut Vec<u32>,
 ) -> bool {
-    let old = r[dst];
-    if old >= TAG_HEAP {
-        let idx = old as u32 as usize;
+    if t[dst] == TAG_HEAP {
+        let idx = v[dst] as usize;
         if dst < local_count as usize
             && heap
                 .get(idx)
@@ -236,24 +241,22 @@ fn write_heap_value(
         heap.push(Some(value));
         slot
     };
-    r[dst] = TAG_HEAP | u64::from(idx);
+    t[dst] = TAG_HEAP;
+    v[dst] = u64::from(idx);
     *has_heap = true;
     true
 }
 
-/// Construct an owned `Value` from a NaN-boxed word without mutating `src`.
 #[inline(always)]
-fn read_owned_value(w: u64, heap: &[Option<Value>], consts: &[Value]) -> Option<Value> {
-    if is_f64(w) {
-        return Some(Value::Float(unbox_f64(w)));
-    }
-    match w & TAG_MASK {
-        TAG_INT => Some(Value::Int(unbox_int(w))),
-        TAG_BOOL => Some(Value::Bool((w & 1) != 0)),
+fn read_owned_value(tag: u8, bit: u64, heap: &[Option<Value>], consts: &[Value]) -> Option<Value> {
+    match tag {
+        TAG_INT => Some(Value::Int(bit as i64)),
+        TAG_FLOAT => Some(Value::Float(f64::from_bits(bit))),
+        TAG_BOOL => Some(Value::Bool(bit != 0)),
         TAG_NULL => Some(Value::Null),
-        TAG_CONST => consts.get(w as u32 as usize).cloned(),
+        TAG_CONST => consts.get(bit as usize).cloned(),
         TAG_HEAP => {
-            let val = heap.get(w as u32 as usize)?.as_ref()?;
+            let val = heap.get(bit as usize)?.as_ref()?;
             if val.is_reference() {
                 None
             } else {
@@ -264,89 +267,91 @@ fn read_owned_value(w: u64, heap: &[Option<Value>], consts: &[Value]) -> Option<
     }
 }
 
-/// Out-of-line slow path for mixed int/float arithmetic, division, and overflow.
 #[inline(never)]
-fn num_binary_slow(kind: u8, a: u64, b: u64) -> Option<u64> {
-    if is_int(a) && is_int(b) {
-        let x = unbox_int(a);
-        let y = unbox_int(b);
+fn num_binary_slow(kind: u8, lt: u8, lb: u64, rt: u8, rb: u64) -> Option<(u8, u64)> {
+    if lt == TAG_INT && rt == TAG_INT {
+        let a = lb as i64;
+        let b = rb as i64;
         return match kind {
-            NUM_ADD => match x.checked_add(y) {
-                Some(s) => box_int_checked(s),
-                None => Some(box_f64((x as f64) + (y as f64))),
-            },
-            NUM_SUB => match x.checked_sub(y) {
-                Some(s) => box_int_checked(s),
-                None => Some(box_f64((x as f64) - (y as f64))),
-            },
-            NUM_MUL => match x.checked_mul(y) {
-                Some(p) => box_int_checked(p),
-                None => Some(box_f64((x as f64) * (y as f64))),
-            },
+            NUM_ADD => Some(match a.checked_add(b) {
+                Some(s) => (TAG_INT, s as u64),
+                None => (TAG_FLOAT, ((a as f64) + (b as f64)).to_bits()),
+            }),
+            NUM_SUB => Some(match a.checked_sub(b) {
+                Some(s) => (TAG_INT, s as u64),
+                None => (TAG_FLOAT, ((a as f64) - (b as f64)).to_bits()),
+            }),
+            NUM_MUL => Some(match a.checked_mul(b) {
+                Some(p) => (TAG_INT, p as u64),
+                None => (TAG_FLOAT, ((a as f64) * (b as f64)).to_bits()),
+            }),
             NUM_DIV => {
-                if y == 0 {
+                if b == 0 {
                     return None;
                 }
-                if x % y == 0 {
-                    box_int_checked(x / y)
+                if a == i64::MIN && b == -1 {
+                    Some((TAG_FLOAT, (-(i64::MIN as f64)).to_bits()))
+                } else if a % b == 0 {
+                    Some((TAG_INT, (a / b) as u64))
                 } else {
-                    Some(box_f64((x as f64) / (y as f64)))
+                    Some((TAG_FLOAT, ((a as f64) / (b as f64)).to_bits()))
                 }
             }
             _ => None,
         };
     }
-    let a_num = is_f64(a) || is_int(a);
-    let b_num = is_f64(b) || is_int(b);
-    if !a_num || !b_num {
+    if (lt != TAG_INT && lt != TAG_FLOAT) || (rt != TAG_INT && rt != TAG_FLOAT) {
         return None;
     }
-    let x = if is_f64(a) {
-        unbox_f64(a)
+    let a = if lt == TAG_FLOAT {
+        f64::from_bits(lb)
     } else {
-        unbox_int(a) as f64
+        (lb as i64) as f64
     };
-    let y = if is_f64(b) {
-        unbox_f64(b)
+    let b = if rt == TAG_FLOAT {
+        f64::from_bits(rb)
     } else {
-        unbox_int(b) as f64
+        (rb as i64) as f64
     };
     let res = match kind {
-        NUM_ADD => x + y,
-        NUM_SUB => x - y,
-        NUM_MUL => x * y,
+        NUM_ADD => a + b,
+        NUM_SUB => a - b,
+        NUM_MUL => a * b,
         NUM_DIV => {
-            if y == 0.0 {
+            if b == 0.0 {
                 return None;
             }
-            x / y
+            a / b
         }
         _ => return None,
     };
-    Some(box_f64(res))
+    Some((TAG_FLOAT, res.to_bits()))
 }
 
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
 fn move_heap_slow(
-    r: &mut [u64; 256],
+    t: &mut [u8; 256],
+    v: &mut [u64; 256],
     dst: usize,
-    src_w: u64,
+    src_idx: u64,
     local_count: u8,
     has_heap: &mut bool,
     heap: &mut Vec<Option<Value>>,
     free_heap: &mut Vec<u32>,
     consts: &[Value],
 ) -> bool {
-    let Some(val) = read_owned_value(src_w, heap, consts) else {
+    let Some(val) = read_owned_value(TAG_HEAP, src_idx, heap, consts) else {
         return false;
     };
-    write_heap_value(r, dst, val, local_count, has_heap, heap, free_heap)
+    write_heap(t, v, dst, val, local_count, has_heap, heap, free_heap)
 }
 
 #[inline(never)]
+#[allow(clippy::too_many_arguments)]
 fn assign_take_heap_slow(
-    r: &mut [u64; 256],
+    t: &mut [u8; 256],
+    v: &mut [u64; 256],
     dst: usize,
     src: usize,
     local_count: u8,
@@ -354,41 +359,43 @@ fn assign_take_heap_slow(
     heap: &mut [Option<Value>],
     free_heap: &mut Vec<u32>,
 ) -> bool {
-    let src_w = r[src];
+    let src_idx = v[src] as usize;
     if heap
-        .get(src_w as u32 as usize)
+        .get(src_idx)
         .and_then(Option::as_ref)
         .is_none_or(Value::is_reference)
     {
         return false;
     }
-    let old_dst = r[dst];
-    if old_dst >= TAG_HEAP
+    if t[dst] == TAG_HEAP
         && dst < local_count as usize
         && heap
-            .get(old_dst as u32 as usize)
+            .get(v[dst] as usize)
             .and_then(Option::as_ref)
             .is_some_and(Value::is_reference)
     {
         return false;
     }
     if dst != src {
-        if old_dst >= TAG_HEAP
-            && let Some(slot) = heap.get_mut(old_dst as u32 as usize)
+        if t[dst] == TAG_HEAP
+            && let Some(slot) = heap.get_mut(v[dst] as usize)
         {
             *slot = None;
-            free_heap.push(old_dst as u32);
+            free_heap.push(v[dst] as u32);
         }
-        r[dst] = src_w;
-        r[src] = TAG_UNINIT;
+        t[dst] = TAG_HEAP;
+        v[dst] = v[src];
+        t[src] = TAG_UNINIT;
         *has_heap = true;
     }
     true
 }
 
 #[inline(never)]
+#[allow(clippy::too_many_arguments)]
 fn str_append_helper(
-    r: &mut [u64; 256],
+    t: &mut [u8; 256],
+    v: &mut [u64; 256],
     loc: usize,
     src: usize,
     has_heap: &mut bool,
@@ -396,41 +403,40 @@ fn str_append_helper(
     free_heap: &mut Vec<u32>,
     consts: &[Value],
 ) -> bool {
-    let lw = r[loc];
-    let rw = r[src];
+    let lt = t[loc];
+    let rt = t[src];
     let mut stack_buf = [0u8; 32];
-    let rhs_bytes: &[u8] = if (rw & TAG_MASK) == TAG_CONST {
-        match consts.get(rw as u32 as usize) {
+    let rhs_bytes: &[u8] = if rt == TAG_CONST {
+        match consts.get(v[src] as usize) {
             Some(Value::InternedStr(s)) => s.as_bytes(),
             Some(Value::String(s)) => s.as_bytes(),
             _ => return false,
         }
-    } else if rw >= TAG_HEAP {
-        // Clone bytes only if `loc` and `src` could alias; `lower.rs` already
-        // guards `loc != src`, and borrow checker wants split borrow on `heap`.
-        let r_idx = rw as u32 as usize;
-        if lw >= TAG_HEAP && (lw as u32 as usize) == r_idx {
+    } else if rt == TAG_HEAP {
+        let r_idx = v[src] as usize;
+        if lt == TAG_HEAP && (v[loc] as usize) == r_idx {
             return false;
         }
         match heap.get(r_idx) {
             Some(Some(Value::InternedStr(s))) => s.as_bytes(),
             Some(Some(Value::String(s))) => {
-                // Copy into a temporary Vec only if we're mutating `heap`.
                 let bytes = s.as_bytes().to_vec();
-                return str_append_owned_bytes(r, loc, &bytes, has_heap, heap, free_heap, consts);
+                return str_append_owned_bytes(
+                    t, v, loc, &bytes, has_heap, heap, free_heap, consts,
+                );
             }
             _ => return false,
         }
-    } else if is_int(rw) {
-        let mut n = unbox_int(rw);
+    } else if rt == TAG_INT {
+        let n = v[src] as i64;
         let neg = n < 0;
-        let mut v = n.unsigned_abs();
+        let mut mag = n.unsigned_abs();
         let mut pos = stack_buf.len();
         loop {
             pos -= 1;
-            stack_buf[pos] = b'0' + (v % 10) as u8;
-            v /= 10;
-            if v == 0 {
+            stack_buf[pos] = b'0' + (mag % 10) as u8;
+            mag /= 10;
+            if mag == 0 {
                 break;
             }
         }
@@ -438,16 +444,17 @@ fn str_append_helper(
             pos -= 1;
             stack_buf[pos] = b'-';
         }
-        let _ = &mut n;
         &stack_buf[pos..]
     } else {
         return false;
     };
-    str_append_owned_bytes(r, loc, rhs_bytes, has_heap, heap, free_heap, consts)
+    str_append_owned_bytes(t, v, loc, rhs_bytes, has_heap, heap, free_heap, consts)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn str_append_owned_bytes(
-    r: &mut [u64; 256],
+    t: &mut [u8; 256],
+    v: &mut [u64; 256],
     loc: usize,
     rhs_bytes: &[u8],
     has_heap: &mut bool,
@@ -455,9 +462,9 @@ fn str_append_owned_bytes(
     free_heap: &mut Vec<u32>,
     consts: &[Value],
 ) -> bool {
-    let lw = r[loc];
-    if lw >= TAG_HEAP {
-        let idx = lw as u32 as usize;
+    let lt = t[loc];
+    if lt == TAG_HEAP {
+        let idx = v[loc] as usize;
         match heap.get_mut(idx) {
             Some(Some(Value::String(s))) => {
                 s.push_bytes(rhs_bytes);
@@ -475,8 +482,8 @@ fn str_append_owned_bytes(
             }
             _ => false,
         }
-    } else if (lw & TAG_MASK) == TAG_CONST {
-        let lhs_bytes = match consts.get(lw as u32 as usize) {
+    } else if lt == TAG_CONST {
+        let lhs_bytes = match consts.get(v[loc] as usize) {
             Some(Value::InternedStr(s)) => s.as_bytes(),
             Some(Value::String(s)) => s.as_bytes(),
             _ => return false,
@@ -492,7 +499,8 @@ fn str_append_owned_bytes(
             heap.push(Some(Value::String(PhpString::from(buf))));
             slot
         };
-        r[loc] = TAG_HEAP | u64::from(idx);
+        t[loc] = TAG_HEAP;
+        v[loc] = u64::from(idx);
         *has_heap = true;
         true
     } else {
@@ -502,41 +510,9 @@ fn str_append_owned_bytes(
 
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
-fn str_len_helper(
-    r: &mut [u64; 256],
-    dst: usize,
-    src: usize,
-    local_count: u8,
-    heap: &mut [Option<Value>],
-    free_heap: &mut Vec<u32>,
-    consts: &[Value],
-) -> bool {
-    let sw = r[src];
-    let len = if (sw & TAG_MASK) == TAG_CONST {
-        match consts.get(sw as u32 as usize) {
-            Some(Value::InternedStr(s)) => s.len(),
-            Some(Value::String(s)) => s.len(),
-            _ => return false,
-        }
-    } else if sw >= TAG_HEAP {
-        match heap.get(sw as u32 as usize) {
-            Some(Some(Value::String(s))) => s.len(),
-            Some(Some(Value::InternedStr(s))) => s.len(),
-            _ => return false,
-        }
-    } else {
-        return false;
-    };
-    let Some(w) = box_int_checked(len as i64) else {
-        return false;
-    };
-    write_word(r, dst, w, local_count, heap, free_heap)
-}
-
-#[inline(never)]
-#[allow(clippy::too_many_arguments)]
 fn new_array_helper(
-    r: &mut [u64; 256],
+    t: &mut [u8; 256],
+    v: &mut [u64; 256],
     dst: usize,
     cap: i32,
     local_count: u8,
@@ -549,8 +525,9 @@ fn new_array_helper(
     } else {
         PhpArray::new()
     };
-    write_heap_value(
-        r,
+    write_heap(
+        t,
+        v,
         dst,
         Value::Array(Rc::new(array)),
         local_count,
@@ -560,10 +537,24 @@ fn new_array_helper(
     )
 }
 
+/// Helper to read a `PhpArray` int slot using direct `list_slots()` fast path.
+#[inline(always)]
+fn array_get_int_fast(arr: &PhpArray, key: i64) -> Option<&Value> {
+    if let Some((start, slots)) = arr.list_slots() {
+        let off = key.wrapping_sub(start);
+        if off >= 0 && (off as usize) < slots.len() {
+            return slots[off as usize].as_ref();
+        }
+        return None;
+    }
+    arr.get_int(key)
+}
+
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
 fn arr_get_int_helper(
-    r: &mut [u64; 256],
+    t: &mut [u8; 256],
+    v: &mut [u64; 256],
     dst: usize,
     arr_r: usize,
     idx_r: usize,
@@ -574,28 +565,24 @@ fn arr_get_int_helper(
     free_heap: &mut Vec<u32>,
     consts: &[Value],
 ) -> bool {
-    let idx_w = r[idx_r];
-    if !is_int(idx_w) {
+    if t[idx_r] != TAG_INT {
         return false;
     }
-    let key = unbox_int(idx_w);
-    let base_w = r[arr_r];
+    let key = v[idx_r] as i64;
+    let bt = t[arr_r];
 
     enum Found {
-        Word(u64),
+        Scalar(u8, u64),
         Heap(Value),
         Bail,
     }
 
-    let resolve_val = |v: &Value| -> Found {
-        match v {
-            Value::Int(i) => match box_int_checked(*i) {
-                Some(w) => Found::Word(w),
-                None => Found::Heap(Value::Int(*i)),
-            },
-            Value::Float(f) => Found::Word(box_f64(*f)),
-            Value::Bool(b) => Found::Word(box_bool(*b)),
-            Value::Null => Found::Word(TAG_NULL),
+    let resolve_val = |val: &Value| -> Found {
+        match val {
+            Value::Int(i) => Found::Scalar(TAG_INT, *i as u64),
+            Value::Float(f) => Found::Scalar(TAG_FLOAT, f.to_bits()),
+            Value::Bool(b) => Found::Scalar(TAG_BOOL, u64::from(*b)),
+            Value::Null => Found::Scalar(TAG_NULL, 0),
             other if !other.is_reference() => Found::Heap(other.clone()),
             _ => Found::Bail,
         }
@@ -609,11 +596,11 @@ fn arr_get_int_helper(
         }
     };
 
-    let found = if base_w >= TAG_HEAP {
-        match heap.get(base_w as u32 as usize) {
-            Some(Some(Value::Array(rc))) => match rc.get_int(key) {
-                Some(v) => resolve_val(v),
-                None if quiet => Found::Word(TAG_NULL),
+    let found = if bt == TAG_HEAP {
+        match heap.get(v[arr_r] as usize) {
+            Some(Some(Value::Array(rc))) => match array_get_int_fast(rc, key) {
+                Some(val) => resolve_val(val),
+                None if quiet => Found::Scalar(TAG_NULL, 0),
                 None => Found::Bail,
             },
             Some(Some(Value::InternedStr(s))) => resolve_bytes(s.as_bytes()),
@@ -621,9 +608,9 @@ fn arr_get_int_helper(
             Some(Some(Value::Reference(cell))) => {
                 if let Ok(guard) = cell.try_borrow() {
                     match &*guard {
-                        Value::Array(rc) => match rc.get_int(key) {
-                            Some(v) => resolve_val(v),
-                            None if quiet => Found::Word(TAG_NULL),
+                        Value::Array(rc) => match array_get_int_fast(rc, key) {
+                            Some(val) => resolve_val(val),
+                            None if quiet => Found::Scalar(TAG_NULL, 0),
                             None => Found::Bail,
                         },
                         _ => Found::Bail,
@@ -634,13 +621,13 @@ fn arr_get_int_helper(
             }
             _ => Found::Bail,
         }
-    } else if (base_w & TAG_MASK) == TAG_CONST {
-        match consts.get(base_w as u32 as usize) {
+    } else if bt == TAG_CONST {
+        match consts.get(v[arr_r] as usize) {
             Some(Value::InternedStr(s)) => resolve_bytes(s.as_bytes()),
             Some(Value::String(s)) => resolve_bytes(s.as_bytes()),
-            Some(Value::Array(rc)) => match rc.get_int(key) {
-                Some(v) => resolve_val(v),
-                None if quiet => Found::Word(TAG_NULL),
+            Some(Value::Array(rc)) => match array_get_int_fast(rc, key) {
+                Some(val) => resolve_val(val),
+                None if quiet => Found::Scalar(TAG_NULL, 0),
                 None => Found::Bail,
             },
             _ => Found::Bail,
@@ -650,8 +637,8 @@ fn arr_get_int_helper(
     };
 
     match found {
-        Found::Word(w) => write_word(r, dst, w, local_count, heap, free_heap),
-        Found::Heap(val) => write_heap_value(r, dst, val, local_count, has_heap, heap, free_heap),
+        Found::Scalar(tag, bit) => write_scalar(t, v, dst, tag, bit, local_count, heap, free_heap),
+        Found::Heap(val) => write_heap(t, v, dst, val, local_count, has_heap, heap, free_heap),
         Found::Bail => false,
     }
 }
@@ -659,7 +646,8 @@ fn arr_get_int_helper(
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
 fn arr_2d_get_int_helper(
-    r: &mut [u64; 256],
+    t: &mut [u8; 256],
+    v: &mut [u64; 256],
     dst: usize,
     arr_r: usize,
     idx1_r: usize,
@@ -670,72 +658,83 @@ fn arr_2d_get_int_helper(
     heap: &mut Vec<Option<Value>>,
     free_heap: &mut Vec<u32>,
 ) -> bool {
-    let base_w = r[arr_r];
-    let i1_w = r[idx1_r];
-    let i2_w = r[idx2_r];
-    if base_w < TAG_HEAP || !is_int(i1_w) || !is_int(i2_w) {
+    if t[arr_r] != TAG_HEAP || t[idx1_r] != TAG_INT || t[idx2_r] != TAG_INT {
         return false;
     }
-    let k1 = unbox_int(i1_w);
-    let k2 = unbox_int(i2_w);
+    let k1 = v[idx1_r] as i64;
+    let k2 = v[idx2_r] as i64;
 
     enum Found2 {
-        Word(u64),
+        Scalar(u8, u64),
         Heap(Value),
         Bail,
     }
 
-    let found = match heap.get(base_w as u32 as usize) {
-        Some(Some(Value::Array(rc1))) => match rc1.get_int(k1) {
-            Some(Value::Array(rc2)) => match rc2.get_int(k2) {
-                Some(Value::Int(i)) => match box_int_checked(*i) {
-                    Some(w) => Found2::Word(w),
-                    None => Found2::Heap(Value::Int(*i)),
-                },
-                Some(Value::Float(f)) => Found2::Word(box_f64(*f)),
-                Some(Value::Bool(b)) => Found2::Word(box_bool(*b)),
-                Some(Value::Null) => Found2::Word(TAG_NULL),
+    let found = match heap.get(v[arr_r] as usize) {
+        Some(Some(Value::Array(rc1))) => match array_get_int_fast(rc1, k1) {
+            Some(Value::Array(rc2)) => match array_get_int_fast(rc2, k2) {
+                Some(Value::Int(i)) => Found2::Scalar(TAG_INT, *i as u64),
+                Some(Value::Float(f)) => Found2::Scalar(TAG_FLOAT, f.to_bits()),
+                Some(Value::Bool(b)) => Found2::Scalar(TAG_BOOL, u64::from(*b)),
+                Some(Value::Null) => Found2::Scalar(TAG_NULL, 0),
                 Some(other) if !other.is_reference() => Found2::Heap(other.clone()),
-                None if quiet => Found2::Word(TAG_NULL),
+                None if quiet => Found2::Scalar(TAG_NULL, 0),
                 _ => Found2::Bail,
             },
-            None if quiet => Found2::Word(TAG_NULL),
+            None if quiet => Found2::Scalar(TAG_NULL, 0),
             _ => Found2::Bail,
         },
         _ => Found2::Bail,
     };
 
     match found {
-        Found2::Word(w) => write_word(r, dst, w, local_count, heap, free_heap),
-        Found2::Heap(val) => write_heap_value(r, dst, val, local_count, has_heap, heap, free_heap),
+        Found2::Scalar(tag, bit) => write_scalar(t, v, dst, tag, bit, local_count, heap, free_heap),
+        Found2::Heap(val) => write_heap(t, v, dst, val, local_count, has_heap, heap, free_heap),
         Found2::Bail => false,
     }
 }
 
 #[inline(never)]
+#[allow(clippy::too_many_arguments)]
 fn arr_set_int_helper(
-    r: &[u64; 256],
+    t: &[u8; 256],
+    v: &[u64; 256],
     arr_r: usize,
     idx_r: usize,
     src_r: usize,
     heap: &mut [Option<Value>],
     consts: &[Value],
 ) -> bool {
-    let base_w = r[arr_r];
-    let idx_w = r[idx_r];
-    if base_w < TAG_HEAP || !is_int(idx_w) {
+    if t[arr_r] != TAG_HEAP || t[idx_r] != TAG_INT {
         return false;
     }
-    let key = unbox_int(idx_w);
-    let Some(val) = read_owned_value(r[src_r], heap, consts) else {
+    let key = v[idx_r] as i64;
+    let Some(val) = read_owned_value(t[src_r], v[src_r], heap, consts) else {
         return false;
     };
-    match heap.get_mut(base_w as u32 as usize) {
-        Some(Some(Value::Array(rc))) => Rc::make_mut(rc).insert_int_if_not_ref(key, val).is_ok(),
+    let set_in = |rc: &mut Rc<PhpArray>, val: Value| -> bool {
+        let arr = Rc::make_mut(rc);
+        if let Some((start, slots)) = arr.list_slots_mut() {
+            let off = key.wrapping_sub(start);
+            if off >= 0
+                && (off as usize) < slots.len()
+                && let Some(existing) = &mut slots[off as usize]
+            {
+                if !existing.is_reference() {
+                    *existing = val;
+                    return true;
+                }
+                return false;
+            }
+        }
+        arr.insert_int_if_not_ref(key, val).is_ok()
+    };
+    match heap.get_mut(v[arr_r] as usize) {
+        Some(Some(Value::Array(rc))) => set_in(rc, val),
         Some(Some(Value::Reference(cell))) => {
             if let Ok(mut guard) = cell.try_borrow_mut() {
                 match &mut *guard {
-                    Value::Array(rc) => Rc::make_mut(rc).insert_int_if_not_ref(key, val).is_ok(),
+                    Value::Array(rc) => set_in(rc, val),
                     _ => false,
                 }
             } else {
@@ -748,97 +747,92 @@ fn arr_set_int_helper(
 
 #[inline(never)]
 fn arr_add_assign_int_helper(
-    r: &[u64; 256],
+    t: &[u8; 256],
+    v: &[u64; 256],
     arr_r: usize,
     idx_r: usize,
     src_r: usize,
     heap: &mut [Option<Value>],
 ) -> bool {
-    let base_w = r[arr_r];
-    let idx_w = r[idx_r];
-    let rhs_w = r[src_r];
-    if base_w < TAG_HEAP || !is_int(idx_w) {
+    if t[arr_r] != TAG_HEAP || t[idx_r] != TAG_INT {
         return false;
     }
-    let rhs_is_int = is_int(rhs_w);
-    let rhs_is_f64 = is_f64(rhs_w);
-    if !rhs_is_int && !rhs_is_f64 {
+    let st = t[src_r];
+    if st != TAG_INT && st != TAG_FLOAT {
         return false;
     }
-    let key = unbox_int(idx_w);
-    let Some(Some(Value::Array(rc))) = heap.get_mut(base_w as u32 as usize) else {
+    let key = v[idx_r] as i64;
+    let rhs_bit = v[src_r];
+    let Some(Some(Value::Array(rc))) = heap.get_mut(v[arr_r] as usize) else {
         return false;
     };
     let target = Rc::make_mut(rc);
     let Some(slot) = target.get_mut_int(key) else {
         return false;
     };
-    match (slot, rhs_is_int) {
-        (slot @ Value::Int(_), true) => {
+    match (slot, st) {
+        (slot @ Value::Int(_), TAG_INT) => {
             let Value::Int(lhs) = *slot else {
                 unreachable!()
             };
-            let rhs = unbox_int(rhs_w);
+            let rhs = rhs_bit as i64;
             match lhs.checked_add(rhs) {
                 Some(sum) => *slot = Value::Int(sum),
                 None => *slot = Value::Float((lhs as f64) + (rhs as f64)),
             }
             true
         }
-        (slot @ Value::Float(_), false) => {
+        (slot @ Value::Float(_), TAG_FLOAT) => {
             let Value::Float(lhs) = *slot else {
                 unreachable!()
             };
-            *slot = Value::Float(lhs + unbox_f64(rhs_w));
+            *slot = Value::Float(lhs + f64::from_bits(rhs_bit));
             true
         }
-        (slot @ Value::Float(_), true) => {
+        (slot @ Value::Float(_), TAG_INT) => {
             let Value::Float(lhs) = *slot else {
                 unreachable!()
             };
-            *slot = Value::Float(lhs + (unbox_int(rhs_w) as f64));
+            *slot = Value::Float(lhs + (rhs_bit as i64) as f64);
             true
         }
-        (slot @ Value::Int(_), false) => {
+        (slot @ Value::Int(_), TAG_FLOAT) => {
             let Value::Int(lhs) = *slot else {
                 unreachable!()
             };
-            *slot = Value::Float((lhs as f64) + unbox_f64(rhs_w));
+            *slot = Value::Float((lhs as f64) + f64::from_bits(rhs_bit));
             true
         }
         _ => false,
     }
 }
 
-/// Fused `$dst_arr[$idx] += $src_arr[$idx]` (single op for `ary3`!).
 #[inline(never)]
 fn arr_add_from_arr_helper(
-    r: &[u64; 256],
+    t: &[u8; 256],
+    v: &[u64; 256],
     dst_arr_r: usize,
     src_arr_r: usize,
     idx_r: usize,
     heap: &mut [Option<Value>],
 ) -> bool {
-    let dst_w = r[dst_arr_r];
-    let src_w = r[src_arr_r];
-    let idx_w = r[idx_r];
-    if dst_w < TAG_HEAP || src_w < TAG_HEAP || !is_int(idx_w) {
+    if t[dst_arr_r] != TAG_HEAP || t[src_arr_r] != TAG_HEAP || t[idx_r] != TAG_INT {
         return false;
     }
-    let key = unbox_int(idx_w);
+    let key = v[idx_r] as i64;
     enum RhsNum {
         Int(i64),
         Float(f64),
     }
-    let rhs = match heap.get(src_w as u32 as usize) {
-        Some(Some(Value::Array(rc))) => match rc.get_int(key) {
+    let rhs = match heap.get(v[src_arr_r] as usize) {
+        Some(Some(Value::Array(rc))) => match array_get_int_fast(rc, key) {
             Some(Value::Int(i)) => RhsNum::Int(*i),
             Some(Value::Float(f)) => RhsNum::Float(*f),
             _ => return false,
         },
         _ => return false,
     };
-    let Some(Some(Value::Array(rc))) = heap.get_mut(dst_w as u32 as usize) else {
+    let Some(Some(Value::Array(rc))) = heap.get_mut(v[dst_arr_r] as usize) else {
         return false;
     };
     let target = Rc::make_mut(rc);
@@ -881,22 +875,188 @@ fn arr_add_from_arr_helper(
     }
 }
 
+enum ArrayLoopExit {
+    Done(usize),
+    Yield,
+    Bail(usize),
+}
+
+/// Hoisted-slice inner loop for `for ($j = ...; $j >= lim; $j--) $Y[$j] += $X[$j]`.
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn arr_add_from_arr_loop_helper(
+    t: &[u8; 256],
+    v: &mut [u64; 256],
+    dst_arr_r: usize,
+    src_arr_r: usize,
+    idx_r: usize,
+    lim: i64,
+    heap: &mut [Option<Value>],
+    budget_start: usize,
+) -> ArrayLoopExit {
+    if t[dst_arr_r] != TAG_HEAP || t[src_arr_r] != TAG_HEAP || t[idx_r] != TAG_INT {
+        return ArrayLoopExit::Bail(0);
+    }
+    let dst_slot = v[dst_arr_r] as usize;
+    let src_slot = v[src_arr_r] as usize;
+    let mut j = v[idx_r] as i64;
+    let mut budget = budget_start.max(1);
+
+    // Distinct `Storage::List` arrays: borrow both slices ONCE outside the loop!
+    if dst_slot != src_slot && dst_slot < heap.len() && src_slot < heap.len() {
+        let (dst_opt, src_opt) = if dst_slot < src_slot {
+            let (left, right) = heap.split_at_mut(src_slot);
+            (&mut left[dst_slot], &right[0])
+        } else {
+            let (left, right) = heap.split_at_mut(dst_slot);
+            (&mut right[0], &left[src_slot])
+        };
+        if let (Some(Value::Array(dst_rc)), Some(Value::Array(src_rc))) = (dst_opt, src_opt) {
+            let dst_arr = Rc::make_mut(dst_rc);
+            if let (Some((d_start, d_slots)), Some((s_start, s_slots))) =
+                (dst_arr.list_slots_mut(), src_rc.list_slots())
+            {
+                loop {
+                    let d_off = j.wrapping_sub(d_start);
+                    let s_off = j.wrapping_sub(s_start);
+                    if d_off < 0
+                        || s_off < 0
+                        || (d_off as usize) >= d_slots.len()
+                        || (s_off as usize) >= s_slots.len()
+                    {
+                        v[idx_r] = j as u64;
+                        return ArrayLoopExit::Bail(budget_start.saturating_sub(budget));
+                    }
+                    match (&mut d_slots[d_off as usize], &s_slots[s_off as usize]) {
+                        (Some(Value::Int(lv)), Some(Value::Int(rv))) => {
+                            if let Some(sum) = lv.checked_add(*rv) {
+                                *lv = sum;
+                            } else {
+                                d_slots[d_off as usize] =
+                                    Some(Value::Float((*lv as f64) + (*rv as f64)));
+                            }
+                        }
+                        (Some(Value::Float(lv)), Some(Value::Float(rv))) => {
+                            *lv += *rv;
+                        }
+                        (Some(Value::Float(lv)), Some(Value::Int(rv))) => {
+                            *lv += *rv as f64;
+                        }
+                        (Some(Value::Int(lv)), Some(Value::Float(rv))) => {
+                            let res = (*lv as f64) + *rv;
+                            d_slots[d_off as usize] = Some(Value::Float(res));
+                        }
+                        _ => {
+                            v[idx_r] = j as u64;
+                            return ArrayLoopExit::Bail(budget_start.saturating_sub(budget));
+                        }
+                    }
+                    let Some(next_j) = j.checked_sub(1) else {
+                        v[idx_r] = j as u64;
+                        return ArrayLoopExit::Bail(budget_start.saturating_sub(budget));
+                    };
+                    j = next_j;
+                    if j < lim {
+                        v[idx_r] = j as u64;
+                        return ArrayLoopExit::Done(budget_start.saturating_sub(budget));
+                    }
+                    budget -= 1;
+                    if budget == 0 {
+                        v[idx_r] = j as u64;
+                        return ArrayLoopExit::Yield;
+                    }
+                }
+            }
+        }
+    }
+
+    // Fallback (aliased arrays or `Storage::Map`): run one iteration at a time.
+    loop {
+        v[idx_r] = j as u64;
+        if !arr_add_from_arr_helper(t, v, dst_arr_r, src_arr_r, idx_r, heap) {
+            return ArrayLoopExit::Bail(budget_start.saturating_sub(budget));
+        }
+        let Some(next_j) = j.checked_sub(1) else {
+            return ArrayLoopExit::Bail(budget_start.saturating_sub(budget));
+        };
+        j = next_j;
+        if j < lim {
+            v[idx_r] = j as u64;
+            return ArrayLoopExit::Done(budget_start.saturating_sub(budget));
+        }
+        budget -= 1;
+        if budget == 0 {
+            v[idx_r] = j as u64;
+            return ArrayLoopExit::Yield;
+        }
+    }
+}
+
+/// Hoisted-slice inner loop for `for ($k = ...; $k <= lim; $k += $step) unset($flags[$k])`.
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn arr_unset_step_loop_helper(
+    t: &[u8; 256],
+    v: &mut [u64; 256],
+    arr_r: usize,
+    k_r: usize,
+    step_r: usize,
+    lim: i64,
+    heap: &mut [Option<Value>],
+    budget_start: usize,
+) -> ArrayLoopExit {
+    if t[arr_r] != TAG_HEAP || t[k_r] != TAG_INT || t[step_r] != TAG_INT {
+        return ArrayLoopExit::Bail(0);
+    }
+    let step = v[step_r] as i64;
+    let mut k = v[k_r] as i64;
+    let mut budget = budget_start.max(1);
+
+    if let Some(Some(Value::Array(rc))) = heap.get_mut(v[arr_r] as usize) {
+        let arr = Rc::make_mut(rc);
+        if let Some((start, slots, dead)) = arr.list_slots_mut_with_dead() {
+            loop {
+                let off = k.wrapping_sub(start);
+                if off >= 0 && (off as usize) < slots.len() && slots[off as usize].take().is_some()
+                {
+                    *dead += 1;
+                }
+                let Some(next_k) = k.checked_add(step) else {
+                    v[k_r] = k as u64;
+                    return ArrayLoopExit::Bail(budget_start.saturating_sub(budget));
+                };
+                k = next_k;
+                if k > lim {
+                    v[k_r] = k as u64;
+                    return ArrayLoopExit::Done(budget_start.saturating_sub(budget));
+                }
+                budget -= 1;
+                if budget == 0 {
+                    v[k_r] = k as u64;
+                    return ArrayLoopExit::Yield;
+                }
+            }
+        }
+    }
+    ArrayLoopExit::Bail(0)
+}
+
 #[inline(never)]
 fn arr_push_helper(
-    r: &[u64; 256],
+    t: &[u8; 256],
+    v: &[u64; 256],
     arr_r: usize,
     src_r: usize,
     heap: &mut [Option<Value>],
     consts: &[Value],
 ) -> bool {
-    let base_w = r[arr_r];
-    if base_w < TAG_HEAP {
+    if t[arr_r] != TAG_HEAP {
         return false;
     }
-    let Some(val) = read_owned_value(r[src_r], heap, consts) else {
+    let Some(val) = read_owned_value(t[src_r], v[src_r], heap, consts) else {
         return false;
     };
-    match heap.get_mut(base_w as u32 as usize) {
+    match heap.get_mut(v[arr_r] as usize) {
         Some(Some(Value::Array(rc))) => Rc::make_mut(rc).push(val).is_ok(),
         _ => false,
     }
@@ -904,18 +1064,17 @@ fn arr_push_helper(
 
 #[inline(never)]
 fn arr_unset_int_helper(
-    r: &[u64; 256],
+    t: &[u8; 256],
+    v: &[u64; 256],
     arr_r: usize,
     idx_r: usize,
     heap: &mut [Option<Value>],
 ) -> bool {
-    let base_w = r[arr_r];
-    let idx_w = r[idx_r];
-    if base_w < TAG_HEAP || !is_int(idx_w) {
+    if t[arr_r] != TAG_HEAP || t[idx_r] != TAG_INT {
         return false;
     }
-    let key = unbox_int(idx_w);
-    match heap.get_mut(base_w as u32 as usize) {
+    let key = v[idx_r] as i64;
+    match heap.get_mut(v[arr_r] as usize) {
         Some(Some(Value::Array(rc))) => {
             let _ = Rc::make_mut(rc).remove_int(key);
             true
@@ -948,8 +1107,6 @@ enum CallSetup<'a> {
     Bail,
 }
 
-/// Out-of-line general `CallFast` setup helper (keeps the hot dispatch loop
-/// leaf-clean!).
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
 fn call_fast_setup<'a>(
@@ -988,14 +1145,15 @@ fn call_fast_setup<'a>(
     let mut typed = callee.typed_params;
     let mut callee_has_heap = false;
     for i in 0..count {
-        let aw = fast_stack.regs[base + args_base + i];
-        if aw == TAG_UNINIT {
+        let at = fast_stack.tags[base + args_base + i];
+        let ab = fast_stack.bits[base + args_base + i];
+        if at == TAG_UNINIT {
             return CallSetup::Bail;
         }
-        if aw >= TAG_HEAP {
+        if at == TAG_HEAP {
             let is_ref = fast_stack
                 .heap
-                .get(aw as u32 as usize)
+                .get(ab as usize)
                 .and_then(Option::as_ref)
                 .is_none_or(Value::is_reference);
             if is_ref {
@@ -1005,7 +1163,8 @@ fn call_fast_setup<'a>(
         }
         if (typed & 1) != 0 {
             let mask = callee.param_masks[i];
-            if !word_type_mask(aw, &fast_stack.heap, consts).is_some_and(|own| mask.intersects(own))
+            if !tag_type_mask(at, ab, &fast_stack.heap, consts)
+                .is_some_and(|own| mask.intersects(own))
             {
                 return CallSetup::Bail;
             }
@@ -1013,16 +1172,14 @@ fn call_fast_setup<'a>(
         typed >>= 1;
     }
 
-    // Empty-body `[ReturnNull]` shortcut inside Tier 2!
     if callee.is_empty_return_null
         && callee
             .return_mask
-            .is_none_or(|m| return_mask_fits(m, TAG_NULL, &fast_stack.heap, consts))
+            .is_none_or(|m| return_mask_fits(m, TAG_NULL, 0, &fast_stack.heap, consts))
     {
-        let old_dst = fast_stack.regs[base + dst as usize];
-        if old_dst >= TAG_HEAP
+        if fast_stack.tags[base + dst as usize] == TAG_HEAP
             && !release_dst_slot(
-                old_dst,
+                fast_stack.bits[base + dst as usize] as u32,
                 dst as usize,
                 cur_fn.local_count,
                 &mut fast_stack.heap,
@@ -1032,23 +1189,26 @@ fn call_fast_setup<'a>(
             return CallSetup::Bail;
         }
         for i in 0..count {
-            let aw = fast_stack.regs[base + args_base + i];
-            if aw >= TAG_HEAP {
-                fast_stack.free_heap_slot(aw as u32);
+            if fast_stack.tags[base + args_base + i] == TAG_HEAP {
+                let idx = fast_stack.bits[base + args_base + i] as u32;
+                fast_stack.free_heap_slot(idx);
             }
-            fast_stack.regs[base + args_base + i] = TAG_UNINIT;
+            fast_stack.tags[base + args_base + i] = TAG_UNINIT;
         }
-        fast_stack.regs[base + dst as usize] = TAG_NULL;
+        fast_stack.tags[base + dst as usize] = TAG_NULL;
+        fast_stack.bits[base + dst as usize] = 0;
         return CallSetup::EmptyDone;
     }
 
     let new_base = base + cur_fn.reg_count as usize;
     fast_stack.ensure_window(new_base);
 
-    let mut args_buf = [TAG_UNINIT; 16];
-    for (i, slot) in args_buf.iter_mut().enumerate().take(count) {
-        *slot = fast_stack.regs[base + args_base + i];
-        fast_stack.regs[base + args_base + i] = TAG_UNINIT;
+    let mut arg_tags = [TAG_UNINIT; 16];
+    let mut arg_bits = [0u64; 16];
+    for i in 0..count {
+        arg_tags[i] = fast_stack.tags[base + args_base + i];
+        arg_bits[i] = fast_stack.bits[base + args_base + i];
+        fast_stack.tags[base + args_base + i] = TAG_UNINIT;
     }
 
     fast_stack.frames.push(FastFrame {
@@ -1061,10 +1221,11 @@ fn call_fast_setup<'a>(
         return_bc_ip: cur_fn.bc_ip[ip] + 1,
     });
 
-    fast_stack.regs[new_base..new_base + count].copy_from_slice(&args_buf[..count]);
+    fast_stack.tags[new_base..new_base + count].copy_from_slice(&arg_tags[..count]);
+    fast_stack.bits[new_base..new_base + count].copy_from_slice(&arg_bits[..count]);
     let callee_regs = callee.reg_count as usize;
     if callee_regs > count {
-        fast_stack.regs[new_base + count..new_base + callee_regs].fill(TAG_UNINIT);
+        fast_stack.tags[new_base + count..new_base + callee_regs].fill(TAG_UNINIT);
     }
 
     CallSetup::Enter {
@@ -1075,11 +1236,11 @@ fn call_fast_setup<'a>(
     }
 }
 
-/// Out-of-line slow path for `Op::CallNoop` when an argument is `TAG_HEAP`
-/// or `count > 1` or `dst` holds `TAG_HEAP`.
 #[inline(never)]
+#[allow(clippy::too_many_arguments)]
 fn call_noop_slow(
-    r: &mut [u64; 256],
+    t: &mut [u8; 256],
+    v: &mut [u64; 256],
     dst: usize,
     args_base: usize,
     count: usize,
@@ -1088,34 +1249,33 @@ fn call_noop_slow(
     free_heap: &mut Vec<u32>,
 ) -> bool {
     for i in 0..count {
-        let aw = r[args_base + i];
-        if aw == TAG_UNINIT {
+        let at = t[args_base + i];
+        if at == TAG_UNINIT {
             return false;
         }
-        if aw >= TAG_HEAP
+        if at == TAG_HEAP
             && heap
-                .get(aw as u32 as usize)
+                .get(v[args_base + i] as usize)
                 .and_then(Option::as_ref)
                 .is_none_or(Value::is_reference)
         {
             return false;
         }
     }
-    let old_dst = r[dst];
-    if old_dst >= TAG_HEAP && !release_dst_slot(old_dst, dst, local_count, heap, free_heap) {
+    if t[dst] == TAG_HEAP && !release_dst_slot(v[dst] as u32, dst, local_count, heap, free_heap) {
         return false;
     }
     for i in 0..count {
-        let aw = r[args_base + i];
-        if aw >= TAG_HEAP
-            && let Some(slot) = heap.get_mut(aw as u32 as usize)
+        if t[args_base + i] == TAG_HEAP
+            && let Some(slot) = heap.get_mut(v[args_base + i] as usize)
         {
             *slot = None;
-            free_heap.push(aw as u32);
+            free_heap.push(v[args_base + i] as u32);
         }
-        r[args_base + i] = TAG_UNINIT;
+        t[args_base + i] = TAG_UNINIT;
     }
-    r[dst] = TAG_NULL;
+    t[dst] = TAG_NULL;
+    v[dst] = 0;
     true
 }
 
@@ -1146,8 +1306,27 @@ pub(crate) fn run_fast(
         && code.facts(entry_frame.function).local.is_some()
         && !stack.has_calls_from(entry_frame.start());
 
-    // All `CallDirect` callees belong to the same `CompiledUnit` and share the
-    // exact same immutable constant table.
+    // Ultra-fast direct entry for pure-`i64` self-recursion (`fibo_r`, `Ack`)!
+    if entry_fast_ip == 0
+        && entry_can_fast_return
+        && let Some(ref int_rec) = entry_fast.int_rec
+        && let Some(exit) = run_int_rec_entry(
+            int_rec,
+            entry_frame.function,
+            stack,
+            registers,
+            &mut fast_stack.rec_regs,
+            &mut fast_stack.rec_frames,
+            entry_frame,
+            frame_limit.saturating_sub(entry_depth),
+            YIELD_AFTER_STEPS.saturating_sub(*work_io).max(1),
+            work_io,
+            executed_io,
+        )
+    {
+        return exit;
+    }
+
     let unit_consts: &[Value] = &code.cache(entry_frame.function).constants;
 
     fast_stack.reset();
@@ -1166,12 +1345,17 @@ pub(crate) fn run_fast(
     let mut work: usize = *work_io;
     let work_start: usize = work;
     let max_fast_frames = frame_limit.saturating_sub(entry_depth);
+    let mut yield_now = false;
+    let mut structural_deopt = false;
 
     'frame_loop: loop {
         fast_stack.ensure_window(base);
-        let r: &mut [u64; 256] = (&mut fast_stack.regs[base..base + 256])
+        let t: &mut [u8; 256] = (&mut fast_stack.tags[base..base + 256])
             .try_into()
-            .expect("256-reg window");
+            .expect("256-tag window");
+        let v: &mut [u64; 256] = (&mut fast_stack.bits[base..base + 256])
+            .try_into()
+            .expect("256-bit window");
         let heap = &mut fast_stack.heap;
         let free_heap = &mut fast_stack.free_heap;
 
@@ -1182,37 +1366,61 @@ pub(crate) fn run_fast(
 
             match op.op {
                 // =============================================================
-                // FUSED ROTATED-LOOP LATCHES (1 op per loop round!)
+                // SPECIALIZED UNBOXED INNER SCALAR LOOP KERNEL!
+                // =============================================================
+                Op::EnterScalarLoop => {
+                    let sl = &cur_fn.scalar_loops[op.imm as usize];
+                    let budget = YIELD_AFTER_STEPS.saturating_sub(work).max(1);
+                    if let Some(exit) = try_run_scalar_loop(sl, t, v, budget) {
+                        match exit {
+                            ScalarExit::Exit {
+                                next_fast_ip,
+                                spent,
+                            } => {
+                                work += spent;
+                                ip = if next_fast_ip == usize::MAX {
+                                    sl.fallthrough_fast_ip as usize
+                                } else {
+                                    next_fast_ip
+                                };
+                                continue;
+                            }
+                            ScalarExit::Yield => {
+                                work = 0;
+                                yield_now = true;
+                                break 'frame_loop;
+                            }
+                            ScalarExit::Fallback {
+                                fallback_fast_ip,
+                                spent,
+                            } => {
+                                work += spent;
+                                ip = fallback_fast_ip;
+                                continue;
+                            }
+                        }
+                    }
+                    // Entry guard did not match (e.g. iter 0 has TAG_INT for a
+                    // float reg): fall through into the tagged ops at `ip + 1`!
+                    ip += 1;
+                }
+
+                // =============================================================
+                // FUSED ROTATED-LOOP LATCHES
                 // =============================================================
                 Op::IncLoopLtImm => {
-                    let idx = op.a as usize;
-                    let w = r[idx];
-                    if is_int(w) {
-                        let next = unbox_int(w) + 1;
-                        if let Some(nw) = box_int_checked(next) {
-                            r[idx] = nw;
+                    let r = op.a as usize;
+                    if t[r] == TAG_INT {
+                        let next = (v[r] as i64).wrapping_add(1);
+                        if next != i64::MIN {
+                            v[r] = next as u64;
                             if next < i64::from(op.imm) {
                                 ip = (op.b as usize) | ((op.c as usize) << 8);
                                 work += 1;
                                 if work >= YIELD_AFTER_STEPS {
                                     work = 0;
-                                    return materialize_deopt(
-                                        code,
-                                        stack,
-                                        registers,
-                                        fast_stack,
-                                        entry_frame,
-                                        entry_fast.reg_count as usize,
-                                        cur_fn_idx,
-                                        cur_fn,
-                                        base,
-                                        ip,
-                                        true,
-                                        work_io,
-                                        executed_io,
-                                        work,
-                                        YIELD_AFTER_STEPS as u64,
-                                    );
+                                    yield_now = true;
+                                    break 'frame_loop;
                                 }
                                 continue;
                             }
@@ -1223,34 +1431,18 @@ pub(crate) fn run_fast(
                     break 'frame_loop;
                 }
                 Op::IncLoopLeImm => {
-                    let idx = op.a as usize;
-                    let w = r[idx];
-                    if is_int(w) {
-                        let next = unbox_int(w) + 1;
-                        if let Some(nw) = box_int_checked(next) {
-                            r[idx] = nw;
+                    let r = op.a as usize;
+                    if t[r] == TAG_INT {
+                        let next = (v[r] as i64).wrapping_add(1);
+                        if next != i64::MIN {
+                            v[r] = next as u64;
                             if next <= i64::from(op.imm) {
                                 ip = (op.b as usize) | ((op.c as usize) << 8);
                                 work += 1;
                                 if work >= YIELD_AFTER_STEPS {
                                     work = 0;
-                                    return materialize_deopt(
-                                        code,
-                                        stack,
-                                        registers,
-                                        fast_stack,
-                                        entry_frame,
-                                        entry_fast.reg_count as usize,
-                                        cur_fn_idx,
-                                        cur_fn,
-                                        base,
-                                        ip,
-                                        true,
-                                        work_io,
-                                        executed_io,
-                                        work,
-                                        YIELD_AFTER_STEPS as u64,
-                                    );
+                                    yield_now = true;
+                                    break 'frame_loop;
                                 }
                                 continue;
                             }
@@ -1261,34 +1453,18 @@ pub(crate) fn run_fast(
                     break 'frame_loop;
                 }
                 Op::DecLoopGeImm => {
-                    let idx = op.a as usize;
-                    let w = r[idx];
-                    if is_int(w) {
-                        let next = unbox_int(w) - 1;
-                        if let Some(nw) = box_int_checked(next) {
-                            r[idx] = nw;
+                    let r = op.a as usize;
+                    if t[r] == TAG_INT {
+                        let next = (v[r] as i64).wrapping_sub(1);
+                        if next != i64::MAX {
+                            v[r] = next as u64;
                             if next >= i64::from(op.imm) {
                                 ip = (op.b as usize) | ((op.c as usize) << 8);
                                 work += 1;
                                 if work >= YIELD_AFTER_STEPS {
                                     work = 0;
-                                    return materialize_deopt(
-                                        code,
-                                        stack,
-                                        registers,
-                                        fast_stack,
-                                        entry_frame,
-                                        entry_fast.reg_count as usize,
-                                        cur_fn_idx,
-                                        cur_fn,
-                                        base,
-                                        ip,
-                                        true,
-                                        work_io,
-                                        executed_io,
-                                        work,
-                                        YIELD_AFTER_STEPS as u64,
-                                    );
+                                    yield_now = true;
+                                    break 'frame_loop;
                                 }
                                 continue;
                             }
@@ -1299,34 +1475,18 @@ pub(crate) fn run_fast(
                     break 'frame_loop;
                 }
                 Op::DecLoopGtImm => {
-                    let idx = op.a as usize;
-                    let w = r[idx];
-                    if is_int(w) {
-                        let next = unbox_int(w) - 1;
-                        if let Some(nw) = box_int_checked(next) {
-                            r[idx] = nw;
+                    let r = op.a as usize;
+                    if t[r] == TAG_INT {
+                        let next = (v[r] as i64).wrapping_sub(1);
+                        if next != i64::MAX {
+                            v[r] = next as u64;
                             if next > i64::from(op.imm) {
                                 ip = (op.b as usize) | ((op.c as usize) << 8);
                                 work += 1;
                                 if work >= YIELD_AFTER_STEPS {
                                     work = 0;
-                                    return materialize_deopt(
-                                        code,
-                                        stack,
-                                        registers,
-                                        fast_stack,
-                                        entry_frame,
-                                        entry_fast.reg_count as usize,
-                                        cur_fn_idx,
-                                        cur_fn,
-                                        base,
-                                        ip,
-                                        true,
-                                        work_io,
-                                        executed_io,
-                                        work,
-                                        YIELD_AFTER_STEPS as u64,
-                                    );
+                                    yield_now = true;
+                                    break 'frame_loop;
                                 }
                                 continue;
                             }
@@ -1337,35 +1497,19 @@ pub(crate) fn run_fast(
                     break 'frame_loop;
                 }
                 Op::IncLoopLtReg => {
-                    let idx = op.a as usize;
-                    let w = r[idx];
-                    let lim = r[op.b as usize];
-                    if is_int(w) && is_int(lim) {
-                        let next = unbox_int(w) + 1;
-                        if let Some(nw) = box_int_checked(next) {
-                            r[idx] = nw;
-                            if next < unbox_int(lim) {
+                    let r = op.a as usize;
+                    let lim = op.b as usize;
+                    if t[r] == TAG_INT && t[lim] == TAG_INT {
+                        let next = (v[r] as i64).wrapping_add(1);
+                        if next != i64::MIN {
+                            v[r] = next as u64;
+                            if next < (v[lim] as i64) {
                                 ip = op.imm as usize;
                                 work += 1;
                                 if work >= YIELD_AFTER_STEPS {
                                     work = 0;
-                                    return materialize_deopt(
-                                        code,
-                                        stack,
-                                        registers,
-                                        fast_stack,
-                                        entry_frame,
-                                        entry_fast.reg_count as usize,
-                                        cur_fn_idx,
-                                        cur_fn,
-                                        base,
-                                        ip,
-                                        true,
-                                        work_io,
-                                        executed_io,
-                                        work,
-                                        YIELD_AFTER_STEPS as u64,
-                                    );
+                                    yield_now = true;
+                                    break 'frame_loop;
                                 }
                                 continue;
                             }
@@ -1376,35 +1520,19 @@ pub(crate) fn run_fast(
                     break 'frame_loop;
                 }
                 Op::IncLoopLeReg => {
-                    let idx = op.a as usize;
-                    let w = r[idx];
-                    let lim = r[op.b as usize];
-                    if is_int(w) && is_int(lim) {
-                        let next = unbox_int(w) + 1;
-                        if let Some(nw) = box_int_checked(next) {
-                            r[idx] = nw;
-                            if next <= unbox_int(lim) {
+                    let r = op.a as usize;
+                    let lim = op.b as usize;
+                    if t[r] == TAG_INT && t[lim] == TAG_INT {
+                        let next = (v[r] as i64).wrapping_add(1);
+                        if next != i64::MIN {
+                            v[r] = next as u64;
+                            if next <= (v[lim] as i64) {
                                 ip = op.imm as usize;
                                 work += 1;
                                 if work >= YIELD_AFTER_STEPS {
                                     work = 0;
-                                    return materialize_deopt(
-                                        code,
-                                        stack,
-                                        registers,
-                                        fast_stack,
-                                        entry_frame,
-                                        entry_fast.reg_count as usize,
-                                        cur_fn_idx,
-                                        cur_fn,
-                                        base,
-                                        ip,
-                                        true,
-                                        work_io,
-                                        executed_io,
-                                        work,
-                                        YIELD_AFTER_STEPS as u64,
-                                    );
+                                    yield_now = true;
+                                    break 'frame_loop;
                                 }
                                 continue;
                             }
@@ -1415,35 +1543,19 @@ pub(crate) fn run_fast(
                     break 'frame_loop;
                 }
                 Op::DecLoopGeReg => {
-                    let idx = op.a as usize;
-                    let w = r[idx];
-                    let lim = r[op.b as usize];
-                    if is_int(w) && is_int(lim) {
-                        let next = unbox_int(w) - 1;
-                        if let Some(nw) = box_int_checked(next) {
-                            r[idx] = nw;
-                            if next >= unbox_int(lim) {
+                    let r = op.a as usize;
+                    let lim = op.b as usize;
+                    if t[r] == TAG_INT && t[lim] == TAG_INT {
+                        let next = (v[r] as i64).wrapping_sub(1);
+                        if next != i64::MAX {
+                            v[r] = next as u64;
+                            if next >= (v[lim] as i64) {
                                 ip = op.imm as usize;
                                 work += 1;
                                 if work >= YIELD_AFTER_STEPS {
                                     work = 0;
-                                    return materialize_deopt(
-                                        code,
-                                        stack,
-                                        registers,
-                                        fast_stack,
-                                        entry_frame,
-                                        entry_fast.reg_count as usize,
-                                        cur_fn_idx,
-                                        cur_fn,
-                                        base,
-                                        ip,
-                                        true,
-                                        work_io,
-                                        executed_io,
-                                        work,
-                                        YIELD_AFTER_STEPS as u64,
-                                    );
+                                    yield_now = true;
+                                    break 'frame_loop;
                                 }
                                 continue;
                             }
@@ -1454,35 +1566,19 @@ pub(crate) fn run_fast(
                     break 'frame_loop;
                 }
                 Op::DecLoopGtReg => {
-                    let idx = op.a as usize;
-                    let w = r[idx];
-                    let lim = r[op.b as usize];
-                    if is_int(w) && is_int(lim) {
-                        let next = unbox_int(w) - 1;
-                        if let Some(nw) = box_int_checked(next) {
-                            r[idx] = nw;
-                            if next > unbox_int(lim) {
+                    let r = op.a as usize;
+                    let lim = op.b as usize;
+                    if t[r] == TAG_INT && t[lim] == TAG_INT {
+                        let next = (v[r] as i64).wrapping_sub(1);
+                        if next != i64::MAX {
+                            v[r] = next as u64;
+                            if next > (v[lim] as i64) {
                                 ip = op.imm as usize;
                                 work += 1;
                                 if work >= YIELD_AFTER_STEPS {
                                     work = 0;
-                                    return materialize_deopt(
-                                        code,
-                                        stack,
-                                        registers,
-                                        fast_stack,
-                                        entry_frame,
-                                        entry_fast.reg_count as usize,
-                                        cur_fn_idx,
-                                        cur_fn,
-                                        base,
-                                        ip,
-                                        true,
-                                        work_io,
-                                        executed_io,
-                                        work,
-                                        YIELD_AFTER_STEPS as u64,
-                                    );
+                                    yield_now = true;
+                                    break 'frame_loop;
                                 }
                                 continue;
                             }
@@ -1494,276 +1590,437 @@ pub(crate) fn run_fast(
                 }
 
                 // =============================================================
-                // FLOAT-FIRST ARITHMETIC (`mandel`, `mandel2`, `heapsort`)
+                // FLOAT-FIRST ARITHMETIC
                 // =============================================================
                 Op::AddF64 => {
-                    let a = r[op.b as usize];
-                    let b = r[op.c as usize];
-                    let res = if is_f64(a) && is_f64(b) {
-                        box_f64(unbox_f64(a) + unbox_f64(b))
-                    } else if let Some(w) = num_binary_slow(NUM_ADD, a, b) {
-                        w
+                    let (lt, lb) = (t[op.b as usize], v[op.b as usize]);
+                    let (rt, rb) = (t[op.c as usize], v[op.c as usize]);
+                    let (dt, db) = if lt == TAG_FLOAT && rt == TAG_FLOAT {
+                        (
+                            TAG_FLOAT,
+                            (f64::from_bits(lb) + f64::from_bits(rb)).to_bits(),
+                        )
+                    } else if let Some(pair) = num_binary_slow(NUM_ADD, lt, lb, rt, rb) {
+                        pair
                     } else {
                         break 'frame_loop;
                     };
-                    if !write_word(r, op.a as usize, res, cur_local_count, heap, free_heap) {
+                    if !write_scalar(
+                        t,
+                        v,
+                        op.a as usize,
+                        dt,
+                        db,
+                        cur_local_count,
+                        heap,
+                        free_heap,
+                    ) {
                         break 'frame_loop;
                     }
                     ip += 1;
                 }
                 Op::SubF64 => {
-                    let a = r[op.b as usize];
-                    let b = r[op.c as usize];
-                    let res = if is_f64(a) && is_f64(b) {
-                        box_f64(unbox_f64(a) - unbox_f64(b))
-                    } else if let Some(w) = num_binary_slow(NUM_SUB, a, b) {
-                        w
+                    let (lt, lb) = (t[op.b as usize], v[op.b as usize]);
+                    let (rt, rb) = (t[op.c as usize], v[op.c as usize]);
+                    let (dt, db) = if lt == TAG_FLOAT && rt == TAG_FLOAT {
+                        (
+                            TAG_FLOAT,
+                            (f64::from_bits(lb) - f64::from_bits(rb)).to_bits(),
+                        )
+                    } else if let Some(pair) = num_binary_slow(NUM_SUB, lt, lb, rt, rb) {
+                        pair
                     } else {
                         break 'frame_loop;
                     };
-                    if !write_word(r, op.a as usize, res, cur_local_count, heap, free_heap) {
+                    if !write_scalar(
+                        t,
+                        v,
+                        op.a as usize,
+                        dt,
+                        db,
+                        cur_local_count,
+                        heap,
+                        free_heap,
+                    ) {
                         break 'frame_loop;
                     }
                     ip += 1;
                 }
                 Op::MulF64 => {
-                    let a = r[op.b as usize];
-                    let b = r[op.c as usize];
-                    let res = if is_f64(a) && is_f64(b) {
-                        box_f64(unbox_f64(a) * unbox_f64(b))
-                    } else if let Some(w) = num_binary_slow(NUM_MUL, a, b) {
-                        w
+                    let (lt, lb) = (t[op.b as usize], v[op.b as usize]);
+                    let (rt, rb) = (t[op.c as usize], v[op.c as usize]);
+                    let (dt, db) = if lt == TAG_FLOAT && rt == TAG_FLOAT {
+                        (
+                            TAG_FLOAT,
+                            (f64::from_bits(lb) * f64::from_bits(rb)).to_bits(),
+                        )
+                    } else if let Some(pair) = num_binary_slow(NUM_MUL, lt, lb, rt, rb) {
+                        pair
                     } else {
                         break 'frame_loop;
                     };
-                    if !write_word(r, op.a as usize, res, cur_local_count, heap, free_heap) {
+                    if !write_scalar(
+                        t,
+                        v,
+                        op.a as usize,
+                        dt,
+                        db,
+                        cur_local_count,
+                        heap,
+                        free_heap,
+                    ) {
                         break 'frame_loop;
                     }
                     ip += 1;
                 }
                 Op::DivF64 => {
-                    let a = r[op.b as usize];
-                    let b = r[op.c as usize];
-                    let res = if is_f64(a) && is_f64(b) {
-                        let y = unbox_f64(b);
+                    let (lt, lb) = (t[op.b as usize], v[op.b as usize]);
+                    let (rt, rb) = (t[op.c as usize], v[op.c as usize]);
+                    let (dt, db) = if lt == TAG_FLOAT && rt == TAG_FLOAT {
+                        let y = f64::from_bits(rb);
                         if y == 0.0 {
                             break 'frame_loop;
                         }
-                        box_f64(unbox_f64(a) / y)
-                    } else if let Some(w) = num_binary_slow(NUM_DIV, a, b) {
-                        w
+                        (TAG_FLOAT, (f64::from_bits(lb) / y).to_bits())
+                    } else if let Some(pair) = num_binary_slow(NUM_DIV, lt, lb, rt, rb) {
+                        pair
                     } else {
                         break 'frame_loop;
                     };
-                    if !write_word(r, op.a as usize, res, cur_local_count, heap, free_heap) {
+                    if !write_scalar(
+                        t,
+                        v,
+                        op.a as usize,
+                        dt,
+                        db,
+                        cur_local_count,
+                        heap,
+                        free_heap,
+                    ) {
                         break 'frame_loop;
                     }
                     ip += 1;
                 }
                 Op::MulF64Imm => {
-                    let a = r[op.b as usize];
-                    let res = if is_f64(a) {
-                        box_f64(unbox_f64(a) * (op.imm as f64))
-                    } else if let Some(w) = num_binary_slow(NUM_MUL, a, box_i32(op.imm)) {
-                        w
+                    let (lt, lb) = (t[op.b as usize], v[op.b as usize]);
+                    let (dt, db) = if lt == TAG_FLOAT {
+                        (TAG_FLOAT, (f64::from_bits(lb) * (op.imm as f64)).to_bits())
+                    } else if let Some(pair) =
+                        num_binary_slow(NUM_MUL, lt, lb, TAG_INT, i64::from(op.imm) as u64)
+                    {
+                        pair
                     } else {
                         break 'frame_loop;
                     };
-                    if !write_word(r, op.a as usize, res, cur_local_count, heap, free_heap) {
+                    if !write_scalar(
+                        t,
+                        v,
+                        op.a as usize,
+                        dt,
+                        db,
+                        cur_local_count,
+                        heap,
+                        free_heap,
+                    ) {
                         break 'frame_loop;
                     }
                     ip += 1;
                 }
                 Op::AddF64Imm => {
-                    let a = r[op.b as usize];
-                    let res = if is_f64(a) {
-                        box_f64(unbox_f64(a) + (op.imm as f64))
-                    } else if let Some(w) = num_binary_slow(NUM_ADD, a, box_i32(op.imm)) {
-                        w
+                    let (lt, lb) = (t[op.b as usize], v[op.b as usize]);
+                    let (dt, db) = if lt == TAG_FLOAT {
+                        (TAG_FLOAT, (f64::from_bits(lb) + (op.imm as f64)).to_bits())
+                    } else if let Some(pair) =
+                        num_binary_slow(NUM_ADD, lt, lb, TAG_INT, i64::from(op.imm) as u64)
+                    {
+                        pair
                     } else {
                         break 'frame_loop;
                     };
-                    if !write_word(r, op.a as usize, res, cur_local_count, heap, free_heap) {
+                    if !write_scalar(
+                        t,
+                        v,
+                        op.a as usize,
+                        dt,
+                        db,
+                        cur_local_count,
+                        heap,
+                        free_heap,
+                    ) {
                         break 'frame_loop;
                     }
                     ip += 1;
                 }
                 Op::SubF64Imm => {
-                    let a = r[op.b as usize];
-                    let res = if is_f64(a) {
-                        box_f64(unbox_f64(a) - (op.imm as f64))
-                    } else if let Some(w) = num_binary_slow(NUM_SUB, a, box_i32(op.imm)) {
-                        w
+                    let (lt, lb) = (t[op.b as usize], v[op.b as usize]);
+                    let (dt, db) = if lt == TAG_FLOAT {
+                        (TAG_FLOAT, (f64::from_bits(lb) - (op.imm as f64)).to_bits())
+                    } else if let Some(pair) =
+                        num_binary_slow(NUM_SUB, lt, lb, TAG_INT, i64::from(op.imm) as u64)
+                    {
+                        pair
                     } else {
                         break 'frame_loop;
                     };
-                    if !write_word(r, op.a as usize, res, cur_local_count, heap, free_heap) {
+                    if !write_scalar(
+                        t,
+                        v,
+                        op.a as usize,
+                        dt,
+                        db,
+                        cur_local_count,
+                        heap,
+                        free_heap,
+                    ) {
                         break 'frame_loop;
                     }
                     ip += 1;
                 }
 
                 // =============================================================
-                // INT-FIRST ARITHMETIC (out-of-line float/overflow fallback)
+                // INT-FIRST ARITHMETIC
                 // =============================================================
                 Op::AddNum => {
-                    let a = r[op.b as usize];
-                    let b = r[op.c as usize];
-                    let res = if is_int(a) && is_int(b) {
-                        match box_int_checked(unbox_int(a) + unbox_int(b)) {
-                            Some(w) => w,
-                            None => break 'frame_loop,
+                    let (lt, lb) = (t[op.b as usize], v[op.b as usize]);
+                    let (rt, rb) = (t[op.c as usize], v[op.c as usize]);
+                    let (dt, db) = if lt == TAG_INT && rt == TAG_INT {
+                        match (lb as i64).checked_add(rb as i64) {
+                            Some(s) => (TAG_INT, s as u64),
+                            None => (
+                                TAG_FLOAT,
+                                (((lb as i64) as f64) + ((rb as i64) as f64)).to_bits(),
+                            ),
                         }
-                    } else if let Some(w) = num_binary_slow(NUM_ADD, a, b) {
-                        w
+                    } else if let Some(pair) = num_binary_slow(NUM_ADD, lt, lb, rt, rb) {
+                        pair
                     } else {
                         break 'frame_loop;
                     };
-                    if !write_word(r, op.a as usize, res, cur_local_count, heap, free_heap) {
+                    if !write_scalar(
+                        t,
+                        v,
+                        op.a as usize,
+                        dt,
+                        db,
+                        cur_local_count,
+                        heap,
+                        free_heap,
+                    ) {
                         break 'frame_loop;
                     }
                     ip += 1;
                 }
                 Op::SubNum => {
-                    let a = r[op.b as usize];
-                    let b = r[op.c as usize];
-                    let res = if is_int(a) && is_int(b) {
-                        match box_int_checked(unbox_int(a) - unbox_int(b)) {
-                            Some(w) => w,
-                            None => break 'frame_loop,
+                    let (lt, lb) = (t[op.b as usize], v[op.b as usize]);
+                    let (rt, rb) = (t[op.c as usize], v[op.c as usize]);
+                    let (dt, db) = if lt == TAG_INT && rt == TAG_INT {
+                        match (lb as i64).checked_sub(rb as i64) {
+                            Some(s) => (TAG_INT, s as u64),
+                            None => (
+                                TAG_FLOAT,
+                                (((lb as i64) as f64) - ((rb as i64) as f64)).to_bits(),
+                            ),
                         }
-                    } else if let Some(w) = num_binary_slow(NUM_SUB, a, b) {
-                        w
+                    } else if let Some(pair) = num_binary_slow(NUM_SUB, lt, lb, rt, rb) {
+                        pair
                     } else {
                         break 'frame_loop;
                     };
-                    if !write_word(r, op.a as usize, res, cur_local_count, heap, free_heap) {
+                    if !write_scalar(
+                        t,
+                        v,
+                        op.a as usize,
+                        dt,
+                        db,
+                        cur_local_count,
+                        heap,
+                        free_heap,
+                    ) {
                         break 'frame_loop;
                     }
                     ip += 1;
                 }
                 Op::MulNum => {
-                    let a = r[op.b as usize];
-                    let b = r[op.c as usize];
-                    let res = if is_int(a) && is_int(b) {
-                        match unbox_int(a)
-                            .checked_mul(unbox_int(b))
-                            .and_then(box_int_checked)
-                        {
-                            Some(w) => w,
-                            None => match num_binary_slow(NUM_MUL, a, b) {
-                                Some(w) => w,
-                                None => break 'frame_loop,
-                            },
+                    let (lt, lb) = (t[op.b as usize], v[op.b as usize]);
+                    let (rt, rb) = (t[op.c as usize], v[op.c as usize]);
+                    let (dt, db) = if lt == TAG_INT && rt == TAG_INT {
+                        match (lb as i64).checked_mul(rb as i64) {
+                            Some(p) => (TAG_INT, p as u64),
+                            None => (
+                                TAG_FLOAT,
+                                (((lb as i64) as f64) * ((rb as i64) as f64)).to_bits(),
+                            ),
                         }
-                    } else if let Some(w) = num_binary_slow(NUM_MUL, a, b) {
-                        w
+                    } else if let Some(pair) = num_binary_slow(NUM_MUL, lt, lb, rt, rb) {
+                        pair
                     } else {
                         break 'frame_loop;
                     };
-                    if !write_word(r, op.a as usize, res, cur_local_count, heap, free_heap) {
+                    if !write_scalar(
+                        t,
+                        v,
+                        op.a as usize,
+                        dt,
+                        db,
+                        cur_local_count,
+                        heap,
+                        free_heap,
+                    ) {
                         break 'frame_loop;
                     }
                     ip += 1;
                 }
                 Op::DivNum => {
-                    let Some(res) = num_binary_slow(NUM_DIV, r[op.b as usize], r[op.c as usize])
-                    else {
+                    let Some((dt, db)) = num_binary_slow(
+                        NUM_DIV,
+                        t[op.b as usize],
+                        v[op.b as usize],
+                        t[op.c as usize],
+                        v[op.c as usize],
+                    ) else {
                         break 'frame_loop;
                     };
-                    if !write_word(r, op.a as usize, res, cur_local_count, heap, free_heap) {
+                    if !write_scalar(
+                        t,
+                        v,
+                        op.a as usize,
+                        dt,
+                        db,
+                        cur_local_count,
+                        heap,
+                        free_heap,
+                    ) {
                         break 'frame_loop;
                     }
                     ip += 1;
                 }
                 Op::ModInt => {
-                    let a = r[op.b as usize];
-                    let b = r[op.c as usize];
-                    if !is_int(a) || !is_int(b) {
+                    if t[op.b as usize] != TAG_INT || t[op.c as usize] != TAG_INT {
                         break 'frame_loop;
                     }
-                    let y = unbox_int(b);
+                    let y = v[op.c as usize] as i64;
                     if y == 0 {
                         break 'frame_loop;
                     }
-                    let rem = unbox_int(a) % y;
-                    let res = TAG_INT | ((rem as u64) & PAYLOAD_MASK);
-                    if !write_word(r, op.a as usize, res, cur_local_count, heap, free_heap) {
+                    let res = (v[op.b as usize] as i64).wrapping_rem(y);
+                    if !write_scalar(
+                        t,
+                        v,
+                        op.a as usize,
+                        TAG_INT,
+                        res as u64,
+                        cur_local_count,
+                        heap,
+                        free_heap,
+                    ) {
                         break 'frame_loop;
                     }
                     ip += 1;
                 }
                 Op::BitAnd => {
-                    let a = r[op.b as usize];
-                    let b = r[op.c as usize];
-                    if !is_int(a) || !is_int(b) {
+                    if t[op.b as usize] != TAG_INT || t[op.c as usize] != TAG_INT {
                         break 'frame_loop;
                     }
-                    if !write_word(r, op.a as usize, a & b, cur_local_count, heap, free_heap) {
+                    let res = v[op.b as usize] & v[op.c as usize];
+                    if !write_scalar(
+                        t,
+                        v,
+                        op.a as usize,
+                        TAG_INT,
+                        res,
+                        cur_local_count,
+                        heap,
+                        free_heap,
+                    ) {
                         break 'frame_loop;
                     }
                     ip += 1;
                 }
                 Op::BitOr => {
-                    let a = r[op.b as usize];
-                    let b = r[op.c as usize];
-                    if !is_int(a) || !is_int(b) {
+                    if t[op.b as usize] != TAG_INT || t[op.c as usize] != TAG_INT {
                         break 'frame_loop;
                     }
-                    if !write_word(r, op.a as usize, a | b, cur_local_count, heap, free_heap) {
+                    let res = v[op.b as usize] | v[op.c as usize];
+                    if !write_scalar(
+                        t,
+                        v,
+                        op.a as usize,
+                        TAG_INT,
+                        res,
+                        cur_local_count,
+                        heap,
+                        free_heap,
+                    ) {
                         break 'frame_loop;
                     }
                     ip += 1;
                 }
                 Op::BitXor => {
-                    let a = r[op.b as usize];
-                    let b = r[op.c as usize];
-                    if !is_int(a) || !is_int(b) {
+                    if t[op.b as usize] != TAG_INT || t[op.c as usize] != TAG_INT {
                         break 'frame_loop;
                     }
-                    let res = TAG_INT | ((a ^ b) & PAYLOAD_MASK);
-                    if !write_word(r, op.a as usize, res, cur_local_count, heap, free_heap) {
+                    let res = v[op.b as usize] ^ v[op.c as usize];
+                    if !write_scalar(
+                        t,
+                        v,
+                        op.a as usize,
+                        TAG_INT,
+                        res,
+                        cur_local_count,
+                        heap,
+                        free_heap,
+                    ) {
                         break 'frame_loop;
                     }
                     ip += 1;
                 }
                 Op::Shl => {
-                    let a = r[op.b as usize];
-                    let b = r[op.c as usize];
-                    if !is_int(a) || !is_int(b) {
+                    if t[op.b as usize] != TAG_INT || t[op.c as usize] != TAG_INT {
                         break 'frame_loop;
                     }
-                    let s = unbox_int(b);
+                    let s = v[op.c as usize] as i64;
                     if s < 0 {
                         break 'frame_loop;
                     }
-                    let shifted = if s >= 64 {
+                    let res = if s >= 64 {
                         0
                     } else {
-                        unbox_int(a).wrapping_shl(s as u32)
+                        (v[op.b as usize] as i64).wrapping_shl(s as u32)
                     };
-                    let Some(res) = box_int_checked(shifted) else {
-                        break 'frame_loop;
-                    };
-                    if !write_word(r, op.a as usize, res, cur_local_count, heap, free_heap) {
+                    if !write_scalar(
+                        t,
+                        v,
+                        op.a as usize,
+                        TAG_INT,
+                        res as u64,
+                        cur_local_count,
+                        heap,
+                        free_heap,
+                    ) {
                         break 'frame_loop;
                     }
                     ip += 1;
                 }
                 Op::Shr => {
-                    let a = r[op.b as usize];
-                    let b = r[op.c as usize];
-                    if !is_int(a) || !is_int(b) {
+                    if t[op.b as usize] != TAG_INT || t[op.c as usize] != TAG_INT {
                         break 'frame_loop;
                     }
-                    let s = unbox_int(b);
+                    let s = v[op.c as usize] as i64;
                     if s < 0 {
                         break 'frame_loop;
                     }
-                    let x = unbox_int(a);
-                    let shifted = if s >= 64 { x >> 63 } else { x >> (s as u32) };
-                    let res = TAG_INT | ((shifted as u64) & PAYLOAD_MASK);
-                    if !write_word(r, op.a as usize, res, cur_local_count, heap, free_heap) {
+                    let a = v[op.b as usize] as i64;
+                    let res = if s >= 64 { a >> 63 } else { a >> (s as u32) };
+                    if !write_scalar(
+                        t,
+                        v,
+                        op.a as usize,
+                        TAG_INT,
+                        res as u64,
+                        cur_local_count,
+                        heap,
+                        free_heap,
+                    ) {
                         break 'frame_loop;
                     }
                     ip += 1;
@@ -1773,138 +2030,217 @@ pub(crate) fn run_fast(
                 // IMMEDIATE ARITHMETIC
                 // =============================================================
                 Op::AddImm => {
-                    let a = r[op.b as usize];
-                    let res = if is_int(a) {
-                        match box_int_checked(unbox_int(a) + i64::from(op.imm)) {
-                            Some(w) => w,
-                            None => break 'frame_loop,
+                    let (lt, lb) = (t[op.b as usize], v[op.b as usize]);
+                    let (dt, db) = if lt == TAG_INT {
+                        match (lb as i64).checked_add(i64::from(op.imm)) {
+                            Some(s) => (TAG_INT, s as u64),
+                            None => (
+                                TAG_FLOAT,
+                                (((lb as i64) as f64) + (op.imm as f64)).to_bits(),
+                            ),
                         }
-                    } else if let Some(w) = num_binary_slow(NUM_ADD, a, box_i32(op.imm)) {
-                        w
+                    } else if let Some(pair) =
+                        num_binary_slow(NUM_ADD, lt, lb, TAG_INT, i64::from(op.imm) as u64)
+                    {
+                        pair
                     } else {
                         break 'frame_loop;
                     };
-                    if !write_word(r, op.a as usize, res, cur_local_count, heap, free_heap) {
+                    if !write_scalar(
+                        t,
+                        v,
+                        op.a as usize,
+                        dt,
+                        db,
+                        cur_local_count,
+                        heap,
+                        free_heap,
+                    ) {
                         break 'frame_loop;
                     }
                     ip += 1;
                 }
                 Op::SubImm => {
-                    let a = r[op.b as usize];
-                    let res = if is_int(a) {
-                        match box_int_checked(unbox_int(a) - i64::from(op.imm)) {
-                            Some(w) => w,
-                            None => break 'frame_loop,
+                    let (lt, lb) = (t[op.b as usize], v[op.b as usize]);
+                    let (dt, db) = if lt == TAG_INT {
+                        match (lb as i64).checked_sub(i64::from(op.imm)) {
+                            Some(s) => (TAG_INT, s as u64),
+                            None => (
+                                TAG_FLOAT,
+                                (((lb as i64) as f64) - (op.imm as f64)).to_bits(),
+                            ),
                         }
-                    } else if let Some(w) = num_binary_slow(NUM_SUB, a, box_i32(op.imm)) {
-                        w
+                    } else if let Some(pair) =
+                        num_binary_slow(NUM_SUB, lt, lb, TAG_INT, i64::from(op.imm) as u64)
+                    {
+                        pair
                     } else {
                         break 'frame_loop;
                     };
-                    if !write_word(r, op.a as usize, res, cur_local_count, heap, free_heap) {
+                    if !write_scalar(
+                        t,
+                        v,
+                        op.a as usize,
+                        dt,
+                        db,
+                        cur_local_count,
+                        heap,
+                        free_heap,
+                    ) {
                         break 'frame_loop;
                     }
                     ip += 1;
                 }
                 Op::MulImm => {
-                    let a = r[op.b as usize];
-                    let res = if is_int(a) {
-                        match unbox_int(a)
-                            .checked_mul(i64::from(op.imm))
-                            .and_then(box_int_checked)
-                        {
-                            Some(w) => w,
-                            None => match num_binary_slow(NUM_MUL, a, box_i32(op.imm)) {
-                                Some(w) => w,
-                                None => break 'frame_loop,
-                            },
+                    let (lt, lb) = (t[op.b as usize], v[op.b as usize]);
+                    let (dt, db) = if lt == TAG_INT {
+                        match (lb as i64).checked_mul(i64::from(op.imm)) {
+                            Some(p) => (TAG_INT, p as u64),
+                            None => (
+                                TAG_FLOAT,
+                                (((lb as i64) as f64) * (op.imm as f64)).to_bits(),
+                            ),
                         }
-                    } else if let Some(w) = num_binary_slow(NUM_MUL, a, box_i32(op.imm)) {
-                        w
+                    } else if let Some(pair) =
+                        num_binary_slow(NUM_MUL, lt, lb, TAG_INT, i64::from(op.imm) as u64)
+                    {
+                        pair
                     } else {
                         break 'frame_loop;
                     };
-                    if !write_word(r, op.a as usize, res, cur_local_count, heap, free_heap) {
+                    if !write_scalar(
+                        t,
+                        v,
+                        op.a as usize,
+                        dt,
+                        db,
+                        cur_local_count,
+                        heap,
+                        free_heap,
+                    ) {
                         break 'frame_loop;
                     }
                     ip += 1;
                 }
                 Op::ModImm => {
-                    let a = r[op.b as usize];
-                    if !is_int(a) || op.imm == 0 {
+                    if t[op.b as usize] != TAG_INT || op.imm == 0 {
                         break 'frame_loop;
                     }
-                    let rem = unbox_int(a) % i64::from(op.imm);
-                    let res = TAG_INT | ((rem as u64) & PAYLOAD_MASK);
-                    if !write_word(r, op.a as usize, res, cur_local_count, heap, free_heap) {
+                    let res = (v[op.b as usize] as i64).wrapping_rem(i64::from(op.imm));
+                    if !write_scalar(
+                        t,
+                        v,
+                        op.a as usize,
+                        TAG_INT,
+                        res as u64,
+                        cur_local_count,
+                        heap,
+                        free_heap,
+                    ) {
                         break 'frame_loop;
                     }
                     ip += 1;
                 }
                 Op::BitAndImm => {
-                    let a = r[op.b as usize];
-                    if !is_int(a) {
+                    if t[op.b as usize] != TAG_INT {
                         break 'frame_loop;
                     }
-                    let res = a & box_i32(op.imm);
-                    if !write_word(r, op.a as usize, res, cur_local_count, heap, free_heap) {
+                    let res = (v[op.b as usize] as i64) & i64::from(op.imm);
+                    if !write_scalar(
+                        t,
+                        v,
+                        op.a as usize,
+                        TAG_INT,
+                        res as u64,
+                        cur_local_count,
+                        heap,
+                        free_heap,
+                    ) {
                         break 'frame_loop;
                     }
                     ip += 1;
                 }
                 Op::BitOrImm => {
-                    let a = r[op.b as usize];
-                    if !is_int(a) {
+                    if t[op.b as usize] != TAG_INT {
                         break 'frame_loop;
                     }
-                    let res = a | box_i32(op.imm);
-                    if !write_word(r, op.a as usize, res, cur_local_count, heap, free_heap) {
+                    let res = (v[op.b as usize] as i64) | i64::from(op.imm);
+                    if !write_scalar(
+                        t,
+                        v,
+                        op.a as usize,
+                        TAG_INT,
+                        res as u64,
+                        cur_local_count,
+                        heap,
+                        free_heap,
+                    ) {
                         break 'frame_loop;
                     }
                     ip += 1;
                 }
                 Op::BitXorImm => {
-                    let a = r[op.b as usize];
-                    if !is_int(a) {
+                    if t[op.b as usize] != TAG_INT {
                         break 'frame_loop;
                     }
-                    let res = TAG_INT | ((a ^ box_i32(op.imm)) & PAYLOAD_MASK);
-                    if !write_word(r, op.a as usize, res, cur_local_count, heap, free_heap) {
+                    let res = (v[op.b as usize] as i64) ^ i64::from(op.imm);
+                    if !write_scalar(
+                        t,
+                        v,
+                        op.a as usize,
+                        TAG_INT,
+                        res as u64,
+                        cur_local_count,
+                        heap,
+                        free_heap,
+                    ) {
                         break 'frame_loop;
                     }
                     ip += 1;
                 }
                 Op::ShlImm => {
-                    let a = r[op.b as usize];
-                    if !is_int(a) || op.imm < 0 {
+                    if t[op.b as usize] != TAG_INT || op.imm < 0 {
                         break 'frame_loop;
                     }
-                    let shifted = if op.imm >= 64 {
+                    let res = if op.imm >= 64 {
                         0
                     } else {
-                        unbox_int(a).wrapping_shl(op.imm as u32)
+                        (v[op.b as usize] as i64).wrapping_shl(op.imm as u32)
                     };
-                    let Some(res) = box_int_checked(shifted) else {
-                        break 'frame_loop;
-                    };
-                    if !write_word(r, op.a as usize, res, cur_local_count, heap, free_heap) {
+                    if !write_scalar(
+                        t,
+                        v,
+                        op.a as usize,
+                        TAG_INT,
+                        res as u64,
+                        cur_local_count,
+                        heap,
+                        free_heap,
+                    ) {
                         break 'frame_loop;
                     }
                     ip += 1;
                 }
                 Op::ShrImm => {
-                    let a = r[op.b as usize];
-                    if !is_int(a) || op.imm < 0 {
+                    if t[op.b as usize] != TAG_INT || op.imm < 0 {
                         break 'frame_loop;
                     }
-                    let x = unbox_int(a);
-                    let shifted = if op.imm >= 64 {
-                        x >> 63
+                    let a = v[op.b as usize] as i64;
+                    let res = if op.imm >= 64 {
+                        a >> 63
                     } else {
-                        x >> (op.imm as u32)
+                        a >> (op.imm as u32)
                     };
-                    let res = TAG_INT | ((shifted as u64) & PAYLOAD_MASK);
-                    if !write_word(r, op.a as usize, res, cur_local_count, heap, free_heap) {
+                    if !write_scalar(
+                        t,
+                        v,
+                        op.a as usize,
+                        TAG_INT,
+                        res as u64,
+                        cur_local_count,
+                        heap,
+                        free_heap,
+                    ) {
                         break 'frame_loop;
                     }
                     ip += 1;
@@ -1915,17 +2251,23 @@ pub(crate) fn run_fast(
                 // =============================================================
                 Op::AddAssign => {
                     let loc = op.a as usize;
-                    let a = r[loc];
-                    let b = r[op.b as usize];
-                    if is_int(a) && is_int(b) {
-                        let Some(res) = box_int_checked(unbox_int(a) + unbox_int(b)) else {
-                            break 'frame_loop;
-                        };
-                        r[loc] = res;
-                    } else if is_f64(a) && is_f64(b) {
-                        r[loc] = box_f64(unbox_f64(a) + unbox_f64(b));
-                    } else if let Some(res) = num_binary_slow(NUM_ADD, a, b) {
-                        r[loc] = res;
+                    let src = op.b as usize;
+                    let (lt, rt) = (t[loc], t[src]);
+                    if lt == TAG_INT && rt == TAG_INT {
+                        match (v[loc] as i64).checked_add(v[src] as i64) {
+                            Some(s) => v[loc] = s as u64,
+                            None => {
+                                t[loc] = TAG_FLOAT;
+                                v[loc] =
+                                    (((v[loc] as i64) as f64) + ((v[src] as i64) as f64)).to_bits();
+                            }
+                        }
+                    } else if lt == TAG_FLOAT && rt == TAG_FLOAT {
+                        v[loc] = (f64::from_bits(v[loc]) + f64::from_bits(v[src])).to_bits();
+                    } else if let Some((dt, db)) = num_binary_slow(NUM_ADD, lt, v[loc], rt, v[src])
+                    {
+                        t[loc] = dt;
+                        v[loc] = db;
                     } else {
                         break 'frame_loop;
                     }
@@ -1933,17 +2275,23 @@ pub(crate) fn run_fast(
                 }
                 Op::SubAssign => {
                     let loc = op.a as usize;
-                    let a = r[loc];
-                    let b = r[op.b as usize];
-                    if is_int(a) && is_int(b) {
-                        let Some(res) = box_int_checked(unbox_int(a) - unbox_int(b)) else {
-                            break 'frame_loop;
-                        };
-                        r[loc] = res;
-                    } else if is_f64(a) && is_f64(b) {
-                        r[loc] = box_f64(unbox_f64(a) - unbox_f64(b));
-                    } else if let Some(res) = num_binary_slow(NUM_SUB, a, b) {
-                        r[loc] = res;
+                    let src = op.b as usize;
+                    let (lt, rt) = (t[loc], t[src]);
+                    if lt == TAG_INT && rt == TAG_INT {
+                        match (v[loc] as i64).checked_sub(v[src] as i64) {
+                            Some(s) => v[loc] = s as u64,
+                            None => {
+                                t[loc] = TAG_FLOAT;
+                                v[loc] =
+                                    (((v[loc] as i64) as f64) - ((v[src] as i64) as f64)).to_bits();
+                            }
+                        }
+                    } else if lt == TAG_FLOAT && rt == TAG_FLOAT {
+                        v[loc] = (f64::from_bits(v[loc]) - f64::from_bits(v[src])).to_bits();
+                    } else if let Some((dt, db)) = num_binary_slow(NUM_SUB, lt, v[loc], rt, v[src])
+                    {
+                        t[loc] = dt;
+                        v[loc] = db;
                     } else {
                         break 'frame_loop;
                     }
@@ -1951,32 +2299,54 @@ pub(crate) fn run_fast(
                 }
                 Op::MulAssign => {
                     let loc = op.a as usize;
-                    let a = r[loc];
-                    let b = r[op.b as usize];
-                    if is_int(a) && is_int(b) {
-                        let res = match unbox_int(a)
-                            .checked_mul(unbox_int(b))
-                            .and_then(box_int_checked)
-                        {
-                            Some(w) => w,
-                            None => match num_binary_slow(NUM_MUL, a, b) {
-                                Some(w) => w,
-                                None => break 'frame_loop,
-                            },
-                        };
-                        r[loc] = res;
-                    } else if is_f64(a) && is_f64(b) {
-                        r[loc] = box_f64(unbox_f64(a) * unbox_f64(b));
-                    } else if let Some(res) = num_binary_slow(NUM_MUL, a, b) {
-                        r[loc] = res;
+                    let src = op.b as usize;
+                    let (lt, rt) = (t[loc], t[src]);
+                    if lt == TAG_INT && rt == TAG_INT {
+                        match (v[loc] as i64).checked_mul(v[src] as i64) {
+                            Some(p) => v[loc] = p as u64,
+                            None => {
+                                t[loc] = TAG_FLOAT;
+                                v[loc] =
+                                    (((v[loc] as i64) as f64) * ((v[src] as i64) as f64)).to_bits();
+                            }
+                        }
+                    } else if lt == TAG_FLOAT && rt == TAG_FLOAT {
+                        v[loc] = (f64::from_bits(v[loc]) * f64::from_bits(v[src])).to_bits();
+                    } else if let Some((dt, db)) = num_binary_slow(NUM_MUL, lt, v[loc], rt, v[src])
+                    {
+                        t[loc] = dt;
+                        v[loc] = db;
                     } else {
                         break 'frame_loop;
                     }
                     ip += 1;
                 }
+                Op::MulAddAssign => {
+                    let acc = op.a as usize;
+                    let lhs = op.b as usize;
+                    let rhs = op.c as usize;
+                    if t[acc] == TAG_INT && t[lhs] == TAG_INT && t[rhs] == TAG_INT {
+                        let Some(prod) = (v[lhs] as i64).checked_mul(v[rhs] as i64) else {
+                            break 'frame_loop;
+                        };
+                        let Some(sum) = (v[acc] as i64).checked_add(prod) else {
+                            break 'frame_loop;
+                        };
+                        v[acc] = sum as u64;
+                        ip += 1;
+                    } else if t[acc] == TAG_FLOAT && t[lhs] == TAG_FLOAT && t[rhs] == TAG_FLOAT {
+                        let res = f64::from_bits(v[acc])
+                            + f64::from_bits(v[lhs]) * f64::from_bits(v[rhs]);
+                        v[acc] = res.to_bits();
+                        ip += 1;
+                    } else {
+                        break 'frame_loop;
+                    }
+                }
                 Op::StrAppend => {
                     if !str_append_helper(
-                        r,
+                        t,
+                        v,
                         op.a as usize,
                         op.b as usize,
                         &mut cur_has_heap,
@@ -1993,10 +2363,12 @@ pub(crate) fn run_fast(
                 // CONSTANTS, MOVES, CLEARS
                 // =============================================================
                 Op::LoadInt => {
-                    if !write_word(
-                        r,
+                    if !write_scalar(
+                        t,
+                        v,
                         op.a as usize,
-                        box_i32(op.imm),
+                        TAG_INT,
+                        i64::from(op.imm) as u64,
                         cur_local_count,
                         heap,
                         free_heap,
@@ -2006,35 +2378,70 @@ pub(crate) fn run_fast(
                     ip += 1;
                 }
                 Op::LoadF64 => {
-                    let bits = cur_f64[op.imm as usize];
-                    if !write_word(r, op.a as usize, bits, cur_local_count, heap, free_heap) {
+                    let bits = cur_f64[op.imm as usize].to_bits();
+                    if !write_scalar(
+                        t,
+                        v,
+                        op.a as usize,
+                        TAG_FLOAT,
+                        bits,
+                        cur_local_count,
+                        heap,
+                        free_heap,
+                    ) {
                         break 'frame_loop;
                     }
                     ip += 1;
                 }
                 Op::LoadBool => {
-                    let w = TAG_BOOL | u64::from(op.b);
-                    if !write_word(r, op.a as usize, w, cur_local_count, heap, free_heap) {
+                    if !write_scalar(
+                        t,
+                        v,
+                        op.a as usize,
+                        TAG_BOOL,
+                        u64::from(op.b),
+                        cur_local_count,
+                        heap,
+                        free_heap,
+                    ) {
                         break 'frame_loop;
                     }
                     ip += 1;
                 }
                 Op::LoadNull => {
-                    if !write_word(r, op.a as usize, TAG_NULL, cur_local_count, heap, free_heap) {
+                    if !write_scalar(
+                        t,
+                        v,
+                        op.a as usize,
+                        TAG_NULL,
+                        0,
+                        cur_local_count,
+                        heap,
+                        free_heap,
+                    ) {
                         break 'frame_loop;
                     }
                     ip += 1;
                 }
                 Op::LoadConstRef => {
-                    let w = TAG_CONST | (op.imm as u32 as u64);
-                    if !write_word(r, op.a as usize, w, cur_local_count, heap, free_heap) {
+                    if !write_scalar(
+                        t,
+                        v,
+                        op.a as usize,
+                        TAG_CONST,
+                        op.imm as u32 as u64,
+                        cur_local_count,
+                        heap,
+                        free_heap,
+                    ) {
                         break 'frame_loop;
                     }
                     ip += 1;
                 }
                 Op::NewArray => {
                     if !new_array_helper(
-                        r,
+                        t,
+                        v,
                         op.a as usize,
                         op.imm,
                         cur_local_count,
@@ -2048,25 +2455,26 @@ pub(crate) fn run_fast(
                 }
                 Op::Move | Op::Assign => {
                     let dst = op.a as usize;
-                    let sw = r[op.b as usize];
-                    if sw < TAG_UNINIT {
-                        if !write_word(r, dst, sw, cur_local_count, heap, free_heap) {
+                    let src = op.b as usize;
+                    let st = t[src];
+                    if st == TAG_UNINIT {
+                        break 'frame_loop;
+                    }
+                    if st != TAG_HEAP {
+                        if !write_scalar(t, v, dst, st, v[src], cur_local_count, heap, free_heap) {
                             break 'frame_loop;
                         }
-                    } else if sw >= TAG_HEAP {
-                        if !move_heap_slow(
-                            r,
-                            dst,
-                            sw,
-                            cur_local_count,
-                            &mut cur_has_heap,
-                            heap,
-                            free_heap,
-                            unit_consts,
-                        ) {
-                            break 'frame_loop;
-                        }
-                    } else {
+                    } else if !move_heap_slow(
+                        t,
+                        v,
+                        dst,
+                        v[src],
+                        cur_local_count,
+                        &mut cur_has_heap,
+                        heap,
+                        free_heap,
+                        unit_consts,
+                    ) {
                         break 'frame_loop;
                     }
                     ip += 1;
@@ -2074,41 +2482,41 @@ pub(crate) fn run_fast(
                 Op::AssignTake => {
                     let dst = op.a as usize;
                     let src = op.b as usize;
-                    let sw = r[src];
-                    if sw < TAG_UNINIT {
-                        if !write_word(r, dst, sw, cur_local_count, heap, free_heap) {
+                    let st = t[src];
+                    if st == TAG_UNINIT {
+                        break 'frame_loop;
+                    }
+                    if st != TAG_HEAP {
+                        if !write_scalar(t, v, dst, st, v[src], cur_local_count, heap, free_heap) {
                             break 'frame_loop;
                         }
                         if dst != src {
-                            r[src] = TAG_UNINIT;
+                            t[src] = TAG_UNINIT;
                         }
-                    } else if sw >= TAG_HEAP {
-                        if !assign_take_heap_slow(
-                            r,
-                            dst,
-                            src,
-                            cur_local_count,
-                            &mut cur_has_heap,
-                            heap,
-                            free_heap,
-                        ) {
-                            break 'frame_loop;
-                        }
-                    } else {
+                    } else if !assign_take_heap_slow(
+                        t,
+                        v,
+                        dst,
+                        src,
+                        cur_local_count,
+                        &mut cur_has_heap,
+                        heap,
+                        free_heap,
+                    ) {
                         break 'frame_loop;
                     }
                     ip += 1;
                 }
                 Op::Clear => {
-                    let idx = op.a as usize;
-                    let old = r[idx];
-                    if old >= TAG_HEAP
-                        && let Some(slot) = heap.get_mut(old as u32 as usize)
-                    {
-                        *slot = None;
-                        free_heap.push(old as u32);
+                    let r = op.a as usize;
+                    if t[r] == TAG_HEAP {
+                        let idx = v[r] as u32;
+                        if let Some(slot) = heap.get_mut(idx as usize) {
+                            *slot = None;
+                            free_heap.push(idx);
+                        }
                     }
-                    r[idx] = TAG_UNINIT;
+                    t[r] = TAG_UNINIT;
                     ip += 1;
                 }
 
@@ -2116,30 +2524,42 @@ pub(crate) fn run_fast(
                 // UNARY, CASTS, BUILTINS, INC/DEC
                 // =============================================================
                 Op::NegNum => {
-                    let a = r[op.b as usize];
-                    let res = if is_f64(a) {
-                        box_f64(-unbox_f64(a))
-                    } else if is_int(a) {
-                        match box_int_checked(-unbox_int(a)) {
-                            Some(w) => w,
-                            None => break 'frame_loop,
+                    let st = t[op.b as usize];
+                    let sb = v[op.b as usize];
+                    let (dt, db) = if st == TAG_FLOAT {
+                        (TAG_FLOAT, (-f64::from_bits(sb)).to_bits())
+                    } else if st == TAG_INT {
+                        match (sb as i64).checked_neg() {
+                            Some(n) => (TAG_INT, n as u64),
+                            None => (TAG_FLOAT, (-((sb as i64) as f64)).to_bits()),
                         }
                     } else {
                         break 'frame_loop;
                     };
-                    if !write_word(r, op.a as usize, res, cur_local_count, heap, free_heap) {
+                    if !write_scalar(
+                        t,
+                        v,
+                        op.a as usize,
+                        dt,
+                        db,
+                        cur_local_count,
+                        heap,
+                        free_heap,
+                    ) {
                         break 'frame_loop;
                     }
                     ip += 1;
                 }
                 Op::NotBool => {
-                    let Some(truthy) = scalar_truthy(r[op.b as usize]) else {
+                    let Some(truthy) = scalar_truthy(t[op.b as usize], v[op.b as usize]) else {
                         break 'frame_loop;
                     };
-                    if !write_word(
-                        r,
+                    if !write_scalar(
+                        t,
+                        v,
                         op.a as usize,
-                        box_bool(!truthy),
+                        TAG_BOOL,
+                        u64::from(!truthy),
                         cur_local_count,
                         heap,
                         free_heap,
@@ -2149,70 +2569,90 @@ pub(crate) fn run_fast(
                     ip += 1;
                 }
                 Op::BitNotInt => {
-                    let a = r[op.b as usize];
-                    if !is_int(a) {
+                    if t[op.b as usize] != TAG_INT {
                         break 'frame_loop;
                     }
-                    let res = TAG_INT | ((!a) & PAYLOAD_MASK);
-                    if !write_word(r, op.a as usize, res, cur_local_count, heap, free_heap) {
+                    if !write_scalar(
+                        t,
+                        v,
+                        op.a as usize,
+                        TAG_INT,
+                        !v[op.b as usize],
+                        cur_local_count,
+                        heap,
+                        free_heap,
+                    ) {
                         break 'frame_loop;
                     }
                     ip += 1;
                 }
                 Op::CastInt => {
-                    let a = r[op.b as usize];
-                    let res = if is_int(a) {
-                        a
-                    } else if is_f64(a) {
-                        let f = unbox_f64(a);
-                        if f.is_finite()
-                            && (-140_737_488_355_328.0..140_737_488_355_328.0).contains(&f)
-                        {
-                            match box_int_checked(f as i64) {
-                                Some(w) => w,
-                                None => break 'frame_loop,
+                    let st = t[op.b as usize];
+                    let sb = v[op.b as usize];
+                    let res = match st {
+                        TAG_INT => sb,
+                        TAG_FLOAT => {
+                            let f = f64::from_bits(sb);
+                            if f.is_finite()
+                                && (-9223372036854775808.0..9223372036854775808.0).contains(&f)
+                            {
+                                (f as i64) as u64
+                            } else {
+                                break 'frame_loop;
                             }
-                        } else {
-                            break 'frame_loop;
                         }
-                    } else if a == TAG_NULL {
-                        box_i32(0)
-                    } else if (a & TAG_MASK) == TAG_BOOL {
-                        box_i32((a & 1) as i32)
-                    } else {
-                        break 'frame_loop;
+                        TAG_NULL => 0,
+                        TAG_BOOL => u64::from(sb != 0),
+                        _ => break 'frame_loop,
                     };
-                    if !write_word(r, op.a as usize, res, cur_local_count, heap, free_heap) {
+                    if !write_scalar(
+                        t,
+                        v,
+                        op.a as usize,
+                        TAG_INT,
+                        res,
+                        cur_local_count,
+                        heap,
+                        free_heap,
+                    ) {
                         break 'frame_loop;
                     }
                     ip += 1;
                 }
                 Op::CastFloat => {
-                    let a = r[op.b as usize];
-                    let res = if is_f64(a) {
-                        a
-                    } else if is_int(a) {
-                        box_f64(unbox_int(a) as f64)
-                    } else if a == TAG_NULL {
-                        box_f64(0.0)
-                    } else if (a & TAG_MASK) == TAG_BOOL {
-                        box_f64(if (a & 1) != 0 { 1.0 } else { 0.0 })
-                    } else {
-                        break 'frame_loop;
+                    let st = t[op.b as usize];
+                    let sb = v[op.b as usize];
+                    let bits = match st {
+                        TAG_FLOAT => sb,
+                        TAG_INT => ((sb as i64) as f64).to_bits(),
+                        TAG_NULL => 0.0f64.to_bits(),
+                        TAG_BOOL => (if sb != 0 { 1.0f64 } else { 0.0f64 }).to_bits(),
+                        _ => break 'frame_loop,
                     };
-                    if !write_word(r, op.a as usize, res, cur_local_count, heap, free_heap) {
+                    if !write_scalar(
+                        t,
+                        v,
+                        op.a as usize,
+                        TAG_FLOAT,
+                        bits,
+                        cur_local_count,
+                        heap,
+                        free_heap,
+                    ) {
                         break 'frame_loop;
                     }
                     ip += 1;
                 }
                 Op::CastBool => {
-                    let Some(truthy) = scalar_truthy(r[op.b as usize]) else {
+                    let Some(truthy) = scalar_truthy(t[op.b as usize], v[op.b as usize]) else {
                         break 'frame_loop;
                     };
-                    if !write_word(
-                        r,
+                    if !write_scalar(
+                        t,
+                        v,
                         op.a as usize,
-                        box_bool(truthy),
+                        TAG_BOOL,
+                        u64::from(truthy),
                         cur_local_count,
                         heap,
                         free_heap,
@@ -2222,14 +2662,31 @@ pub(crate) fn run_fast(
                     ip += 1;
                 }
                 Op::StrLen => {
-                    if !str_len_helper(
-                        r,
+                    let st = t[op.b as usize];
+                    let len = if st == TAG_CONST {
+                        match unit_consts.get(v[op.b as usize] as usize) {
+                            Some(Value::InternedStr(s)) => s.len(),
+                            Some(Value::String(s)) => s.len(),
+                            _ => break 'frame_loop,
+                        }
+                    } else if st == TAG_HEAP {
+                        match heap.get(v[op.b as usize] as usize) {
+                            Some(Some(Value::String(s))) => s.len(),
+                            Some(Some(Value::InternedStr(s))) => s.len(),
+                            _ => break 'frame_loop,
+                        }
+                    } else {
+                        break 'frame_loop;
+                    };
+                    if !write_scalar(
+                        t,
+                        v,
                         op.a as usize,
-                        op.b as usize,
+                        TAG_INT,
+                        len as u64,
                         cur_local_count,
                         heap,
                         free_heap,
-                        unit_consts,
                     ) {
                         break 'frame_loop;
                     }
@@ -2237,15 +2694,18 @@ pub(crate) fn run_fast(
                 }
                 Op::IncLocalFast => {
                     let loc = op.a as usize;
-                    let w = r[loc];
-                    if is_int(w) {
-                        let Some(nw) = box_int_checked(unbox_int(w) + 1) else {
-                            break 'frame_loop;
-                        };
-                        r[loc] = nw;
+                    if t[loc] == TAG_INT {
+                        let next = (v[loc] as i64).wrapping_add(1);
+                        if next != i64::MIN {
+                            v[loc] = next as u64;
+                            ip += 1;
+                            continue;
+                        }
+                        t[loc] = TAG_FLOAT;
+                        v[loc] = ((i64::MAX as f64) + 1.0).to_bits();
                         ip += 1;
-                    } else if is_f64(w) {
-                        r[loc] = box_f64(unbox_f64(w) + 1.0);
+                    } else if t[loc] == TAG_FLOAT {
+                        v[loc] = (f64::from_bits(v[loc]) + 1.0).to_bits();
                         ip += 1;
                     } else {
                         break 'frame_loop;
@@ -2253,15 +2713,18 @@ pub(crate) fn run_fast(
                 }
                 Op::DecLocalFast => {
                     let loc = op.a as usize;
-                    let w = r[loc];
-                    if is_int(w) {
-                        let Some(nw) = box_int_checked(unbox_int(w) - 1) else {
-                            break 'frame_loop;
-                        };
-                        r[loc] = nw;
+                    if t[loc] == TAG_INT {
+                        let next = (v[loc] as i64).wrapping_sub(1);
+                        if next != i64::MAX {
+                            v[loc] = next as u64;
+                            ip += 1;
+                            continue;
+                        }
+                        t[loc] = TAG_FLOAT;
+                        v[loc] = ((i64::MIN as f64) - 1.0).to_bits();
                         ip += 1;
-                    } else if is_f64(w) {
-                        r[loc] = box_f64(unbox_f64(w) - 1.0);
+                    } else if t[loc] == TAG_FLOAT {
+                        v[loc] = (f64::from_bits(v[loc]) - 1.0).to_bits();
                         ip += 1;
                     } else {
                         break 'frame_loop;
@@ -2271,25 +2734,37 @@ pub(crate) fn run_fast(
                     let dst = op.a as usize;
                     let loc = op.b as usize;
                     let mode = op.c; // 0=PreInc, 1=PostInc, 2=PreDec, 3=PostDec
-                    let old = r[loc];
-                    let next = if is_int(old) {
-                        let delta = if mode < 2 { 1 } else { -1 };
-                        let Some(nw) = box_int_checked(unbox_int(old) + delta) else {
-                            break 'frame_loop;
-                        };
-                        nw
-                    } else if is_f64(old) {
-                        let delta = if mode < 2 { 1.0 } else { -1.0 };
-                        box_f64(unbox_f64(old) + delta)
+                    let old_t = t[loc];
+                    let old_b = v[loc];
+                    let (new_t, new_b) = if old_t == TAG_INT {
+                        let cur = old_b as i64;
+                        if mode < 2 {
+                            match cur.checked_add(1) {
+                                Some(n) => (TAG_INT, n as u64),
+                                None => (TAG_FLOAT, ((cur as f64) + 1.0).to_bits()),
+                            }
+                        } else {
+                            match cur.checked_sub(1) {
+                                Some(n) => (TAG_INT, n as u64),
+                                None => (TAG_FLOAT, ((cur as f64) - 1.0).to_bits()),
+                            }
+                        }
+                    } else if old_t == TAG_FLOAT {
+                        let d = if mode < 2 { 1.0 } else { -1.0 };
+                        (TAG_FLOAT, (f64::from_bits(old_b) + d).to_bits())
                     } else {
                         break 'frame_loop;
                     };
-                    let res = if (mode & 1) == 0 { next } else { old };
-                    // Validate/release `dst` BEFORE mutating `loc`!
-                    if !write_word(r, dst, res, cur_local_count, heap, free_heap) {
+                    let (rt, rb) = if (mode & 1) == 0 {
+                        (new_t, new_b)
+                    } else {
+                        (old_t, old_b)
+                    };
+                    if !write_scalar(t, v, dst, rt, rb, cur_local_count, heap, free_heap) {
                         break 'frame_loop;
                     }
-                    r[loc] = next;
+                    t[loc] = new_t;
+                    v[loc] = new_b;
                     ip += 1;
                 }
 
@@ -2297,14 +2772,21 @@ pub(crate) fn run_fast(
                 // COMPARISONS & BRANCHES
                 // =============================================================
                 Op::CmpNum => {
-                    let Some(res) = compare_words(op.imm as u8, r[op.b as usize], r[op.c as usize])
-                    else {
+                    let Some(res) = compare_nums(
+                        op.imm as u8,
+                        t[op.b as usize],
+                        v[op.b as usize],
+                        t[op.c as usize],
+                        v[op.c as usize],
+                    ) else {
                         break 'frame_loop;
                     };
-                    if !write_word(
-                        r,
+                    if !write_scalar(
+                        t,
+                        v,
                         op.a as usize,
-                        box_bool(res),
+                        TAG_BOOL,
+                        u64::from(res),
                         cur_local_count,
                         heap,
                         free_heap,
@@ -2319,29 +2801,15 @@ pub(crate) fn run_fast(
                         work += 1;
                         if work >= YIELD_AFTER_STEPS {
                             work = 0;
-                            return materialize_deopt(
-                                code,
-                                stack,
-                                registers,
-                                fast_stack,
-                                entry_frame,
-                                entry_fast.reg_count as usize,
-                                cur_fn_idx,
-                                cur_fn,
-                                base,
-                                target,
-                                true,
-                                work_io,
-                                executed_io,
-                                work,
-                                YIELD_AFTER_STEPS as u64,
-                            );
+                            ip = target;
+                            yield_now = true;
+                            break 'frame_loop;
                         }
                     }
                     ip = target;
                 }
                 Op::JumpIf | Op::JumpIfNot => {
-                    let Some(truthy) = scalar_truthy(r[op.a as usize]) else {
+                    let Some(truthy) = scalar_truthy(t[op.a as usize], v[op.a as usize]) else {
                         break 'frame_loop;
                     };
                     let take = if op.op == Op::JumpIf { truthy } else { !truthy };
@@ -2351,23 +2819,9 @@ pub(crate) fn run_fast(
                             work += 1;
                             if work >= YIELD_AFTER_STEPS {
                                 work = 0;
-                                return materialize_deopt(
-                                    code,
-                                    stack,
-                                    registers,
-                                    fast_stack,
-                                    entry_frame,
-                                    entry_fast.reg_count as usize,
-                                    cur_fn_idx,
-                                    cur_fn,
-                                    base,
-                                    target,
-                                    true,
-                                    work_io,
-                                    executed_io,
-                                    work,
-                                    YIELD_AFTER_STEPS as u64,
-                                );
+                                ip = target;
+                                yield_now = true;
+                                break 'frame_loop;
                             }
                         }
                         ip = target;
@@ -2376,11 +2830,11 @@ pub(crate) fn run_fast(
                     }
                 }
                 Op::JumpIfNull | Op::JumpIfNotNull => {
-                    let w = r[op.a as usize];
-                    if w == TAG_UNINIT || w >= TAG_HEAP {
+                    let st = t[op.a as usize];
+                    if st == TAG_UNINIT || st == TAG_HEAP {
                         break 'frame_loop;
                     }
-                    let is_null = w == TAG_NULL;
+                    let is_null = st == TAG_NULL;
                     let take = if op.op == Op::JumpIfNull {
                         is_null
                     } else {
@@ -2392,23 +2846,9 @@ pub(crate) fn run_fast(
                             work += 1;
                             if work >= YIELD_AFTER_STEPS {
                                 work = 0;
-                                return materialize_deopt(
-                                    code,
-                                    stack,
-                                    registers,
-                                    fast_stack,
-                                    entry_frame,
-                                    entry_fast.reg_count as usize,
-                                    cur_fn_idx,
-                                    cur_fn,
-                                    base,
-                                    target,
-                                    true,
-                                    work_io,
-                                    executed_io,
-                                    work,
-                                    YIELD_AFTER_STEPS as u64,
-                                );
+                                ip = target;
+                                yield_now = true;
+                                break 'frame_loop;
                             }
                         }
                         ip = target;
@@ -2419,7 +2859,13 @@ pub(crate) fn run_fast(
                 Op::BranchCmp => {
                     let cmp = op.a & 0x0f;
                     let when = (op.a & 0x10) != 0;
-                    let Some(res) = compare_words(cmp, r[op.b as usize], r[op.c as usize]) else {
+                    let Some(res) = compare_nums(
+                        cmp,
+                        t[op.b as usize],
+                        v[op.b as usize],
+                        t[op.c as usize],
+                        v[op.c as usize],
+                    ) else {
                         break 'frame_loop;
                     };
                     if res == when {
@@ -2428,23 +2874,9 @@ pub(crate) fn run_fast(
                             work += 1;
                             if work >= YIELD_AFTER_STEPS {
                                 work = 0;
-                                return materialize_deopt(
-                                    code,
-                                    stack,
-                                    registers,
-                                    fast_stack,
-                                    entry_frame,
-                                    entry_fast.reg_count as usize,
-                                    cur_fn_idx,
-                                    cur_fn,
-                                    base,
-                                    target,
-                                    true,
-                                    work_io,
-                                    executed_io,
-                                    work,
-                                    YIELD_AFTER_STEPS as u64,
-                                );
+                                ip = target;
+                                yield_now = true;
+                                break 'frame_loop;
                             }
                         }
                         ip = target;
@@ -2460,10 +2892,10 @@ pub(crate) fn run_fast(
                 | Op::BranchNeImm
                 | Op::BranchIdentImm
                 | Op::BranchNotIdentImm => {
-                    let lw = r[op.a as usize];
+                    let lt = t[op.a as usize];
                     let imm = i64::from(op.imm);
-                    let res = if is_int(lw) {
-                        let a = unbox_int(lw);
+                    let res = if lt == TAG_INT {
+                        let a = v[op.a as usize] as i64;
                         match op.op {
                             Op::BranchLtImm => a < imm,
                             Op::BranchLeImm => a <= imm,
@@ -2473,8 +2905,8 @@ pub(crate) fn run_fast(
                             Op::BranchNeImm | Op::BranchNotIdentImm => a != imm,
                             _ => unreachable!(),
                         }
-                    } else if is_f64(lw) {
-                        let a = unbox_f64(lw);
+                    } else if lt == TAG_FLOAT {
+                        let a = f64::from_bits(v[op.a as usize]);
                         let b = imm as f64;
                         match op.op {
                             Op::BranchLtImm => a < b,
@@ -2488,7 +2920,8 @@ pub(crate) fn run_fast(
                             _ => unreachable!(),
                         }
                     } else if matches!(op.op, Op::BranchIdentImm | Op::BranchNotIdentImm)
-                        && lw < TAG_UNINIT
+                        && lt != TAG_UNINIT
+                        && lt != TAG_HEAP
                     {
                         matches!(op.op, Op::BranchNotIdentImm)
                     } else {
@@ -2501,23 +2934,9 @@ pub(crate) fn run_fast(
                             work += 1;
                             if work >= YIELD_AFTER_STEPS {
                                 work = 0;
-                                return materialize_deopt(
-                                    code,
-                                    stack,
-                                    registers,
-                                    fast_stack,
-                                    entry_frame,
-                                    entry_fast.reg_count as usize,
-                                    cur_fn_idx,
-                                    cur_fn,
-                                    base,
-                                    target,
-                                    true,
-                                    work_io,
-                                    executed_io,
-                                    work,
-                                    YIELD_AFTER_STEPS as u64,
-                                );
+                                ip = target;
+                                yield_now = true;
+                                break 'frame_loop;
                             }
                         }
                         ip = target;
@@ -2527,11 +2946,12 @@ pub(crate) fn run_fast(
                 }
 
                 // =============================================================
-                // IN-LOOP ARRAY OPS (ALL OUT-OF-LINE HELPERS!)
+                // IN-LOOP ARRAY OPS (DIRECT LIST SLICE + HOISTED INNER LOOPS!)
                 // =============================================================
                 Op::ArrGetInt => {
                     if !arr_get_int_helper(
-                        r,
+                        t,
+                        v,
                         op.a as usize,
                         op.b as usize,
                         op.c as usize,
@@ -2548,7 +2968,8 @@ pub(crate) fn run_fast(
                 }
                 Op::Arr2DGetInt => {
                     if !arr_2d_get_int_helper(
-                        r,
+                        t,
+                        v,
                         op.a as usize,
                         op.b as usize,
                         op.c as usize,
@@ -2565,7 +2986,8 @@ pub(crate) fn run_fast(
                 }
                 Op::ArrSetInt => {
                     if !arr_set_int_helper(
-                        r,
+                        t,
+                        v,
                         op.a as usize,
                         op.b as usize,
                         op.c as usize,
@@ -2578,7 +3000,8 @@ pub(crate) fn run_fast(
                 }
                 Op::ArrAddAssignInt => {
                     if !arr_add_assign_int_helper(
-                        r,
+                        t,
+                        v,
                         op.a as usize,
                         op.b as usize,
                         op.c as usize,
@@ -2590,7 +3013,8 @@ pub(crate) fn run_fast(
                 }
                 Op::ArrAddFromArr => {
                     if !arr_add_from_arr_helper(
-                        r,
+                        t,
+                        v,
                         op.a as usize,
                         op.b as usize,
                         op.c as usize,
@@ -2600,33 +3024,94 @@ pub(crate) fn run_fast(
                     }
                     ip += 1;
                 }
+                Op::ArrAddFromArrLoop => {
+                    let budget = YIELD_AFTER_STEPS.saturating_sub(work).max(1);
+                    match arr_add_from_arr_loop_helper(
+                        t,
+                        v,
+                        op.a as usize,
+                        op.b as usize,
+                        op.c as usize,
+                        i64::from(op.imm),
+                        heap,
+                        budget,
+                    ) {
+                        ArrayLoopExit::Done(spent) => {
+                            work += spent;
+                            ip += 1;
+                        }
+                        ArrayLoopExit::Yield => {
+                            work = 0;
+                            yield_now = true;
+                            break 'frame_loop;
+                        }
+                        ArrayLoopExit::Bail(spent) => {
+                            work += spent;
+                            break 'frame_loop;
+                        }
+                    }
+                }
+                Op::ArrUnsetStepLoop => {
+                    let budget = YIELD_AFTER_STEPS.saturating_sub(work).max(1);
+                    match arr_unset_step_loop_helper(
+                        t,
+                        v,
+                        op.a as usize,
+                        op.b as usize,
+                        op.c as usize,
+                        i64::from(op.imm),
+                        heap,
+                        budget,
+                    ) {
+                        ArrayLoopExit::Done(spent) => {
+                            work += spent;
+                            ip += 1;
+                        }
+                        ArrayLoopExit::Yield => {
+                            work = 0;
+                            yield_now = true;
+                            break 'frame_loop;
+                        }
+                        ArrayLoopExit::Bail(spent) => {
+                            work += spent;
+                            break 'frame_loop;
+                        }
+                    }
+                }
                 Op::ArrPush => {
-                    if !arr_push_helper(r, op.a as usize, op.b as usize, heap, unit_consts) {
+                    if !arr_push_helper(t, v, op.a as usize, op.b as usize, heap, unit_consts) {
                         break 'frame_loop;
                     }
                     ip += 1;
                 }
                 Op::ArrUnsetInt => {
-                    if !arr_unset_int_helper(r, op.a as usize, op.b as usize, heap) {
+                    if !arr_unset_int_helper(t, v, op.a as usize, op.b as usize, heap) {
                         break 'frame_loop;
                     }
                     ip += 1;
                 }
 
                 // =============================================================
-                // SPECIALIZED CALLS & RETURNS (ZERO-OVERHEAD RECURSION & NOOPS!)
+                // SPECIALIZED CALLS & RETURNS
                 // =============================================================
                 Op::CallNoop => {
                     let dst = op.a as usize;
                     let args_base = op.b as usize;
                     let count = op.c as usize;
-                    if count == 1 && r[args_base] < TAG_UNINIT && r[dst] < TAG_HEAP {
-                        r[args_base] = TAG_UNINIT;
-                        r[dst] = TAG_NULL;
-                    } else if count == 0 && r[dst] < TAG_HEAP {
-                        r[dst] = TAG_NULL;
+                    if count == 1
+                        && t[args_base] != TAG_UNINIT
+                        && t[args_base] != TAG_HEAP
+                        && t[dst] != TAG_HEAP
+                    {
+                        t[args_base] = TAG_UNINIT;
+                        t[dst] = TAG_NULL;
+                        v[dst] = 0;
+                    } else if count == 0 && t[dst] != TAG_HEAP {
+                        t[dst] = TAG_NULL;
+                        v[dst] = 0;
                     } else if !call_noop_slow(
-                        r,
+                        t,
+                        v,
                         dst,
                         args_base,
                         count,
@@ -2636,33 +3121,17 @@ pub(crate) fn run_fast(
                     ) {
                         break 'frame_loop;
                     }
-                    work += 1;
-                    if work >= YIELD_AFTER_STEPS {
-                        work = 0;
-                        return materialize_deopt(
-                            code,
-                            stack,
-                            registers,
-                            fast_stack,
-                            entry_frame,
-                            entry_fast.reg_count as usize,
-                            cur_fn_idx,
-                            cur_fn,
-                            base,
-                            ip + 1,
-                            true,
-                            work_io,
-                            executed_io,
-                            work,
-                            YIELD_AFTER_STEPS as u64,
-                        );
-                    }
                     ip += 1;
                 }
                 Op::CallSelf1 => {
-                    let arg0 = r[op.b as usize];
-                    if arg0 < TAG_UNINIT && fast_stack.frames.len() < max_fast_frames {
-                        r[op.b as usize] = TAG_UNINIT;
+                    let arg_r = op.b as usize;
+                    let at = t[arg_r];
+                    if at != TAG_UNINIT
+                        && at != TAG_HEAP
+                        && fast_stack.frames.len() < max_fast_frames
+                    {
+                        let ab = v[arg_r];
+                        t[arg_r] = TAG_UNINIT;
                         let new_base = base + cur_reg_count as usize;
                         fast_stack.frames.push(FastFrame {
                             function: cur_fn_idx,
@@ -2674,10 +3143,11 @@ pub(crate) fn run_fast(
                             return_bc_ip: cur_fn.bc_ip[ip] + 1,
                         });
                         fast_stack.ensure_window(new_base);
-                        fast_stack.regs[new_base] = arg0;
+                        fast_stack.tags[new_base] = at;
+                        fast_stack.bits[new_base] = ab;
                         let regs_n = cur_reg_count as usize;
                         if regs_n > 1 {
-                            fast_stack.regs[new_base + 1..new_base + regs_n].fill(TAG_UNINIT);
+                            fast_stack.tags[new_base + 1..new_base + regs_n].fill(TAG_UNINIT);
                         }
                         cur_has_heap = false;
                         base = new_base;
@@ -2685,23 +3155,8 @@ pub(crate) fn run_fast(
                         work += 1;
                         if work >= YIELD_AFTER_STEPS {
                             work = 0;
-                            return materialize_deopt(
-                                code,
-                                stack,
-                                registers,
-                                fast_stack,
-                                entry_frame,
-                                entry_fast.reg_count as usize,
-                                cur_fn_idx,
-                                cur_fn,
-                                base,
-                                0,
-                                true,
-                                work_io,
-                                executed_io,
-                                work,
-                                YIELD_AFTER_STEPS as u64,
-                            );
+                            yield_now = true;
+                            break 'frame_loop;
                         }
                         continue 'frame_loop;
                     }
@@ -2732,23 +3187,8 @@ pub(crate) fn run_fast(
                             work += 1;
                             if work >= YIELD_AFTER_STEPS {
                                 work = 0;
-                                return materialize_deopt(
-                                    code,
-                                    stack,
-                                    registers,
-                                    fast_stack,
-                                    entry_frame,
-                                    entry_fast.reg_count as usize,
-                                    cur_fn_idx,
-                                    cur_fn,
-                                    base,
-                                    0,
-                                    true,
-                                    work_io,
-                                    executed_io,
-                                    work,
-                                    YIELD_AFTER_STEPS as u64,
-                                );
+                                yield_now = true;
+                                break 'frame_loop;
                             }
                             continue 'frame_loop;
                         }
@@ -2760,14 +3200,18 @@ pub(crate) fn run_fast(
                     }
                 }
                 Op::CallSelf2 => {
-                    let arg0 = r[op.b as usize];
-                    let arg1 = r[op.c as usize];
-                    if arg0 < TAG_UNINIT
-                        && arg1 < TAG_UNINIT
+                    let a0 = op.b as usize;
+                    let a1 = op.c as usize;
+                    let (t0, t1) = (t[a0], t[a1]);
+                    if t0 != TAG_UNINIT
+                        && t0 != TAG_HEAP
+                        && t1 != TAG_UNINIT
+                        && t1 != TAG_HEAP
                         && fast_stack.frames.len() < max_fast_frames
                     {
-                        r[op.b as usize] = TAG_UNINIT;
-                        r[op.c as usize] = TAG_UNINIT;
+                        let (b0, b1) = (v[a0], v[a1]);
+                        t[a0] = TAG_UNINIT;
+                        t[a1] = TAG_UNINIT;
                         let new_base = base + cur_reg_count as usize;
                         fast_stack.frames.push(FastFrame {
                             function: cur_fn_idx,
@@ -2779,11 +3223,13 @@ pub(crate) fn run_fast(
                             return_bc_ip: cur_fn.bc_ip[ip] + 1,
                         });
                         fast_stack.ensure_window(new_base);
-                        fast_stack.regs[new_base] = arg0;
-                        fast_stack.regs[new_base + 1] = arg1;
+                        fast_stack.tags[new_base] = t0;
+                        fast_stack.bits[new_base] = b0;
+                        fast_stack.tags[new_base + 1] = t1;
+                        fast_stack.bits[new_base + 1] = b1;
                         let regs_n = cur_reg_count as usize;
                         if regs_n > 2 {
-                            fast_stack.regs[new_base + 2..new_base + regs_n].fill(TAG_UNINIT);
+                            fast_stack.tags[new_base + 2..new_base + regs_n].fill(TAG_UNINIT);
                         }
                         cur_has_heap = false;
                         base = new_base;
@@ -2791,23 +3237,8 @@ pub(crate) fn run_fast(
                         work += 1;
                         if work >= YIELD_AFTER_STEPS {
                             work = 0;
-                            return materialize_deopt(
-                                code,
-                                stack,
-                                registers,
-                                fast_stack,
-                                entry_frame,
-                                entry_fast.reg_count as usize,
-                                cur_fn_idx,
-                                cur_fn,
-                                base,
-                                0,
-                                true,
-                                work_io,
-                                executed_io,
-                                work,
-                                YIELD_AFTER_STEPS as u64,
-                            );
+                            yield_now = true;
+                            break 'frame_loop;
                         }
                         continue 'frame_loop;
                     }
@@ -2838,23 +3269,8 @@ pub(crate) fn run_fast(
                             work += 1;
                             if work >= YIELD_AFTER_STEPS {
                                 work = 0;
-                                return materialize_deopt(
-                                    code,
-                                    stack,
-                                    registers,
-                                    fast_stack,
-                                    entry_frame,
-                                    entry_fast.reg_count as usize,
-                                    cur_fn_idx,
-                                    cur_fn,
-                                    base,
-                                    0,
-                                    true,
-                                    work_io,
-                                    executed_io,
-                                    work,
-                                    YIELD_AFTER_STEPS as u64,
-                                );
+                                yield_now = true;
+                                break 'frame_loop;
                             }
                             continue 'frame_loop;
                         }
@@ -2903,48 +3319,12 @@ pub(crate) fn run_fast(
                             work += 1;
                             if work >= YIELD_AFTER_STEPS {
                                 work = 0;
-                                return materialize_deopt(
-                                    code,
-                                    stack,
-                                    registers,
-                                    fast_stack,
-                                    entry_frame,
-                                    entry_fast.reg_count as usize,
-                                    cur_fn_idx,
-                                    cur_fn,
-                                    base,
-                                    0,
-                                    true,
-                                    work_io,
-                                    executed_io,
-                                    work,
-                                    YIELD_AFTER_STEPS as u64,
-                                );
+                                yield_now = true;
+                                break 'frame_loop;
                             }
                             continue 'frame_loop;
                         }
                         CallSetup::EmptyDone => {
-                            work += 1;
-                            if work >= YIELD_AFTER_STEPS {
-                                work = 0;
-                                return materialize_deopt(
-                                    code,
-                                    stack,
-                                    registers,
-                                    fast_stack,
-                                    entry_frame,
-                                    entry_fast.reg_count as usize,
-                                    cur_fn_idx,
-                                    cur_fn,
-                                    base,
-                                    ip + 1,
-                                    true,
-                                    work_io,
-                                    executed_io,
-                                    work,
-                                    YIELD_AFTER_STEPS as u64,
-                                );
-                            }
                             ip += 1;
                             continue 'frame_loop;
                         }
@@ -2952,38 +3332,38 @@ pub(crate) fn run_fast(
                     }
                 }
                 Op::RetIntImm | Op::ReturnReg | Op::ReturnNull => {
-                    let ret_w = match op.op {
-                        Op::RetIntImm => box_i32(op.imm),
-                        Op::ReturnNull => TAG_NULL,
+                    let (ret_t, ret_b) = match op.op {
+                        Op::RetIntImm => (TAG_INT, i64::from(op.imm) as u64),
+                        Op::ReturnNull => (TAG_NULL, 0),
                         Op::ReturnReg => {
-                            let rw = r[op.a as usize];
-                            if rw == TAG_UNINIT {
+                            let rt = t[op.a as usize];
+                            if rt == TAG_UNINIT {
                                 break 'frame_loop;
                             }
-                            if rw >= TAG_HEAP {
+                            let rb = v[op.a as usize];
+                            if rt == TAG_HEAP {
                                 let is_ref = heap
-                                    .get(rw as u32 as usize)
+                                    .get(rb as usize)
                                     .and_then(Option::as_ref)
                                     .is_none_or(Value::is_reference);
                                 if is_ref {
                                     break 'frame_loop;
                                 }
                             }
-                            rw
+                            (rt, rb)
                         }
                         _ => unreachable!(),
                     };
 
                     if let Some(mask) = cur_fn.return_mask
-                        && !return_mask_fits(mask, ret_w, heap, unit_consts)
+                        && !return_mask_fits(mask, ret_t, ret_b, heap, unit_consts)
                     {
                         break 'frame_loop;
                     }
 
-                    // Returning from a nested FastFrame?
                     if let Some(caller_fast) = fast_stack.frames.pop() {
-                        if ret_w >= TAG_HEAP && op.op == Op::ReturnReg {
-                            r[op.a as usize] = TAG_UNINIT;
+                        if ret_t == TAG_HEAP && op.op == Op::ReturnReg {
+                            t[op.a as usize] = TAG_UNINIT;
                         }
                         if cur_has_heap {
                             fast_stack.release_frame_heap(base, cur_reg_count as usize);
@@ -2992,12 +3372,13 @@ pub(crate) fn run_fast(
                         let caller_dst = caller_fast.return_dst as usize;
                         let mut caller_has_heap = caller_fast.has_heap;
 
-                        let old_dst = fast_stack.regs[caller_base + caller_dst];
-                        if old_dst >= TAG_HEAP {
-                            fast_stack.free_heap_slot(old_dst as u32);
+                        if fast_stack.tags[caller_base + caller_dst] == TAG_HEAP {
+                            let old_idx = fast_stack.bits[caller_base + caller_dst] as u32;
+                            fast_stack.free_heap_slot(old_idx);
                         }
-                        fast_stack.regs[caller_base + caller_dst] = ret_w;
-                        if ret_w >= TAG_HEAP {
+                        fast_stack.tags[caller_base + caller_dst] = ret_t;
+                        fast_stack.bits[caller_base + caller_dst] = ret_b;
+                        if ret_t == TAG_HEAP {
                             caller_has_heap = true;
                         }
 
@@ -3020,18 +3401,21 @@ pub(crate) fn run_fast(
 
                     // Returning from the entry frame F0!
                     if !entry_can_fast_return {
+                        structural_deopt = true;
                         break 'frame_loop;
                     }
                     let Some(caller_vm) = stack.caller().copied() else {
+                        structural_deopt = true;
                         break 'frame_loop;
                     };
                     let Some(destination) = entry_frame.destination() else {
+                        structural_deopt = true;
                         break 'frame_loop;
                     };
-                    if ret_w >= TAG_HEAP && op.op == Op::ReturnReg {
-                        r[op.a as usize] = TAG_UNINIT;
+                    if ret_t == TAG_HEAP && op.op == Op::ReturnReg {
+                        t[op.a as usize] = TAG_UNINIT;
                     }
-                    let Some(ret_value) = fast_stack.take_value(ret_w, unit_consts) else {
+                    let Some(ret_value) = fast_stack.take_value(ret_t, ret_b, unit_consts) else {
                         break 'frame_loop;
                     };
                     fast_stack.reset();
@@ -3047,14 +3431,25 @@ pub(crate) fn run_fast(
                 }
 
                 // =============================================================
-                // EXACT DEOPTIMIZATION
+                // STRUCTURAL DEOPT (e.g. `echo` in `mandel2` — NOT a type deopt!)
                 // =============================================================
                 Op::Deopt => {
+                    structural_deopt = true;
                     break 'frame_loop;
                 }
             }
         }
     }
+
+    // Track runtime type-deopts (ignore yields and structural `Op::Deopt`).
+    // After 2 runtime type-deopts on the same function, disable Tier 2 for it
+    // so `SplFixedArray` / string-keyed-map scripts never thrash!
+    let disable_fn = if !yield_now && !structural_deopt && fast_stack.frames.is_empty() {
+        let prev = cur_fn.type_deopts.fetch_add(1, Ordering::Relaxed);
+        (prev >= 1).then_some(cur_fn_idx)
+    } else {
+        None
+    };
 
     materialize_deopt(
         code,
@@ -3067,7 +3462,8 @@ pub(crate) fn run_fast(
         cur_fn,
         base,
         ip,
-        false,
+        yield_now,
+        disable_fn,
         work_io,
         executed_io,
         work,
@@ -3075,8 +3471,6 @@ pub(crate) fn run_fast(
     )
 }
 
-/// Materialize the entry frame `F0` and every active nested [`FastFrame`]
-/// back into `Vm::registers` and `Vm::call_stack` at the exact bytecode IP.
 #[cold]
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
@@ -3092,6 +3486,7 @@ fn materialize_deopt(
     cur_base: usize,
     cur_fast_ip: usize,
     yield_now: bool,
+    disable_fn: Option<FunctionIndex>,
     work_io: &mut usize,
     executed_io: &mut u64,
     work: usize,
@@ -3168,5 +3563,6 @@ fn materialize_deopt(
             ip: cur_bc_ip,
         },
         yield_now,
+        disable_fn,
     }
 }
