@@ -9,6 +9,7 @@
 //! `Value::InternedStr` and `ArrayKey::Interned` do no reference counting, and
 //! array lookups reuse the pre-computed hash and numeric-key classification.
 
+use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::fmt;
 use std::hash::{Hash, Hasher};
@@ -58,7 +59,7 @@ impl InternedStr {
         static EMPTY: OnceLock<&'static InternedStr> = OnceLock::new();
         EMPTY.get_or_init(|| {
             let mut table = interner().lock().expect("interner poisoned");
-            table.intern_unchecked(b"")
+            table.intern_unchecked(hash_str_bytes(b""), b"")
         })
     }
 
@@ -324,11 +325,8 @@ impl InternTable {
         }
     }
 
-    fn intern_unchecked(&mut self, bytes: &[u8]) -> &'static InternedStr {
-        let hash = hash_str_bytes(bytes);
-        if let Some(&existing) = self.entries.find(hash, |entry| entry.bytes == bytes) {
-            return existing;
-        }
+    /// Adds `bytes`, which hash to `hash` and are not in the table yet.
+    fn intern_unchecked(&mut self, hash: u64, bytes: &[u8]) -> &'static InternedStr {
         let leaked_bytes: &'static [u8] = if bytes.is_empty() {
             b""
         } else {
@@ -354,8 +352,32 @@ fn interner() -> &'static Mutex<InternTable> {
     TABLE.get_or_init(|| Mutex::new(InternTable::new()))
 }
 
+thread_local! {
+    /// The strings this thread has interned or found so far, as pointers
+    /// into the process table. Entries are immortal and never change, so a
+    /// thread that interns a name it saw before (a PDO column of the next
+    /// query, a unit's literals in the next request) finds it here without
+    /// taking the process lock that every worker thread shares.
+    static SEEN: RefCell<HashTable<&'static InternedStr>> =
+        RefCell::new(HashTable::with_capacity(1_024));
+}
+
 fn intern_non_empty(bytes: &[u8]) -> Option<&'static InternedStr> {
     let hash = hash_str_bytes(bytes);
+    SEEN.with_borrow_mut(|seen| {
+        if let Some(&existing) = seen.find(hash, |entry| entry.bytes == bytes) {
+            return Some(existing);
+        }
+        let interned = intern_shared(hash, bytes)?;
+        seen.insert_unique(hash, interned, |entry| entry.hash);
+        Some(interned)
+    })
+}
+
+/// Finds or adds `bytes` in the process table, under its lock.
+#[cold]
+#[inline(never)]
+fn intern_shared(hash: u64, bytes: &[u8]) -> Option<&'static InternedStr> {
     let mut table = interner().lock().expect("interner poisoned");
     if let Some(&existing) = table.entries.find(hash, |entry| entry.bytes == bytes) {
         return Some(existing);
@@ -365,7 +387,7 @@ fn intern_non_empty(bytes: &[u8]) -> Option<&'static InternedStr> {
     {
         return None;
     }
-    Some(table.intern_unchecked(bytes))
+    Some(table.intern_unchecked(hash, bytes))
 }
 
 #[cfg(test)]
@@ -394,5 +416,27 @@ mod tests {
         let empty = InternedStr::try_intern(b"").unwrap();
         assert!(std::ptr::eq(empty, InternedStr::empty()));
         assert!(!empty.is_truthy());
+    }
+
+    #[test]
+    fn threads_share_one_canonical_string_through_their_own_tables() {
+        let here = InternedStr::try_intern(b"phera_intern_two_threads").unwrap();
+        let there = std::thread::spawn(|| {
+            let first = InternedStr::try_intern(b"phera_intern_two_threads").unwrap();
+            let again = InternedStr::try_intern(b"phera_intern_two_threads").unwrap();
+            assert!(std::ptr::eq(first, again));
+            first as *const InternedStr as usize
+        })
+        .join()
+        .unwrap();
+        assert_eq!(here as *const InternedStr as usize, there);
+        let only_there = std::thread::spawn(|| {
+            InternedStr::try_intern(b"phera_intern_made_elsewhere").unwrap() as *const InternedStr
+                as usize
+        })
+        .join()
+        .unwrap();
+        let seen_here = InternedStr::try_intern(b"phera_intern_made_elsewhere").unwrap();
+        assert_eq!(seen_here as *const InternedStr as usize, only_there);
     }
 }

@@ -147,7 +147,7 @@ impl PhpArray {
                 map.entries.capacity() * size_of::<storage::Entry>()
                     + map.index.as_ref().map_or(0, |index| {
                         size_of::<storage::Index>()
-                            + index.positions.capacity() * (size_of::<u32>() + 1)
+                            + index.positions.capacity() * (size_of::<[u32; 2]>() + 1)
                     })
             }
         }

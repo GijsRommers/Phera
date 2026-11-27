@@ -82,8 +82,9 @@ impl Site {
         self.document_root.display().to_string()
     }
 
-    /// Finds what a request path refers to. Reads the file system, so call
-    /// it from a blocking thread.
+    /// Finds what a request path refers to. It asks the file system about
+    /// the path (`stat`, `realpath`) but reads no file, so the worker thread
+    /// calls it directly.
     pub(crate) fn resolve(&self, request_path: &str) -> Resolved {
         let fallback = || match &self.front_controller {
             Some(script) => Resolved::Script(script.clone()),

@@ -141,9 +141,28 @@ impl RangeValues {
         }
     }
 
+    /// An integer range: every value lies between the endpoints, so stepping
+    /// in `u64` arithmetic from the start cannot leave `i64`, and no value
+    /// needs the float checks of [`RangeValues::collect`].
+    fn integers(&self, count: u64) -> PhpArray {
+        let start = self.start.integer;
+        let step = self.step.integer_step;
+        let at = |index: u64| {
+            let delta = index.wrapping_mul(step);
+            Value::Int(match self.direction {
+                Direction::Increasing => start.wrapping_add_unsigned(delta),
+                Direction::Decreasing => start.wrapping_sub_unsigned(delta),
+            })
+        };
+        PhpArray::from_values((0..count).map(at), count as usize)
+    }
+
     /// Rounded float counts can overrun the endpoint; PHP stops before that value.
     pub(super) fn collect(self) -> NativeResult {
         let count = self.count()?;
+        if matches!(self.kind, RangeKind::Integer) {
+            return Ok(Value::from(self.integers(count)));
+        }
         let values = (0..count)
             .map(|index| self.value_at(index))
             .take_while(|value| match value {

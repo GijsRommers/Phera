@@ -394,8 +394,38 @@ impl PhpArray {
                 Ok(None)
             }
             Storage::Map(map) => {
-                let replaced = map.insert_int_if_not_ref(index, value)?;
+                let replaced = map.insert_if_not_ref(ArrayKey::Int(index), value)?;
                 self.note_int_key(index);
+                if replaced.is_none() {
+                    self.maybe_compact();
+                }
+                Ok(replaced)
+            }
+        }
+    }
+
+    /// [`PhpArray::insert`] that refuses to overwrite a PHP reference,
+    /// returning `Err(value)` without mutating the array. A new key costs one
+    /// hash and one probe of the index, not a failed lookup and an insert.
+    #[inline]
+    pub fn insert_if_not_ref(
+        &mut self,
+        key: ArrayKey,
+        value: Value,
+    ) -> Result<Option<Value>, Value> {
+        if let ArrayKey::Int(index) = key {
+            return self.insert_int_if_not_ref(index, value);
+        }
+        let list_start = self.list_start;
+        match &mut self.storage {
+            Storage::List(_) => {
+                self.list_start = 0;
+                self.storage.as_map(list_start).append(key, value);
+                self.maybe_compact();
+                Ok(None)
+            }
+            Storage::Map(map) => {
+                let replaced = map.insert_if_not_ref(key, value)?;
                 if replaced.is_none() {
                     self.maybe_compact();
                 }

@@ -229,16 +229,16 @@ fn write_single_index(
                 Ok(old) => (true, old),
                 Err(_) => (false, None),
             },
-            IndexKey::Interned(s) => match target.get_mut_interned(s) {
-                Some(slot) if slot.is_reference() => (false, None),
-                Some(slot) => (true, Some(std::mem::replace(slot, value))),
-                None => (true, target.insert(s.to_array_key(), value)),
+            IndexKey::Interned(s) => match target.insert_if_not_ref(s.to_array_key(), value) {
+                Ok(old) => (true, old),
+                Err(_) => (false, None),
             },
-            IndexKey::String(s) => match target.get_mut_str(&s) {
-                Some(slot) if slot.is_reference() => (false, None),
-                Some(slot) => (true, Some(std::mem::replace(slot, value))),
-                None => (true, target.insert(ArrayKey::from_string(s), value)),
-            },
+            IndexKey::String(s) => {
+                match target.insert_if_not_ref(ArrayKey::from_string(s), value) {
+                    Ok(old) => (true, old),
+                    Err(_) => (false, None),
+                }
+            }
         };
     }
     let is_ref = match &key {

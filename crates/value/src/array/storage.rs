@@ -94,11 +94,54 @@ pub(super) struct OrderedMap {
     pub index: Option<Box<Index>>,
 }
 
-/// A hash table of entry positions. It stores no keys: hashing and
-/// comparing go through the key in the entry, which is the only copy.
+/// A hash table of entry positions. It stores no keys: comparing goes
+/// through the key in the entry, which is the only copy. Each slot keeps 32
+/// bits of its key's hash beside the position, as PHP's buckets keep the
+/// hash: growing the table never hashes a key again, and a probe that meets
+/// another key's slot is turned away without reading that entry.
 #[derive(Clone)]
 pub(super) struct Index {
-    pub positions: HashTable<u32>,
+    pub positions: HashTable<Slot>,
+}
+
+/// One slot of an [`Index`]: where the entry is, and its key's hash.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Slot {
+    position: u32,
+    hash: u32,
+}
+
+impl Slot {
+    #[inline(always)]
+    fn new(position: usize, hash: u32) -> Self {
+        let position = u32::try_from(position).expect("array position fits u32");
+        Self { position, hash }
+    }
+
+    #[inline(always)]
+    fn position(self) -> usize {
+        self.position as usize
+    }
+
+    /// The hash the table files this slot under. Only 32 bits are kept, so
+    /// they go to both halves: the table takes its bucket from the low bits
+    /// and its control byte from the top ones.
+    #[inline(always)]
+    fn table_hash(self) -> u64 {
+        spread(self.hash)
+    }
+}
+
+/// The 32 bits of a key's hash that an [`Index`] keeps.
+#[inline(always)]
+fn short_hash(hash: u64) -> u32 {
+    (hash >> 32) as u32
+}
+
+#[inline(always)]
+fn spread(short: u32) -> u64 {
+    let short = u64::from(short);
+    short | (short << 32)
 }
 
 impl Storage {
@@ -243,14 +286,14 @@ impl OrderedMap {
         }
     }
 
-    /// Single-probe integer insert or update that refuses to overwrite a PHP
-    /// reference, returning `Err(value)` untouched when the slot is a reference.
-    pub fn insert_int_if_not_ref(
+    /// Single-probe insert or update that refuses to overwrite a PHP
+    /// reference, returning `Err(value)` untouched when the slot is a
+    /// reference. The key is hashed once, whether it is found or added.
+    pub fn insert_if_not_ref(
         &mut self,
-        index: i64,
+        key: ArrayKey,
         value: Value,
     ) -> Result<Option<Value>, Value> {
-        let key = ArrayKey::Int(index);
         match &mut self.index {
             None => {
                 if let Some(entry) = self
@@ -273,15 +316,15 @@ impl OrderedMap {
                 Ok(None)
             }
             Some(table) => {
-                let hash = hash_int_key(index);
+                let short = short_hash(hash_array_key(&key));
                 let entries = &mut self.entries;
                 match table.positions.entry(
-                    hash,
-                    |&position| entries[position as usize].key == key,
-                    |&other| hash_array_key(&entries[other as usize].key),
+                    spread(short),
+                    |slot| slot.hash == short && entries[slot.position()].key == key,
+                    |slot| slot.table_hash(),
                 ) {
                     HashEntry::Occupied(occupied) => {
-                        let position = *occupied.get() as usize;
+                        let position = occupied.get().position();
                         if entries[position]
                             .value
                             .as_ref()
@@ -292,13 +335,11 @@ impl OrderedMap {
                         Ok(entries[position].value.replace(value))
                     }
                     HashEntry::Vacant(vacant) => {
-                        let position =
-                            u32::try_from(entries.len()).expect("array position fits u32");
+                        vacant.insert(Slot::new(entries.len(), short));
                         entries.push(Entry {
                             key,
                             value: Some(value),
                         });
-                        vacant.insert(position);
                         Ok(None)
                     }
                 }
@@ -328,25 +369,23 @@ impl OrderedMap {
                 None
             }
             Some(index) => {
-                let hash = hash_array_key(&key);
+                let short = short_hash(hash_array_key(&key));
                 let entries = &mut self.entries;
                 match index.positions.entry(
-                    hash,
-                    |&position| entries[position as usize].key == key,
-                    |&other| hash_array_key(&entries[other as usize].key),
+                    spread(short),
+                    |slot| slot.hash == short && entries[slot.position()].key == key,
+                    |slot| slot.table_hash(),
                 ) {
                     HashEntry::Occupied(occupied) => {
-                        let position = *occupied.get() as usize;
+                        let position = occupied.get().position();
                         entries[position].value.replace(value)
                     }
                     HashEntry::Vacant(vacant) => {
-                        let position =
-                            u32::try_from(entries.len()).expect("array position fits u32");
+                        vacant.insert(Slot::new(entries.len(), short));
                         entries.push(Entry {
                             key,
                             value: Some(value),
                         });
-                        vacant.insert(position);
                         None
                     }
                 }
@@ -437,73 +476,82 @@ impl Index {
 
     #[inline]
     fn find(&self, entries: &[Entry], key: &ArrayKey) -> Option<usize> {
-        let hash = hash_array_key(key);
+        let short = short_hash(hash_array_key(key));
         self.positions
-            .find(hash, |&position| entries[position as usize].key == *key)
-            .map(|&position| position as usize)
+            .find(spread(short), |slot| {
+                slot.hash == short && entries[slot.position()].key == *key
+            })
+            .map(|slot| slot.position())
     }
 
     #[inline]
     fn find_int(&self, entries: &[Entry], key: i64) -> Option<usize> {
-        let hash = hash_int_key(key);
+        let short = short_hash(hash_int_key(key));
         self.positions
-            .find(
-                hash,
-                |&position| matches!(entries[position as usize].key, ArrayKey::Int(k) if k == key),
-            )
-            .map(|&position| position as usize)
+            .find(spread(short), |slot| {
+                slot.hash == short
+                    && matches!(entries[slot.position()].key, ArrayKey::Int(k) if k == key)
+            })
+            .map(|slot| slot.position())
     }
 
     #[inline]
     fn find_interned(&self, entries: &[Entry], key: &'static InternedStr) -> Option<usize> {
-        let hash = key.array_hash();
+        let short = short_hash(key.array_hash());
         self.positions
-            .find(hash, |&position| match &entries[position as usize].key {
-                ArrayKey::Interned(k) => std::ptr::eq(*k, key),
-                ArrayKey::String(k) => k.as_bytes() == key.as_bytes(),
-                ArrayKey::Int(_) => false,
+            .find(spread(short), |slot| {
+                slot.hash == short
+                    && match &entries[slot.position()].key {
+                        ArrayKey::Interned(k) => std::ptr::eq(*k, key),
+                        ArrayKey::String(k) => k.as_bytes() == key.as_bytes(),
+                        ArrayKey::Int(_) => false,
+                    }
             })
-            .map(|&position| position as usize)
+            .map(|slot| slot.position())
     }
 
     #[inline]
     fn find_str_bytes(&self, entries: &[Entry], bytes: &[u8]) -> Option<usize> {
-        let hash = hash_str_bytes(bytes);
+        let short = short_hash(hash_str_bytes(bytes));
         self.positions
-            .find(hash, |&position| match &entries[position as usize].key {
-                ArrayKey::Interned(k) => k.as_bytes() == bytes,
-                ArrayKey::String(k) => k.as_bytes() == bytes,
-                ArrayKey::Int(_) => false,
+            .find(spread(short), |slot| {
+                slot.hash == short
+                    && match &entries[slot.position()].key {
+                        ArrayKey::Interned(k) => k.as_bytes() == bytes,
+                        ArrayKey::String(k) => k.as_bytes() == bytes,
+                        ArrayKey::Int(_) => false,
+                    }
             })
-            .map(|&position| position as usize)
+            .map(|slot| slot.position())
     }
 
     fn insert(&mut self, entries: &[Entry], position: usize) {
-        let position = u32::try_from(position).expect("array position fits u32");
-        self.positions.insert_unique(
-            hash_array_key(&entries[position as usize].key),
-            position,
-            |&other| hash_array_key(&entries[other as usize].key),
-        );
+        let short = short_hash(hash_array_key(&entries[position].key));
+        self.positions
+            .insert_unique(spread(short), Slot::new(position, short), |slot| {
+                slot.table_hash()
+            });
     }
 
     /// Drops the key from the index and returns where its entry is.
     fn remove(&mut self, entries: &[Entry], key: &ArrayKey) -> Option<usize> {
-        let hash = hash_array_key(key);
-        let (position, _) = self
+        let short = short_hash(hash_array_key(key));
+        let (slot, _) = self
             .positions
-            .find_entry(hash, |&position| entries[position as usize].key == *key)
+            .find_entry(spread(short), |slot| {
+                slot.hash == short && entries[slot.position()].key == *key
+            })
             .ok()?
             .remove();
-        Some(position as usize)
+        Some(slot.position())
     }
 
     /// Drops the live entry at `position` from the index. It compares
     /// positions, not keys, which is cheaper.
     fn remove_position(&mut self, entries: &[Entry], position: usize) {
-        let hash = hash_array_key(&entries[position].key);
+        let short = short_hash(hash_array_key(&entries[position].key));
         self.positions
-            .find_entry(hash, |&other| other as usize == position)
+            .find_entry(spread(short), |slot| slot.position() == position)
             .expect("every live entry is in the index")
             .remove();
     }

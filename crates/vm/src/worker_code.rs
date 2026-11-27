@@ -34,8 +34,9 @@ pub(crate) enum FastCandidates {
     None,
     /// Bitmask for units with at most 64 functions (`main` + declared functions).
     Small(u64),
-    /// Fallback bitmap for units with more than 64 functions.
-    Large(Rc<[bool]>),
+    /// Packed bitset for units with more than 64 functions: bit `n % 64`
+    /// of word `n / 64` is function offset `n`.
+    Large(Rc<[u64]>),
 }
 
 impl FastCandidates {
@@ -43,37 +44,20 @@ impl FastCandidates {
     #[inline(never)]
     fn scan(unit: &CompiledUnit) -> Self {
         let total = 1 + unit.functions.len();
-        if total <= 64 {
-            let mut mask = 0u64;
-            if crate::fast_tier::lower::is_fast_candidate(&unit.main, None) {
-                mask |= 1;
+        let mut words = vec![0u64; total.div_ceil(64)];
+        let mut mark = |offset: usize| words[offset / 64] |= 1u64 << (offset % 64);
+        if crate::fast_tier::lower::is_fast_candidate(&unit.main, None) {
+            mark(0);
+        }
+        for (idx, func) in unit.functions.iter().enumerate() {
+            if crate::fast_tier::lower::is_fast_candidate(func, Some(idx as u32)) {
+                mark(idx + 1);
             }
-            for (idx, func) in unit.functions.iter().enumerate() {
-                if crate::fast_tier::lower::is_fast_candidate(func, Some(idx as u32)) {
-                    mask |= 1u64 << (idx + 1);
-                }
-            }
-            if mask == 0 {
-                Self::None
-            } else {
-                Self::Small(mask)
-            }
-        } else {
-            let mut any = false;
-            let mut flags = Vec::with_capacity(total);
-            let main_fast = crate::fast_tier::lower::is_fast_candidate(&unit.main, None);
-            any |= main_fast;
-            flags.push(main_fast);
-            for (idx, func) in unit.functions.iter().enumerate() {
-                let is_fast = crate::fast_tier::lower::is_fast_candidate(func, Some(idx as u32));
-                any |= is_fast;
-                flags.push(is_fast);
-            }
-            if any {
-                Self::Large(Rc::from(flags))
-            } else {
-                Self::None
-            }
+        }
+        match words.as_slice() {
+            _ if words.iter().all(|&word| word == 0) => Self::None,
+            [mask] => Self::Small(*mask),
+            _ => Self::Large(Rc::from(words)),
         }
     }
 
@@ -87,7 +71,9 @@ impl FastCandidates {
         match self {
             Self::None => false,
             Self::Small(mask) => offset < 64 && (mask >> offset) & 1 != 0,
-            Self::Large(flags) => flags.get(offset).copied().unwrap_or(false),
+            Self::Large(words) => words
+                .get(offset / 64)
+                .is_some_and(|word| (word >> (offset % 64)) & 1 != 0),
         }
     }
 }
