@@ -495,16 +495,26 @@ pub(super) async fn from_handler_result(
             Some(data) => Ok(data.into_http_response()),
             None => Err(wrong_return_type("an object of another class")),
         },
-        Value::String(body) => Ok(ResponseData::new(200, Some(TEXT), body).into_http_response()),
-        Value::InternedStr(body) => {
-            Ok(
-                ResponseData::new(200, Some(TEXT), PhpString::from(body.as_bytes()))
-                    .into_http_response(),
-            )
-        }
+        Value::String(body) => Ok(HttpResponse {
+            status: 200,
+            headers: vec![("content-type".to_owned(), TEXT.as_bytes().to_vec())],
+            body: body.into_bytes(),
+            websocket: None,
+        }),
+        Value::InternedStr(body) => Ok(HttpResponse {
+            status: 200,
+            headers: vec![("content-type".to_owned(), TEXT.as_bytes().to_vec())],
+            body: body.as_bytes().to_vec(),
+            websocket: None,
+        }),
         Value::Array(_) => {
             let body = encode_json(context, &result).await?;
-            Ok(ResponseData::new(200, Some(JSON), PhpString::from(body)).into_http_response())
+            Ok(HttpResponse {
+                status: 200,
+                headers: vec![("content-type".to_owned(), JSON.as_bytes().to_vec())],
+                body,
+                websocket: None,
+            })
         }
         Value::Null => Ok(HttpResponse {
             status: 204,

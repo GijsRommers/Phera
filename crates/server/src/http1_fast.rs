@@ -269,8 +269,6 @@ pub(crate) async fn serve_connection(
     worker: Rc<WorkerContext>,
 ) {
     let _active = ActiveConnectionGuard::enter(worker.clone());
-    let limits = worker.limits;
-    let read_limit = limits.idle_timeout.min(limits.request_read_timeout);
     let mut first_request = true;
     let mut pending: Option<Vec<u8>> = None;
 
@@ -285,67 +283,68 @@ pub(crate) async fn serve_connection(
             return;
         }
 
-        // Step 1: Try an immediate non-blocking read before arming an idle
-        // timer or polling shutdown. When no bytes are ready, release the
-        // scratch buffer immediately and park with ZERO heap buffer held.
+        // Step 1: Acquire non-empty request bytes. Try an immediate non-blocking
+        // read first; when no bytes are ready, release the scratch buffer BEFORE
+        // parking on `stream.readable()` so idle sockets hold zero heap buffers.
         let mut buf = if let Some(leftover) = pending.take() {
             leftover
         } else {
-            let mut scratch_buf = worker.scratch.take_read_buf();
-            match stream.try_read_buf(&mut scratch_buf) {
-                Ok(0) => {
-                    worker.scratch.return_read_buf(scratch_buf);
-                    return;
-                }
-                Ok(_) => scratch_buf,
-                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                    worker.scratch.return_read_buf(scratch_buf);
-                    let idle_ready = tokio::select! {
-                        biased;
-                        ready = tokio::time::timeout(read_limit, stream.readable()) => ready,
-                        _ = &mut shutdown_fut => return,
-                    };
-                    match idle_ready {
-                        Ok(Ok(())) => worker.scratch.take_read_buf(),
-                        Ok(Err(_)) | Err(_) => return,
+            loop {
+                let mut scratch_buf = worker.scratch.take_read_buf();
+                match stream.try_read_buf(&mut scratch_buf) {
+                    Ok(0) => {
+                        worker.scratch.return_read_buf(scratch_buf);
+                        return;
                     }
-                }
-                Err(error) if error.kind() == io::ErrorKind::Interrupted => {
-                    worker.scratch.return_read_buf(scratch_buf);
-                    continue;
-                }
-                Err(_) => {
-                    worker.scratch.return_read_buf(scratch_buf);
-                    return;
-                }
-            }
-        };
-
-        let head_started = Instant::now();
-        let head_deadline = head_started + read_limit;
-
-        // Step 2: Read and parse the HTTP/1.x request head (or sniff HTTP/2 preface).
-        let parsed = loop {
-            if buf.is_empty() {
-                match read_chunk(&mut stream, &mut buf, head_deadline, shutdown_fut.as_mut()).await
-                {
-                    ReadOutcome::GotBytes => {}
-                    ReadOutcome::Eof
-                    | ReadOutcome::Shutdown
-                    | ReadOutcome::IoError
-                    | ReadOutcome::TimedOut => {
-                        worker.scratch.return_read_buf(buf);
+                    Ok(_) => break scratch_buf,
+                    Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                        worker.scratch.return_read_buf(scratch_buf);
+                        let read_limit = worker
+                            .limits
+                            .idle_timeout
+                            .min(worker.limits.request_read_timeout);
+                        let idle_ready = tokio::select! {
+                            biased;
+                            ready = tokio::time::timeout(read_limit, stream.readable()) => ready,
+                            _ = &mut shutdown_fut => return,
+                        };
+                        match idle_ready {
+                            Ok(Ok(())) => continue,
+                            Ok(Err(_)) | Err(_) => return,
+                        }
+                    }
+                    Err(error) if error.kind() == io::ErrorKind::Interrupted => {
+                        worker.scratch.return_read_buf(scratch_buf);
+                        continue;
+                    }
+                    Err(_) => {
+                        worker.scratch.return_read_buf(scratch_buf);
                         return;
                     }
                 }
             }
+        };
 
+        let mut head_started: Option<Instant> = None;
+
+        // Step 2 + 3 + 4: Parse the HTTP/1.x request head (or sniff HTTP/2
+        // preface), finish reading any fragmented head or partial fixed-length
+        // body via boxed cold helpers, construct `Request`, and return the
+        // scratch read buffer BEFORE awaiting the PHP handler.
+        let (meta, answer_fut) = loop {
             if first_request && starts_like_h2_preface(&buf) {
                 if buf.len() >= H2_PREFACE.len() {
                     handoff_to_hyper(buf, stream, peer, shutdown, work, &worker).await;
                     return;
                 }
-                match read_chunk(&mut stream, &mut buf, head_deadline, shutdown_fut.as_mut()).await
+                let started = *head_started.get_or_insert_with(Instant::now);
+                let head_deadline = started
+                    + worker
+                        .limits
+                        .idle_timeout
+                        .min(worker.limits.request_read_timeout);
+                match read_chunk_cold(&mut stream, &mut buf, head_deadline, shutdown_fut.as_mut())
+                    .await
                 {
                     ReadOutcome::GotBytes => continue,
                     // Partial HTTP/2 preface that stalls must close silently
@@ -360,20 +359,94 @@ pub(crate) async fn serve_connection(
                 }
             }
 
-            match parse_head_meta(&buf) {
-                ParseResult::Complete(info) => break info,
-                ParseResult::Partial => {
+            // Destructure `ParseResult` synchronously before any `.await` so
+            // `Request` (~224 bytes) is never held across a generator yield.
+            enum HeadAction {
+                NeedBody(HeadMeta),
+                Partial,
+                FallbackToHyper,
+                BadRequest,
+            }
+            let action = match parse_fast_request(
+                &buf,
+                worker.limits.max_body_bytes,
+                peer,
+                worker.local_addr,
+            ) {
+                ParseResult::Ready(ready) => {
+                    let meta = ready.meta;
+                    let total_needed = meta.head_len + meta.content_length;
+                    if buf.len() > total_needed {
+                        pending = Some(buf[total_needed..].to_vec());
+                    }
+                    worker.scratch.return_read_buf(buf);
+                    let fut = answer(
+                        worker.handler.clone(),
+                        ready.request,
+                        worker.limits.request_timeout,
+                        work.clone(),
+                    );
+                    break (meta, fut);
+                }
+                ParseResult::NeedBody(meta) => HeadAction::NeedBody(meta),
+                ParseResult::Partial => HeadAction::Partial,
+                ParseResult::FallbackToHyper => HeadAction::FallbackToHyper,
+                ParseResult::BadRequest => HeadAction::BadRequest,
+            };
+
+            match action {
+                HeadAction::NeedBody(meta) => {
+                    let started = *head_started.get_or_insert_with(Instant::now);
+                    let body_ok = read_remaining_body(
+                        &mut stream,
+                        &mut buf,
+                        meta,
+                        started,
+                        worker.limits,
+                        shutdown_fut.as_mut(),
+                    )
+                    .await;
+                    if !body_ok {
+                        worker.scratch.return_read_buf(buf);
+                        return;
+                    }
+                    let total_needed = meta.head_len + meta.content_length;
+                    let request = build_request(&buf, meta, peer, worker.local_addr);
+                    if buf.len() > total_needed {
+                        pending = Some(buf[total_needed..].to_vec());
+                    }
+                    worker.scratch.return_read_buf(buf);
+                    let fut = answer(
+                        worker.handler.clone(),
+                        request,
+                        worker.limits.request_timeout,
+                        work.clone(),
+                    );
+                    break (meta, fut);
+                }
+                HeadAction::Partial => {
                     if buf.len() >= MAX_FAST_HEAD_BYTES {
                         handoff_to_hyper(buf, stream, peer, shutdown, work, &worker).await;
                         return;
                     }
-                    match read_chunk(&mut stream, &mut buf, head_deadline, shutdown_fut.as_mut())
-                        .await
+                    let started = *head_started.get_or_insert_with(Instant::now);
+                    let head_deadline = started
+                        + worker
+                            .limits
+                            .idle_timeout
+                            .min(worker.limits.request_read_timeout);
+                    match read_chunk_cold(
+                        &mut stream,
+                        &mut buf,
+                        head_deadline,
+                        shutdown_fut.as_mut(),
+                    )
+                    .await
                     {
                         ReadOutcome::GotBytes => continue,
                         ReadOutcome::TimedOut => {
                             worker.scratch.return_read_buf(buf);
-                            if limits.request_read_timeout <= limits.idle_timeout {
+                            if worker.limits.request_read_timeout <= worker.limits.idle_timeout {
                                 const TIMEOUT_408: &[u8] = b"HTTP/1.1 408 Request Timeout\r\nConnection: close\r\nContent-Length: 0\r\n\r\n";
                                 let _ = write_error_and_close(&mut stream, TIMEOUT_408).await;
                             }
@@ -385,11 +458,11 @@ pub(crate) async fn serve_connection(
                         }
                     }
                 }
-                ParseResult::FallbackToHyper => {
+                HeadAction::FallbackToHyper => {
                     handoff_to_hyper(buf, stream, peer, shutdown, work, &worker).await;
                     return;
                 }
-                ParseResult::BadRequest => {
+                HeadAction::BadRequest => {
                     worker.scratch.return_read_buf(buf);
                     const BAD_400: &[u8] =
                         b"HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Length: 0\r\n\r\n";
@@ -401,85 +474,24 @@ pub(crate) async fn serve_connection(
 
         first_request = false;
 
-        // Check body size & framing fallback before reading body bytes.
-        let content_length = parsed.content_length;
-        if content_length > limits.max_body_bytes || content_length > MAX_FAST_BODY_BYTES {
-            handoff_to_hyper(buf, stream, peer, shutdown, work, &worker).await;
-            return;
-        }
-
-        // Step 3: Read any remaining fixed-length body bytes under the shared
-        // head+body budget and body_idle_timeout.
-        let total_needed = parsed.head_len + content_length;
-        if buf.len() < total_needed {
-            buf.reserve(total_needed - buf.len());
-            while buf.len() < total_needed {
-                let body_so_far = buf.len() - parsed.head_len;
-                let total_budget = limits
-                    .request_read_timeout
-                    .saturating_add(body_time_credit(body_so_far));
-                let remaining = total_budget.saturating_sub(head_started.elapsed());
-                if remaining.is_zero() {
-                    worker.scratch.return_read_buf(buf);
-                    let _ = write_stalled_408(&mut stream).await;
-                    return;
-                }
-                let step_deadline = Instant::now() + remaining.min(limits.body_idle_timeout);
-                match read_chunk(&mut stream, &mut buf, step_deadline, shutdown_fut.as_mut()).await
-                {
-                    ReadOutcome::GotBytes => {}
-                    ReadOutcome::TimedOut => {
-                        worker.scratch.return_read_buf(buf);
-                        let _ = write_stalled_408(&mut stream).await;
-                        return;
-                    }
-                    ReadOutcome::Eof | ReadOutcome::Shutdown | ReadOutcome::IoError => {
-                        worker.scratch.return_read_buf(buf);
-                        return;
-                    }
-                }
-            }
-        }
-
-        // Step 4: Construct Request and return the scratch read buffer BEFORE
-        // awaiting the PHP handler (so slow async handlers hold zero read buffers).
-        let is_head = parsed.is_head;
-        let version = parsed.version;
+        let is_head = meta.is_head;
+        let version = meta.version;
         let client_keep_alive = match version {
-            HttpVersion::Http11 => !parsed.connection_close,
-            HttpVersion::Http10 => parsed.connection_keep_alive,
+            HttpVersion::Http11 => !meta.connection_close,
+            HttpVersion::Http10 => meta.connection_keep_alive,
             HttpVersion::Http2 => false,
         };
-        let request = build_request(&buf, parsed, peer, worker.local_addr);
-        if buf.len() > total_needed {
-            pending = Some(buf[total_needed..].to_vec());
-        }
-        worker.scratch.return_read_buf(buf);
 
-        // Step 5: Execute the handler via `answer` (uses Phase 1 single-poll
-        // sync fast path + detached/streaming/timeout handling).
-        // `biased;` polls `answer` first so synchronous handlers never even
+        // Step 5: Execute the handler via `answer_fut` (uses single-poll sync
+        // fast path + boxed cold continuation for async/detached/streaming).
+        // `biased;` polls `answer_fut` first so synchronous handlers never even
         // poll `wait_peer_closed`; async handlers observe a client disconnect
         // promptly and detach cleanly via `ResponseTask::drop`.
-        let mut response = if pending.is_none() {
-            tokio::select! {
-                biased;
-                response = answer(
-                    worker.handler.clone(),
-                    request,
-                    limits.request_timeout,
-                    work.clone(),
-                ) => response,
-                _ = wait_peer_closed(&stream) => return,
-            }
-        } else {
-            answer(
-                worker.handler.clone(),
-                request,
-                limits.request_timeout,
-                work.clone(),
-            )
-            .await
+        let watch_disconnect = pending.is_none();
+        let mut response = tokio::select! {
+            biased;
+            response = answer_fut => response,
+            _ = wait_peer_closed(&stream), if watch_disconnect => return,
         };
         if response.upgrade.take().is_some() {
             response = UpgradeRejection::UpgradeRequired.into_response();
@@ -487,7 +499,8 @@ pub(crate) async fn serve_connection(
 
         // Step 6: Decide keep-alive (respecting client, handler, shutdown, and
         // connection-pressure load shedding).
-        let shedding = limits
+        let shedding = worker
+            .limits
             .keepalive_shed_at
             .is_some_and(|threshold| worker.active_connections.get() >= threshold);
         let handler_closed = response.headers.iter().any(|(name, value)| {
@@ -525,6 +538,52 @@ enum ReadOutcome {
     TimedOut,
     Shutdown,
     IoError,
+}
+
+#[cold]
+fn read_remaining_body<'a, F: Future<Output = ()> + 'a>(
+    stream: &'a mut TcpStream,
+    buf: &'a mut Vec<u8>,
+    meta: HeadMeta,
+    started: Instant,
+    limits: ConnectionLimits,
+    mut shutdown_fut: Pin<&'a mut F>,
+) -> Pin<Box<dyn Future<Output = bool> + 'a>> {
+    Box::pin(async move {
+        let total_needed = meta.head_len + meta.content_length;
+        buf.reserve(total_needed - buf.len());
+        while buf.len() < total_needed {
+            let body_so_far = buf.len() - meta.head_len;
+            let total_budget = limits
+                .request_read_timeout
+                .saturating_add(body_time_credit(body_so_far));
+            let remaining = total_budget.saturating_sub(started.elapsed());
+            if remaining.is_zero() {
+                let _ = write_stalled_408(stream).await;
+                return false;
+            }
+            let step_deadline = Instant::now() + remaining.min(limits.body_idle_timeout);
+            match read_chunk(stream, buf, step_deadline, shutdown_fut.as_mut()).await {
+                ReadOutcome::GotBytes => {}
+                ReadOutcome::TimedOut => {
+                    let _ = write_stalled_408(stream).await;
+                    return false;
+                }
+                ReadOutcome::Eof | ReadOutcome::Shutdown | ReadOutcome::IoError => return false,
+            }
+        }
+        true
+    })
+}
+
+#[cold]
+fn read_chunk_cold<'a, F: Future<Output = ()> + 'a>(
+    stream: &'a mut TcpStream,
+    buf: &'a mut Vec<u8>,
+    deadline: Instant,
+    shutdown_fut: Pin<&'a mut F>,
+) -> Pin<Box<dyn Future<Output = ReadOutcome> + 'a>> {
+    Box::pin(read_chunk(stream, buf, deadline, shutdown_fut))
 }
 
 async fn read_chunk<F: Future<Output = ()>>(
@@ -567,14 +626,71 @@ struct HeadMeta {
     is_head: bool,
 }
 
+struct ReadyRequest {
+    request: Request,
+    meta: HeadMeta,
+}
+
+/// `Ready` is the 99.99% hot path and is destructured immediately on the stack
+/// without crossing an `.await` point, so avoiding `Box` eliminates a heap
+/// allocation per request.
+#[allow(clippy::large_enum_variant)]
 enum ParseResult {
-    Complete(HeadMeta),
+    Ready(ReadyRequest),
+    NeedBody(HeadMeta),
     Partial,
     FallbackToHyper,
     BadRequest,
 }
 
-fn parse_head_meta(buf: &[u8]) -> ParseResult {
+fn build_request_from_parsed(
+    method_str: &str,
+    target_str: &str,
+    raw_headers: &[httparse::Header<'_>],
+    buf: &[u8],
+    meta: HeadMeta,
+    peer: SocketAddr,
+    local_addr: SocketAddr,
+) -> Request {
+    let (path, query) = match target_str.split_once('?') {
+        Some((p, q)) => (p.to_owned(), q.to_owned()),
+        None => (target_str.to_owned(), String::new()),
+    };
+    let target = if query.is_empty() && target_str.len() == path.len() {
+        path.clone()
+    } else {
+        target_str.to_owned()
+    };
+    let mut headers = Vec::with_capacity(raw_headers.len());
+    for header in raw_headers {
+        let lower = header.name.to_ascii_lowercase();
+        headers.push((lower, trim_ows(header.value).to_vec()));
+    }
+    let body = if meta.content_length == 0 {
+        Vec::new()
+    } else {
+        buf[meta.head_len..meta.head_len + meta.content_length].to_vec()
+    };
+    Request {
+        method: method_str.to_owned(),
+        target,
+        path,
+        query,
+        version: meta.version,
+        headers,
+        body,
+        remote_addr: peer,
+        local_addr,
+        is_websocket_upgrade: false,
+    }
+}
+
+fn parse_fast_request(
+    buf: &[u8],
+    max_body_bytes: usize,
+    peer: SocketAddr,
+    local_addr: SocketAddr,
+) -> ParseResult {
     let mut raw_headers = [httparse::EMPTY_HEADER; MAX_FAST_HEADERS];
     let mut req = httparse::Request::new(&mut raw_headers);
     let head_len = match req.parse(buf) {
@@ -652,14 +768,34 @@ fn parse_head_meta(buf: &[u8]) -> ParseResult {
         return ParseResult::BadRequest;
     }
 
-    ParseResult::Complete(HeadMeta {
+    let content_length = content_length.unwrap_or(0);
+    if content_length > max_body_bytes || content_length > MAX_FAST_BODY_BYTES {
+        return ParseResult::FallbackToHyper;
+    }
+
+    let meta = HeadMeta {
         head_len,
-        content_length: content_length.unwrap_or(0),
+        content_length,
         version,
         connection_close,
         connection_keep_alive,
         is_head: method_str == "HEAD",
-    })
+    };
+
+    if buf.len() >= head_len + content_length {
+        let request = build_request_from_parsed(
+            method_str,
+            target_str,
+            req.headers,
+            buf,
+            meta,
+            peer,
+            local_addr,
+        );
+        ParseResult::Ready(ReadyRequest { request, meta })
+    } else {
+        ParseResult::NeedBody(meta)
+    }
 }
 
 fn build_request(buf: &[u8], meta: HeadMeta, peer: SocketAddr, local_addr: SocketAddr) -> Request {
@@ -668,37 +804,15 @@ fn build_request(buf: &[u8], meta: HeadMeta, peer: SocketAddr, local_addr: Socke
     let _ = req.parse(&buf[..meta.head_len]);
     let method_str = req.method.unwrap_or("GET");
     let target_str = req.path.unwrap_or("/");
-    let (path, query) = match target_str.split_once('?') {
-        Some((p, q)) => (p.to_owned(), q.to_owned()),
-        None => (target_str.to_owned(), String::new()),
-    };
-    let target = if query.is_empty() && target_str.len() == path.len() {
-        path.clone()
-    } else {
-        target_str.to_owned()
-    };
-    let mut headers = Vec::with_capacity(req.headers.len());
-    for header in req.headers.iter() {
-        let lower = header.name.to_ascii_lowercase();
-        headers.push((lower, trim_ows(header.value).to_vec()));
-    }
-    let body = if meta.content_length == 0 {
-        Vec::new()
-    } else {
-        buf[meta.head_len..meta.head_len + meta.content_length].to_vec()
-    };
-    Request {
-        method: method_str.to_owned(),
-        target,
-        path,
-        query,
-        version: meta.version,
-        headers,
-        body,
-        remote_addr: peer,
+    build_request_from_parsed(
+        method_str,
+        target_str,
+        req.headers,
+        buf,
+        meta,
+        peer,
         local_addr,
-        is_websocket_upgrade: false,
-    }
+    )
 }
 
 fn trim_ows(mut bytes: &[u8]) -> &[u8] {
@@ -907,20 +1021,28 @@ async fn wait_peer_closed(stream: &TcpStream) {
     }
 }
 
-async fn write_response(
-    stream: &mut TcpStream,
+fn write_response<'a>(
+    stream: &'a mut TcpStream,
     response: Response,
     is_head: bool,
     version: HttpVersion,
     keep_alive: bool,
     watch_disconnect: bool,
-    scratch: &WorkerScratch,
-) -> bool {
+    scratch: &'a WorkerScratch,
+) -> impl Future<Output = bool> + 'a {
+    enum PreparedWrite<'a> {
+        Single(&'a mut TcpStream, Vec<u8>),
+        HeadAndBody(&'a mut TcpStream, Vec<u8>, Vec<u8>),
+        Cold(Pin<Box<dyn Future<Output = bool> + 'a>>),
+    }
+
     let status = response.status;
     let bodyless_status = (100..200).contains(&status) || status == 204 || status == 304;
     let omit_body = is_head || bodyless_status;
 
-    match response.body {
+    // Serialize `Body::Bytes` synchronously before creating the async future so
+    // `Response` never occupies space in `serve_connection`'s idle future.
+    let prepared = match response.body {
         Body::Bytes(body_bytes) => {
             let content_length = if bodyless_status {
                 if status == 304 && !body_bytes.is_empty() {
@@ -944,31 +1066,43 @@ async fn write_response(
                 },
                 scratch,
             );
-            let ok = if omit_body || body_bytes.is_empty() {
-                write_all_fast(stream, &out).await
+            if omit_body || body_bytes.is_empty() {
+                PreparedWrite::Single(stream, out)
             } else if out.len() + body_bytes.len() <= 64 * 1024 {
                 out.extend_from_slice(&body_bytes);
-                write_all_fast(stream, &out).await
+                PreparedWrite::Single(stream, out)
             } else {
-                write_all_fast(stream, &out).await && write_all_fast(stream, &body_bytes).await
-            };
-            scratch.return_write_buf(out);
-            ok
+                PreparedWrite::HeadAndBody(stream, out, body_bytes)
+            }
         }
-        other => {
-            write_non_bytes_response(
-                stream,
-                status,
-                response.headers,
-                other,
-                bodyless_status,
-                omit_body,
-                version,
-                keep_alive,
-                watch_disconnect,
-                scratch,
-            )
-            .await
+        other => PreparedWrite::Cold(write_non_bytes_response(
+            stream,
+            status,
+            response.headers,
+            other,
+            bodyless_status,
+            omit_body,
+            version,
+            keep_alive,
+            watch_disconnect,
+            scratch,
+        )),
+    };
+
+    async move {
+        match prepared {
+            PreparedWrite::Single(stream, out) => {
+                let ok = write_all_fast(stream, &out).await;
+                scratch.return_write_buf(out);
+                ok
+            }
+            PreparedWrite::HeadAndBody(stream, out, body_bytes) => {
+                let ok =
+                    write_all_fast(stream, &out).await && write_all_fast(stream, &body_bytes).await;
+                scratch.return_write_buf(out);
+                ok
+            }
+            PreparedWrite::Cold(fut) => fut.await,
         }
     }
 }
@@ -1098,8 +1232,9 @@ fn write_non_bytes_response<'a>(
 mod tests {
     use super::*;
 
-    /// Guard against accidentally embedding Hyper's ~18 KiB `auto::Connection`
-    /// state machine back inside `serve_connection`'s async future.
+    /// Guard against accidentally bloating `serve_connection`'s async future
+    /// (which directly controls per-idle-connection RSS across 10k+ keep-alive
+    /// sockets; keeping it <= 1024 bytes keeps it inside mimalloc's 1 KiB class).
     #[test]
     fn serve_connection_future_stays_compact() {
         fn future_size<A, B, C, D, E, F: Future>(_: fn(A, B, C, D, E) -> F) -> usize {
@@ -1107,8 +1242,8 @@ mod tests {
         }
         let size = future_size(serve_connection);
         assert!(
-            size <= 2048,
-            "serve_connection future grew to {size} bytes (expected <= 2048)"
+            size <= 1024,
+            "serve_connection future grew to {size} bytes (expected <= 1024)"
         );
     }
 }

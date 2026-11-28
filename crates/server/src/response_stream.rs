@@ -127,8 +127,24 @@ impl ResponseWriter {
         }
     }
 
-    pub(crate) fn scope<F: Future>(self, request: F) -> impl Future<Output = F::Output> {
-        CURRENT_RESPONSE.scope(Cell::new(Some(self)), request)
+    pub(crate) fn scope_opt<F: Future>(
+        writer: Option<Self>,
+        request: F,
+    ) -> impl Future<Output = F::Output> {
+        CURRENT_RESPONSE.scope(Cell::new(writer), request)
+    }
+
+    /// Runs one synchronous poll step with `slot` installed in
+    /// `CURRENT_RESPONSE`, returning any unclaimed writer back into `slot`.
+    pub(crate) fn sync_scope<R>(slot: &mut Option<Self>, run: impl FnOnce() -> R) -> R {
+        let initial = Cell::new(slot.take());
+        let (result, remaining) = CURRENT_RESPONSE.sync_scope(initial, || {
+            let result = run();
+            let remaining = CURRENT_RESPONSE.with(Cell::take);
+            (result, remaining)
+        });
+        *slot = remaining;
+        result
     }
 
     /// Claim the connection's writer on the first transport flush.
