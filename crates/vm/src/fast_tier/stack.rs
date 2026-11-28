@@ -5,7 +5,7 @@ use phera_value::Value;
 
 use crate::calls::registers::Registers;
 use crate::code_table::FunctionIndex;
-use crate::fast_tier::int_rec::RecFrame;
+use crate::fast_tier::int_rec::{RecFrame, WaitingCall};
 use crate::fast_tier::{TAG_BOOL, TAG_CONST, TAG_FLOAT, TAG_HEAP, TAG_INT, TAG_NULL, TAG_UNINIT};
 
 /// One active nested caller frame inside `FastVm` (above the entry frame already
@@ -29,6 +29,9 @@ pub(crate) struct FastScratch {
     pub(crate) list_buf_i64: Vec<i64>,
     /// Reusable unboxed `f64` scratch slice for `list_loop::try_run_list_loop`.
     pub(crate) list_buf_f64: Vec<f64>,
+    /// Reusable stack of waiting frames for the `int_rec` nested-recursion
+    /// kernels, which may go as deep as the frame limit.
+    pub(crate) rec_stack: Vec<WaitingCall>,
     /// What `echo` wrote during one run of the interpreter loop, which the
     /// VM sends to the request's output when the loop hands back, before
     /// anything else can write (`Vm::write_fast_echo`).
@@ -68,6 +71,7 @@ impl FastStack {
             scratch: FastScratch {
                 list_buf_i64: Vec::new(),
                 list_buf_f64: Vec::new(),
+                rec_stack: Vec::new(),
                 echo: Vec::new(),
                 echo_open: false,
             },

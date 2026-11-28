@@ -1637,8 +1637,32 @@ pub(crate) fn run_fast(
             registers,
             &mut fast_stack.rec_regs,
             &mut fast_stack.rec_frames,
+            &mut fast_stack.scratch.rec_stack,
             entry_frame,
             frame_limit.saturating_sub(entry_depth),
+            YIELD_AFTER_STEPS.saturating_sub(*work_io).max(1),
+            work_io,
+            executed_io,
+        )
+    {
+        return exit;
+    }
+
+    // A frame of such a function waiting for one of its self-calls (after
+    // a yield materialised the kernel's frames) goes back into the kernel.
+    if entry_fast_ip != 0
+        && let Some(ref int_rec) = entry_fast.int_rec
+        && code.facts(entry_frame.function).local.is_some()
+        && let Some(exit) = crate::fast_tier::int_rec::resume_int_rec(
+            int_rec,
+            stack,
+            registers,
+            &mut fast_stack.rec_regs,
+            &mut fast_stack.rec_frames,
+            &mut fast_stack.scratch.rec_stack,
+            position.ip,
+            stop,
+            frame_limit,
             YIELD_AFTER_STEPS.saturating_sub(*work_io).max(1),
             work_io,
             executed_io,
@@ -3678,6 +3702,7 @@ pub(crate) fn run_fast(
                         && let Some(ref int_rec) = cur_fn.int_rec
                         && let Some((ret, spent)) = crate::fast_tier::int_rec::try_eval_int_rec_2(
                             int_rec,
+                            &mut scratch.rec_stack,
                             v[a0] as i64,
                             v[a1] as i64,
                             max_fast_frames.saturating_sub(fast_stack.frames.len()),
