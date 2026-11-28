@@ -207,6 +207,7 @@ impl Vm {
                 suspended_fibers: Default::default(),
                 snapshot: self.snapshot.forked(),
                 debugger: None,
+                soundness_oracle: None,
                 debug_evaluating: false,
                 websocket_sink: self.websocket_sink.clone(),
                 websocket_resolver,

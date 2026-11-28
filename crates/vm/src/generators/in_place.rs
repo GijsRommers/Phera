@@ -69,7 +69,11 @@ impl Vm {
     ) -> Option<Result<T, NativeError>> {
         // The regular driver publishes the resumed frame so a connected IDE
         // can stop before the generator's next source line.
-        if self.debugger.is_some() || self.pending_callbacks || self.generator_releases_pending() {
+        if self.debugger.is_some()
+            || self.soundness_oracle.is_some()
+            || self.pending_callbacks
+            || self.generator_releases_pending()
+        {
             return None;
         }
         match state(object, |generator| {

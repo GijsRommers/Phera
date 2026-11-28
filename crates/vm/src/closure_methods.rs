@@ -228,10 +228,16 @@ impl Vm {
     /// First-class callables retain validated access after their creating scope returns.
     pub(crate) fn closure_from_callee(
         &mut self,
-        callee: crate::calls::call_state::Callee,
+        mut callee: crate::calls::call_state::Callee,
     ) -> Result<Rc<Object>, NativeError> {
         if let crate::calls::call_state::CallTarget::Closure(object) = &callee.target {
             return Ok(object.clone());
+        }
+        if matches!(
+            callee.argument_binding,
+            crate::calls::callback_binding::ArgumentBinding::Caller
+        ) {
+            callee.argument_binding = crate::calls::callback_binding::ArgumentBinding::Dynamic;
         }
         let (context, binding) = match &callee.target {
             crate::calls::call_state::CallTarget::Method { context, method } => (

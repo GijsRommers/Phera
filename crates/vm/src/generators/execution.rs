@@ -138,7 +138,7 @@ impl Vm {
                 }
                 Input::Begin | Input::Send(_) | Input::Complete(_) => {}
             }
-            let result = if self.debugger.is_some() {
+            let result = if self.debugger.is_some() || self.soundness_oracle.is_some() {
                 self.interpret(stop).await?
             } else {
                 let mut work = 0;

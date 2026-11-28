@@ -30,7 +30,7 @@ impl Vm {
         work: usize,
         pending: Option<Result<BatchExit, NativeError>>,
     ) -> LocalFuture<'_, NativeResult> {
-        if self.debugger.is_some() {
+        if self.debugger.is_some() || self.soundness_oracle.is_some() {
             self.continue_debug_execution(stop, work, pending)
         } else {
             self.continue_execution_path::<false>(stop, work, pending)
@@ -118,6 +118,9 @@ impl Vm {
                         continue;
                     };
                     exit
+                }
+                None if DEBUG && self.soundness_oracle.is_some() => {
+                    self.oracle_batch(stop, work)?
                 }
                 None => self.run_batch(stop, work)?,
             };

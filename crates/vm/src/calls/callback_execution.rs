@@ -75,7 +75,9 @@ impl Vm {
             entered = self.with_argument_origin(origin, |vm| vm.enter_prepared_call(None));
         }
         match entered {
-            Ok(CallEntry::Php) if self.debugger.is_some() => self.interpret(stop).await,
+            Ok(CallEntry::Php) if self.debugger.is_some() || self.soundness_oracle.is_some() => {
+                self.interpret(stop).await
+            }
             Ok(CallEntry::Php) => {
                 // A PHP callback may return before it needs any async service.
                 let mut work = 0;

@@ -476,3 +476,177 @@ fn the_same_input_gives_the_same_reports() {
     assert_eq!(again.unit_facts, analyzed.unit_facts);
     assert_eq!(again.classmap, analyzed.classmap);
 }
+
+#[test]
+fn build_time_layout_flow_and_resolution_populate_sound_facts_with_real_compiler() {
+    use phera_bytecode::facts::{
+        CallFlags, ClassFlags, FunctionFlags, PropAccess, PropFlags, SoundMask, SoundType,
+    };
+
+    let (_dir, root) = project(&[
+        (
+            "src/model.php",
+            r#"<?php
+namespace Demo;
+
+trait HasId {
+    public int $id = 1;
+    public function tag(): string { return 'trait'; }
+}
+
+class ParentBox {
+    private int $secret = 1;
+    protected int $count = 2;
+    public function baseOnly(): int { return $this->count; }
+}
+
+final class Box extends ParentBox {
+    use HasId;
+    private string $secret = 'x';
+    public int $count = 3;
+    public function readAll(): int {
+        return $this->count;
+    }
+}
+
+function exact_id(int $n): int {
+    return $n;
+}
+
+function weak_float(int $n): float {
+    return $n;
+}
+
+function hot_loop(int $n): int {
+    $sum = 0;
+    for ($i = 0; $i < $n; $i++) {
+        $sum = (int)($sum + $i);
+    }
+    return $sum;
+}
+"#,
+        ),
+        (
+            "index.php",
+            r#"<?php
+require __DIR__ . '/src/model.php';
+
+function entry_helper(int $a): int {
+    $b = new Demo\Box();
+    $x = $b->readAll();
+    $y = Demo\exact_id($a);
+    return (int)($x + $y + $b->id);
+}
+"#,
+        ),
+    ]);
+
+    let cfg = config(&root, BuildMode::Strict);
+    let world = discover_initial(&cfg).unwrap();
+    let analyzed = close_and_analyze(
+        &cfg,
+        world,
+        |path, bytes| {
+            let src = std::str::from_utf8(bytes).map_err(|e| e.to_string())?;
+            phera_compiler::compile(src, &path.to_string_lossy()).map_err(|e| e.to_string())
+        },
+        hash,
+    )
+    .unwrap();
+
+    // 1. Exact property layout and inherited + trait method table on Demo\Box.
+    let box_layout = analyzed
+        .program_facts
+        .classes
+        .iter()
+        .find(|c| &*c.name == "demo\\box")
+        .expect("demo\\box");
+    assert!(box_layout.flags.contains(ClassFlags::LAYOUT_EXACT));
+    let keys: Vec<&[u8]> = box_layout.slots.iter().map(|s| &*s.key).collect();
+    assert_eq!(
+        keys,
+        vec![
+            &b"\0Demo\\ParentBox\0secret"[..],
+            &b"count"[..],
+            &b"\0Demo\\Box\0secret"[..],
+            &b"id"[..],
+        ]
+    );
+    assert_eq!(box_layout.slots[1].ty, SoundType::INT);
+    assert!(box_layout.slots[1].flags.contains(PropFlags::PUBLIC));
+    assert!(box_layout.slots[1].flags.contains(PropFlags::TYPED));
+    let method_names: Vec<&str> = box_layout.methods.iter().map(|m| &*m.name).collect();
+    assert_eq!(method_names, ["baseonly", "readall", "tag"]);
+
+    // 2. `RETURN_PROVEN`, `FAST_CANDIDATE`, and sound return types on src/model.php.
+    let model_idx = analyzed
+        .units
+        .iter()
+        .position(|u| u.file.relative_path == "src/model.php")
+        .unwrap();
+    let model_unit = &analyzed.units[model_idx].unit;
+    let model_facts = &analyzed.unit_facts[model_idx];
+    let fn_facts = |name: &str| {
+        let pos = model_unit
+            .functions
+            .iter()
+            .position(|f| f.name.eq_ignore_ascii_case(name))
+            .unwrap();
+        &model_facts.functions[pos + 1]
+    };
+    assert!(
+        fn_facts("Demo\\exact_id")
+            .flags
+            .contains(FunctionFlags::RETURN_PROVEN)
+    );
+    assert_eq!(fn_facts("Demo\\exact_id").returns, SoundType::INT);
+    assert!(
+        !fn_facts("Demo\\weak_float")
+            .flags
+            .contains(FunctionFlags::RETURN_PROVEN)
+    );
+    assert_eq!(fn_facts("Demo\\weak_float").returns, SoundType::FLOAT);
+    assert!(
+        fn_facts("Demo\\hot_loop")
+            .flags
+            .contains(FunctionFlags::FAST_CANDIDATE)
+    );
+    assert!(
+        fn_facts("Demo\\hot_loop")
+            .flags
+            .contains(FunctionFlags::RETURN_PROVEN)
+    );
+
+    // 3. Cross-file resolved calls and resolved property slots in index.php::entry_helper.
+    let index_idx = analyzed
+        .units
+        .iter()
+        .position(|u| u.file.relative_path == "index.php")
+        .unwrap();
+    let index_unit = &analyzed.units[index_idx].unit;
+    let helper_pos = index_unit
+        .functions
+        .iter()
+        .position(|f| f.name == "entry_helper")
+        .unwrap();
+    let helper_facts = &analyzed.unit_facts[index_idx].functions[helper_pos + 1];
+    assert!(helper_facts.flags.contains(FunctionFlags::RETURN_PROVEN));
+    assert_eq!(helper_facts.returns.mask, SoundMask::INT);
+    assert!(
+        helper_facts
+            .calls
+            .iter()
+            .any(|c| c.flags.contains(CallFlags::ARGS_EXACT)
+                && c.flags.contains(CallFlags::RETURN_PROVEN)
+                && c.result == SoundType::INT),
+        "expected resolved exact cross-file call in entry_helper: {:?}",
+        helper_facts.calls
+    );
+    assert!(
+        helper_facts.props.iter().any(|p| p.slot == 3
+            && p.flags.contains(PropAccess::READ_EXACT)
+            && p.ty == SoundType::INT),
+        "expected resolved slot 3 ($b->id) in entry_helper: {:?}",
+        helper_facts.props
+    );
+}

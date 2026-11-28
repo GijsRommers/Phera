@@ -23,16 +23,20 @@ mod composer;
 mod control;
 mod declarations;
 mod discover;
+mod flow;
 mod framework;
 mod function_facts;
 mod glob;
 mod hierarchy;
 mod includes;
+mod layout;
 mod report;
+mod resolve;
 #[cfg(test)]
 mod test_support;
 #[cfg(test)]
 mod tests;
+mod types;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -179,13 +183,14 @@ where
         &config.allow,
     );
     hierarchy.mark_effectively_final(audit.holds.contains(Assumptions::SEALED_HIERARCHY));
+    let linked_classes = layout::link_classes(&units, &declarations, &mut hierarchy);
 
     let callees = function_facts::Callees::new(
         &units,
         &declarations,
         audit.holds.contains(Assumptions::SEALED_NAMES),
     );
-    let unit_facts: Vec<UnitBuildFacts> = units
+    let mut unit_facts: Vec<UnitBuildFacts> = units
         .iter()
         .zip(&hierarchy.unit_classes)
         .enumerate()
@@ -193,6 +198,69 @@ where
             function_facts::unit_facts(UnitRef(index as u32), &unit.unit, classes.clone(), &callees)
         })
         .collect();
+
+    // Map each function in each unit to its declaring ClassRef (only for
+    // Unique concrete/abstract/anonymous classes and enums — never traits,
+    // interfaces, Duplicate classes, or closures whose `$this` can be rebound).
+    let fn_owner_class: Vec<Vec<Option<ClassRef>>> = units
+        .iter()
+        .zip(&hierarchy.unit_classes)
+        .map(|(world_unit, class_refs)| {
+            let mut owners = vec![None; 1 + world_unit.unit.functions.len()];
+            for (class_idx, class_decl) in world_unit.unit.classes.iter().enumerate() {
+                if !class_decl.kind.is_class() {
+                    continue;
+                }
+                let cref = class_refs[class_idx];
+                if !matches!(
+                    hierarchy.classes[cref.0 as usize].decl,
+                    phera_bytecode::facts::DeclUniqueness::Unique { .. }
+                ) {
+                    continue;
+                }
+                for method in &class_decl.methods {
+                    if let Some(slot) = owners.get_mut(method.function.index() + 1) {
+                        *slot = Some(cref);
+                    }
+                }
+                for prop in &class_decl.properties {
+                    if let Some(hooks) = &prop.hooks {
+                        for hook in hooks.get.iter().chain(&hooks.set) {
+                            if let Some(slot) = owners.get_mut(hook.function.index() + 1) {
+                                *slot = Some(cref);
+                            }
+                        }
+                    }
+                }
+            }
+            owners
+        })
+        .collect();
+
+    // Pass 1: intra-procedural sound dataflow (using declared callee return types).
+    let pass1_facts = run_flow_pass(
+        &units,
+        &declarations,
+        &hierarchy,
+        &linked_classes,
+        audit.holds,
+        None,
+        &unit_facts,
+        &fn_owner_class,
+        false,
+    );
+    // Pass 2: inter-procedural sound dataflow + resolved call/property site extraction.
+    unit_facts = run_flow_pass(
+        &units,
+        &declarations,
+        &hierarchy,
+        &linked_classes,
+        audit.holds,
+        Some(&pass1_facts),
+        &unit_facts,
+        &fn_owner_class,
+        true,
+    );
 
     let mut classmap = Vec::new();
     for (index, (unit, classes)) in units.iter().zip(&hierarchy.unit_classes).enumerate() {
@@ -248,6 +316,60 @@ pub fn audit_report_text(analyzed: &AnalyzedWorld) -> String {
 /// The audit as a JSON document with the same content as the text report.
 pub fn audit_report_json(analyzed: &AnalyzedWorld) -> String {
     report::json(analyzed)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_flow_pass(
+    units: &[CompiledWorldUnit],
+    declarations: &declarations::Declarations<'_>,
+    hierarchy: &hierarchy::Hierarchy,
+    linked_classes: &[layout::LinkedClassInfo],
+    audit_holds: Assumptions,
+    prev_facts: Option<&[UnitBuildFacts]>,
+    base_facts: &[UnitBuildFacts],
+    fn_owner_class: &[Vec<Option<ClassRef>>],
+    emit_sites: bool,
+) -> Vec<UnitBuildFacts> {
+    let ctx = resolve::ResolveContext {
+        units,
+        declarations,
+        hierarchy,
+        linked_classes,
+        audit_holds,
+        prev_facts,
+    };
+    units
+        .iter()
+        .enumerate()
+        .map(|(unit_idx, world_unit)| {
+            let unit_ref = UnitRef(unit_idx as u32);
+            let mut facts = base_facts[unit_idx].clone();
+            let unit = &world_unit.unit;
+            let owners = &fn_owner_class[unit_idx];
+            // Index 0 = {main}, 1 + i = unit.functions[i].
+            for (fn_idx, (fn_facts, func)) in facts
+                .functions
+                .iter_mut()
+                .zip(std::iter::once(&unit.main).chain(&unit.functions))
+                .enumerate()
+            {
+                let self_local_id = fn_idx.checked_sub(1).map(|i| i as u32);
+                let owner_class = owners.get(fn_idx).copied().flatten();
+                let output = flow::analyze_function(
+                    &ctx,
+                    unit_ref,
+                    unit,
+                    func,
+                    &fn_facts.locals,
+                    self_local_id,
+                    owner_class,
+                    emit_sites,
+                );
+                flow::apply_flow_output(fn_facts, output);
+            }
+            facts
+        })
+        .collect()
 }
 
 /// A path as a build names it: relative to the project root with `/`

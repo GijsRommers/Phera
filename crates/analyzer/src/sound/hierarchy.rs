@@ -365,6 +365,15 @@ impl Hierarchy {
             .map(|index| ClassRef(index as u32))
     }
 
+    pub(crate) fn descendants_of(&self, class: ClassRef) -> &[ClassRef] {
+        let Some(layout) = self.classes.get(class.0 as usize) else {
+            return &[];
+        };
+        let start = layout.first_descendant as usize;
+        let end = start.saturating_add(layout.descendants as usize);
+        self.descendants.get(start..end).unwrap_or(&[])
+    }
+
     /// Whether a lowercased class name is one of the runtime's reflection
     /// classes, or a class of the build that extends one.
     pub(crate) fn is_reflection(&self, lowercased: &str) -> bool {

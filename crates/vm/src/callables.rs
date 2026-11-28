@@ -20,6 +20,15 @@ impl CallableUse<'_> {
     }
 }
 
+fn mark_dynamic_callee(callee: &mut Callee) {
+    if matches!(
+        callee.argument_binding,
+        crate::calls::callback_binding::ArgumentBinding::Caller
+    ) {
+        callee.argument_binding = crate::calls::callback_binding::ArgumentBinding::Dynamic;
+    }
+}
+
 impl Vm {
     /// Strings name functions or static methods; arrays bind an object or name a class.
     pub(crate) fn resolve_callable(&mut self, value: &Value) -> Result<Callee, NativeError> {
@@ -32,8 +41,8 @@ impl Vm {
         value: &Value,
         usage: CallableUse<'_>,
     ) -> Result<Callee, NativeError> {
-        match &*value.deref() {
-            Value::Object(object) => self.resolve_callable_object(object, usage),
+        let mut callee = match &*value.deref() {
+            Value::Object(object) => self.resolve_callable_object(object, usage)?,
             Value::InternedStr(_) | Value::String(_) => {
                 let name = value.deref().to_php_string().expect("checked string");
                 if let Some(callee) = self.function_table.resolved(&name) {
@@ -42,19 +51,24 @@ impl Vm {
                 let written = String::from_utf8_lossy(name.as_bytes());
                 if let Some((class, method)) = written.split_once("::") {
                     self.prepare_callable_class(class, method, usage)?;
-                    self.take_resolved_callable()
+                    self.take_resolved_callable()?
                 } else {
-                    let callee = self.resolve_callee(&written)?;
+                    let mut callee = self.resolve_callee(&written)?;
+                    mark_dynamic_callee(&mut callee);
                     self.function_table.cache_resolution(&name, &callee);
-                    Ok(callee)
+                    return Ok(callee);
                 }
             }
-            Value::Array(array) => self.resolve_callable_array(array, usage),
-            _ => Err(NativeError::error(format!(
-                "Value of type {} is not callable",
-                value.type_name()
-            ))),
-        }
+            Value::Array(array) => self.resolve_callable_array(array, usage)?,
+            _ => {
+                return Err(NativeError::error(format!(
+                    "Value of type {} is not callable",
+                    value.type_name()
+                )));
+            }
+        };
+        mark_dynamic_callee(&mut callee);
+        Ok(callee)
     }
 
     /// Closures reuse their saved visibility; __invoke is PHP's public callable entry point.
