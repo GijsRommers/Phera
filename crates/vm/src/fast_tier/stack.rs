@@ -21,18 +21,10 @@ pub(crate) struct FastFrame {
     pub(crate) return_bc_ip: u32,
 }
 
-/// Reusable per-VM Tier-2 register and frame storage. Lazily boxed inside
-/// `Vm::fast_stack` (`None` on every HTTP request and non-Tier-2 script).
-pub(crate) struct FastStack {
-    pub(crate) tags: Vec<u8>,
-    pub(crate) bits: Vec<u64>,
-    pub(crate) heap: Vec<Option<Value>>,
-    pub(crate) free_heap: Vec<u32>,
-    pub(crate) frames: Vec<FastFrame>,
-    /// Reusable flat raw-`i64` register stack for `int_rec::run_int_rec`.
-    pub(crate) rec_regs: Vec<i64>,
-    /// Reusable compact 8-byte call frames for `int_rec::run_int_rec`.
-    pub(crate) rec_frames: Vec<RecFrame>,
+/// Cold scratch buffers shared behind one pointer in `run_fast` so list-loop
+/// unboxing and buffered `echo` add zero extra live registers to the hot Tier-2
+/// dispatch loop.
+pub(crate) struct FastScratch {
     /// Reusable unboxed `i64` scratch slice for `list_loop::try_run_list_loop`.
     pub(crate) list_buf_i64: Vec<i64>,
     /// Reusable unboxed `f64` scratch slice for `list_loop::try_run_list_loop`.
@@ -47,6 +39,22 @@ pub(crate) struct FastStack {
     pub(crate) echo_open: bool,
 }
 
+/// Reusable per-VM Tier-2 register and frame storage. Lazily boxed inside
+/// `Vm::fast_stack` (`None` on every HTTP request and non-Tier-2 script).
+pub(crate) struct FastStack {
+    pub(crate) tags: Vec<u8>,
+    pub(crate) bits: Vec<u64>,
+    pub(crate) heap: Vec<Option<Value>>,
+    pub(crate) free_heap: Vec<u32>,
+    pub(crate) frames: Vec<FastFrame>,
+    /// Reusable flat raw-`i64` register stack for `int_rec::run_int_rec`.
+    pub(crate) rec_regs: Vec<i64>,
+    /// Reusable compact 8-byte call frames for `int_rec::run_int_rec`.
+    pub(crate) rec_frames: Vec<RecFrame>,
+    /// Bundled scratch buffers for list loops and buffered `Op::Echo`.
+    pub(crate) scratch: FastScratch,
+}
+
 impl FastStack {
     pub(crate) fn new() -> Self {
         Self {
@@ -57,10 +65,12 @@ impl FastStack {
             frames: Vec::new(),
             rec_regs: Vec::new(),
             rec_frames: Vec::new(),
-            list_buf_i64: Vec::new(),
-            list_buf_f64: Vec::new(),
-            echo: Vec::new(),
-            echo_open: false,
+            scratch: FastScratch {
+                list_buf_i64: Vec::new(),
+                list_buf_f64: Vec::new(),
+                echo: Vec::new(),
+                echo_open: false,
+            },
         }
     }
 

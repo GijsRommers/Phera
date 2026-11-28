@@ -90,12 +90,6 @@ impl Vm {
             })
     }
 
-    /// Whether any PHP reference is bound to a typed property.
-    #[inline]
-    pub(crate) fn has_typed_references(&self) -> bool {
-        !self.property_references.borrow().constraints.is_empty()
-    }
-
     /// Look up only this cell; neither objects nor class declarations are scanned.
     #[inline(never)]
     pub(crate) fn check_reference_assignment(

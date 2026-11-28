@@ -301,16 +301,19 @@ impl Machine<'_> {
         local: Reg,
         source: Reg,
     ) -> Step {
-        if GUARDED || self.typed_references || position.frame.has_extras() {
+        if GUARDED || position.frame.has_extras() {
             return Step::Slow;
         }
         let slots = self.registers.tail_mut(position.frame.base());
+        let Some(Some(Value::Reference(cell))) = slots.get(local.index()) else {
+            return Step::Slow;
+        };
+        if !self.property_references.borrow().constraints.is_empty() {
+            return Step::Slow;
+        }
         let value = match slots.get(source.index()) {
             Some(Some(value)) if is_plain_scalar(value) => value.clone(),
             _ => return Step::Slow,
-        };
-        let Some(Some(Value::Reference(cell))) = slots.get(local.index()) else {
-            return Step::Slow;
         };
         let Ok(mut target) = cell.try_borrow_mut() else {
             return Step::Slow;

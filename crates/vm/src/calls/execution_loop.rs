@@ -136,9 +136,10 @@ pub(super) struct Machine<'a> {
     pub(super) globals: &'a crate::globals::Globals,
     /// The constant table's epoch: which cached constant reads still hold.
     pub(super) constant_epoch: u64,
-    /// Whether some PHP reference is bound to a typed property, whose
-    /// type every assignment through the reference must check.
-    pub(super) typed_references: bool,
+    /// Borrowed lazily only when `Assign` targets an actual PHP reference,
+    /// avoiding a `RefCell::borrow()` on every `run_batch_loop` iteration.
+    pub(super) property_references:
+        &'a std::cell::RefCell<crate::reference_holders::ReferenceHolders>,
 }
 
 /// Where the loop is: which function, its registers, its next instruction.
@@ -175,12 +176,11 @@ impl Vm {
         work: &mut usize,
     ) -> Result<BatchExit, NativeError> {
         loop {
-            let (constant_epoch, typed_references) =
-                (self.constants.epoch(), self.has_typed_references());
+            let constant_epoch = self.constants.epoch();
             if self.fast_stack.is_some() {
                 let open = self.fast_echo_allowed();
                 if let Some(fast_stack) = self.fast_stack.as_deref_mut() {
-                    fast_stack.echo_open = open;
+                    fast_stack.scratch.echo_open = open;
                 }
             }
             let mut machine = Machine {
@@ -199,7 +199,7 @@ impl Vm {
                 enum_cases: &self.enum_cases,
                 globals: &self.globals,
                 constant_epoch,
-                typed_references,
+                property_references: &self.property_references,
             };
             // While no live object has a destructor due, no release can
             // make one due, and the loop is the plain one (see
@@ -215,7 +215,7 @@ impl Vm {
             if self
                 .fast_stack
                 .as_deref()
-                .is_some_and(|fast_stack| !fast_stack.echo.is_empty())
+                .is_some_and(|fast_stack| !fast_stack.scratch.echo.is_empty())
             {
                 self.write_fast_echo();
             }

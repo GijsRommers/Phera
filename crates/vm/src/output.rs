@@ -80,13 +80,13 @@ impl Vm {
         let Some(fast_stack) = self.fast_stack.as_deref_mut() else {
             return;
         };
-        let bytes = std::mem::take(&mut fast_stack.echo);
+        let bytes = std::mem::take(&mut fast_stack.scratch.echo);
         self.out(&bytes);
         if let Some(fast_stack) = self.fast_stack.as_deref_mut() {
             // Keep the allocation for the next run.
             let mut bytes = bytes;
             bytes.clear();
-            fast_stack.echo = bytes;
+            fast_stack.scratch.echo = bytes;
         }
     }
 }
