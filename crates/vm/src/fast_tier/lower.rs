@@ -2506,6 +2506,7 @@ fn count_path_reads(function: &Function, path: phera_bytecode::PathId, read: &mu
 mod tests {
     use super::*;
     use crate::code_table::CodeTable;
+    use crate::fast_tier::scalar_loop::SOp;
 
     fn lower_fn(php: &str, fn_name: &str) -> Arc<FastFunction> {
         let unit = Arc::new(phera_compiler::compile(php, "t.php").expect("compile"));
@@ -2519,6 +2520,14 @@ mod tests {
         let f_idx = code.declared(first, idx);
         let (fast, _) = lower_function(&code, f_idx, true).expect("lowered");
         fast
+    }
+
+    /// The ops of every scalar kernel of `fast`, in order.
+    fn kernel_ops(fast: &FastFunction) -> Vec<SOp> {
+        fast.scalar_loops
+            .iter()
+            .flat_map(|sl| sl.ops.iter().map(|op| op.op))
+            .collect()
     }
 
     #[test]
@@ -2621,6 +2630,15 @@ mod tests {
             "Zend mandel should extract ScalarLoop; ops={:?}",
             zend_mandel.ops
         );
+        // `$re*$im*2+$imc` doubles the product; `$re2=$re*$re` squares the
+        // value the op before it made.
+        let mandel_sops = kernel_ops(&zend_mandel);
+        assert!(
+            [SOp::MulDblAddF64, SOp::SubAddSqrF64]
+                .iter()
+                .all(|op| mandel_sops.contains(op)),
+            "Zend mandel should fuse MulDblAddF64 and SubAddSqrF64; sops={mandel_sops:?}"
+        );
 
         let zend_mandel2 = lower_fn(
             r#"<?php
@@ -2641,6 +2659,14 @@ mod tests {
             !zend_mandel2.scalar_loops.is_empty(),
             "Zend mandel2 should extract ScalarLoop; ops={:?}",
             zend_mandel2.ops
+        );
+        // `$z*$z - $Z*$Z + $r` and `$z*$z + $Z*$Z` are two-product ops.
+        let mandel2_sops = kernel_ops(&zend_mandel2);
+        assert!(
+            [SOp::MulMulSubAddF64, SOp::MulMulAddF64]
+                .iter()
+                .all(|op| mandel2_sops.contains(op)),
+            "Zend mandel2 should fuse MulMulSubAddF64 and MulMulAddF64; sops={mandel2_sops:?}"
         );
 
         let zend_sieve = lower_fn(

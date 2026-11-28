@@ -13,6 +13,7 @@ use phera_value::Value;
 use crate::calls::call_stack::CallStack;
 use crate::calls::execution_loop::Position;
 use crate::calls::frame::Frame;
+use crate::calls::prepared_call::CallKind;
 use crate::calls::registers::Registers;
 use crate::code_table::FunctionIndex;
 use crate::fast_tier::{
@@ -77,33 +78,48 @@ impl RecOp {
 pub(crate) enum RecKernel {
     /// Arbitrary pure-`i64` self-recursive function executed by the flat `RecOp` loop.
     General,
-    /// Specialized zero-dispatch iterative kernel for 1-arg binary-branching recurrences:
-    /// `if cmp(n, lim) { return base } else { return f(n - step1) <op> f(n - step2) }`.
-    UnaryBinOp {
-        cmp: u8,
-        lim: i64,
-        base_is_param: bool,
-        base_val: i64,
-        step1: i64,
-        step2: i64,
-        combine: ROp,
-        call1_dst: u8,
-        call1_ret_ip: u16,
-        call2_dst: u8,
-        call2_ret_ip: u16,
-        combine_ip: u16,
-    },
-    /// Specialized zero-dispatch iterative kernel for 2-arg nested recurrences:
-    /// `if m == 0 { return n + c0 } if n == 0 { return f(m - s0, c1) } return f(m - s0, f(m, n - s1))`.
-    BinaryNested {
-        c0: i64,
-        c1: i64,
-        s0: i64,
-        s1: i64,
-        outer_m_reg: u8,
-        inner_ret_dst: u8,
-        inner_call_ret_ip: u16,
-    },
+    /// Specialized zero-dispatch iterative kernel for 1-arg binary-branching recurrences.
+    UnaryBinOp(UnaryBinOp),
+    /// Specialized zero-dispatch iterative kernel for 2-arg nested recurrences.
+    BinaryNested(BinaryNested),
+}
+
+/// `if cmp(n, lim) { return base } else { return f(n - step1) <op> f(n - step2) }`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct UnaryBinOp {
+    cmp: u8,
+    lim: i64,
+    base_is_param: bool,
+    base_val: i64,
+    step1: i64,
+    step2: i64,
+    combine: ROp,
+    call1_dst: u8,
+    call1_ret_ip: u16,
+    call2_dst: u8,
+    call2_ret_ip: u16,
+    combine_ip: u16,
+}
+
+/// A [`BinaryNested`] frame waiting for its inner call `f($m, $n - s1)`:
+/// the `$m - s0` it then passes to its outer call, and its own `$n`, which
+/// a materialised frame shows (`debug_backtrace`, exception traces).
+#[derive(Clone, Copy)]
+pub(crate) struct WaitingCall {
+    outer_m: i64,
+    n: i64,
+}
+
+/// `if m == 0 { return n + c0 } if n == 0 { return f(m - s0, c1) } return f(m - s0, f(m, n - s1))`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct BinaryNested {
+    c0: i64,
+    c1: i64,
+    s0: i64,
+    s1: i64,
+    outer_m_reg: u8,
+    inner_ret_dst: u8,
+    inner_call_ret_ip: u16,
 }
 
 pub(crate) struct IntRecFunc {
@@ -422,7 +438,7 @@ fn detect_unary_binop(ops: &[RecOp]) -> Option<RecKernel> {
     {
         return None;
     }
-    Some(RecKernel::UnaryBinOp {
+    Some(RecKernel::UnaryBinOp(UnaryBinOp {
         cmp,
         lim: i64::from(br.imm),
         base_is_param,
@@ -435,7 +451,7 @@ fn detect_unary_binop(ops: &[RecOp]) -> Option<RecKernel> {
         call2_dst: c2.a,
         call2_ret_ip: (rec_start + 2) as u16,
         combine_ip: (rec_start + 2) as u16,
-    })
+    }))
 }
 
 fn detect_binary_nested(ops: &[RecOp]) -> Option<RecKernel> {
@@ -532,7 +548,7 @@ fn detect_binary_nested(ops: &[RecOp]) -> Option<RecKernel> {
     {
         return None;
     }
-    Some(RecKernel::BinaryNested {
+    Some(RecKernel::BinaryNested(BinaryNested {
         c0: i64::from(add0.imm),
         c1: i64::from(ld1.imm),
         s0: i64::from(sub1.imm),
@@ -540,7 +556,7 @@ fn detect_binary_nested(ops: &[RecOp]) -> Option<RecKernel> {
         outer_m_reg: sub_om.a,
         inner_ret_dst: inner_call.a,
         inner_call_ret_ip: (q + 2) as u16,
-    })
+    }))
 }
 
 /// Run a pure-`i64` self-recursive entry frame directly from `Vm::registers`
@@ -554,6 +570,7 @@ pub(crate) fn run_int_rec_entry(
     registers: &mut Registers,
     rec_regs: &mut Vec<i64>,
     rec_frames: &mut Vec<RecFrame>,
+    rec_stack: &mut Vec<WaitingCall>,
     entry_frame: Frame,
     max_frames: usize,
     budget_start: usize,
@@ -576,85 +593,32 @@ pub(crate) fn run_int_rec_entry(
     let caller_vm = *stack.caller()?;
     let destination = entry_frame.destination()?;
 
-    match rec.kernel {
-        RecKernel::UnaryBinOp {
-            cmp,
-            lim,
-            base_is_param,
-            base_val,
-            step1,
-            step2,
-            combine,
-            call1_dst,
-            call1_ret_ip,
-            call2_dst,
-            call2_ret_ip,
-            combine_ip,
-        } => {
-            return Some(run_unary_binop(
-                rec,
-                fn_idx,
-                stack,
-                registers,
-                rec_regs,
-                rec_frames,
-                entry_frame,
-                caller_vm,
-                destination,
-                entry_args[0],
-                max_frames,
-                budget_start,
-                work_io,
-                executed_io,
-                cmp,
-                lim,
-                base_is_param,
-                base_val,
-                step1,
-                step2,
-                combine,
-                call1_dst,
-                call1_ret_ip,
-                call2_dst,
-                call2_ret_ip,
-                combine_ip,
-            ));
-        }
-        RecKernel::BinaryNested {
-            c0,
-            c1,
-            s0,
-            s1,
-            outer_m_reg,
-            inner_ret_dst,
-            inner_call_ret_ip,
-        } => {
-            return Some(run_binary_nested(
-                rec,
-                fn_idx,
-                stack,
-                registers,
-                rec_regs,
-                rec_frames,
-                entry_frame,
-                caller_vm,
-                destination,
-                entry_args[0],
-                entry_args[1],
-                max_frames,
-                budget_start,
-                work_io,
-                executed_io,
-                c0,
-                c1,
-                s0,
-                s1,
-                outer_m_reg,
-                inner_ret_dst,
-                inner_call_ret_ip,
-            ));
-        }
-        RecKernel::General => {}
+    if !matches!(rec.kernel, RecKernel::General) {
+        let entry = KernelEntry {
+            rec,
+            fn_idx,
+            stack,
+            registers,
+            rec_regs,
+            rec_frames,
+            entry_frame,
+            caller_vm,
+            destination,
+            max_frames,
+            budget_start,
+            work_io,
+            executed_io,
+        };
+        return Some(match rec.kernel {
+            RecKernel::UnaryBinOp(k) => {
+                run_unary_binop(entry, k, &[], UnaryStart::Call(entry_args[0]))
+            }
+            RecKernel::BinaryNested(k) => {
+                rec_stack.clear();
+                run_binary_nested(entry, k, rec_stack, entry_args[0], entry_args[1])
+            }
+            RecKernel::General => unreachable!(),
+        });
     }
 
     // Pre-size flat buffers ONCE so the inner loop has zero re-slicing, zero
@@ -932,35 +896,97 @@ pub(crate) fn run_int_rec_entry(
     ))
 }
 
-#[inline(never)]
-#[allow(clippy::too_many_arguments)]
-fn run_unary_binop(
-    rec: &IntRecFunc,
+/// What a specialised kernel needs from the VM around it: the frame it runs
+/// for (the bottom one when it resumes several), where that frame's result
+/// goes, and the scratch and accounting a materialisation uses.
+struct KernelEntry<'a> {
+    rec: &'a IntRecFunc,
     fn_idx: FunctionIndex,
-    stack: &mut CallStack,
-    registers: &mut Registers,
-    rec_regs: &mut Vec<i64>,
-    rec_frames: &mut Vec<RecFrame>,
+    stack: &'a mut CallStack,
+    registers: &'a mut Registers,
+    rec_regs: &'a mut Vec<i64>,
+    rec_frames: &'a mut Vec<RecFrame>,
     entry_frame: Frame,
     caller_vm: Frame,
     destination: Reg,
-    entry_n: i64,
     max_frames: usize,
     budget_start: usize,
-    work_io: &mut usize,
-    executed_io: &mut u64,
-    cmp: u8,
-    lim: i64,
-    base_is_param: bool,
-    base_val: i64,
-    step1: i64,
-    step2: i64,
-    combine: ROp,
-    call1_dst: u8,
-    call1_ret_ip: u16,
-    call2_dst: u8,
-    call2_ret_ip: u16,
-    combine_ip: u16,
+    work_io: &'a mut usize,
+    executed_io: &'a mut u64,
+}
+
+impl KernelEntry<'_> {
+    /// Each kernel step is about eight times cheaper than a Tier-1
+    /// instruction, so a kernel gets eight steps per unit of work budget
+    /// (about 1 ms between yields) and is charged `steps / 8`.
+    fn step_budget(&self) -> usize {
+        self.budget_start.max(1).saturating_mul(8)
+    }
+
+    /// The entry frame returned `ret` after `steps` kernel steps: leave it
+    /// and hand `ret` to its caller.
+    fn finish(self, ret: i64, steps: usize) -> FastExit {
+        *self.work_io = (*self.work_io).saturating_add(steps >> 3);
+        *self.executed_io += steps.max(1) as u64;
+        self.stack.pop_for_return();
+        self.registers.truncate(self.entry_frame.start());
+        self.registers.put(
+            self.caller_vm.base() + self.destination.index(),
+            Value::Int(ret),
+        );
+        FastExit::Returned(Position {
+            frame: self.caller_vm,
+            ip: self.caller_vm.ip(),
+        })
+    }
+
+    /// Hands the frames rebuilt in `rec_regs` / `rec_frames` back to the VM.
+    fn materialize(
+        self,
+        cur_base: usize,
+        cur_ip: usize,
+        yield_now: bool,
+        steps: usize,
+    ) -> FastExit {
+        materialize_int_rec(
+            self.rec,
+            self.fn_idx,
+            self.stack,
+            self.registers,
+            self.rec_regs,
+            self.rec_frames,
+            self.entry_frame,
+            cur_base,
+            cur_ip,
+            yield_now,
+            steps >> 3,
+            self.work_io,
+            self.executed_io,
+        )
+    }
+}
+
+/// How a [`UnaryBinOp`] kernel run begins: with a call of `f($n)`, or with
+/// a value returned to the innermost open frame (when it resumes frames).
+#[derive(Clone, Copy)]
+enum UnaryStart {
+    Call(i64),
+    Return(i64),
+}
+
+/// The deepest a [`UnaryBinOp`] kernel goes: its frames live in fixed
+/// arrays on the Rust stack.
+const UNARY_MAX_DEPTH: usize = 255;
+
+/// Runs a [`UnaryBinOp`] recursion. `open` are frames already waiting for a
+/// self-call, bottom first: each one's `$n`, and the first call's result
+/// once that call has returned (it then waits for the second).
+#[inline(never)]
+fn run_unary_binop(
+    entry: KernelEntry<'_>,
+    k: UnaryBinOp,
+    open: &[(i64, Option<i64>)],
+    start: UnaryStart,
 ) -> FastExit {
     enum Pause {
         CallAtTop { n: i64, ip: usize },
@@ -968,62 +994,65 @@ fn run_unary_binop(
         CombineOverflow { lhs: i64, rhs: i64 },
     }
 
-    let max_d = max_frames.min(255);
-    let mut st_n = [0i64; 256];
-    let mut st_acc = [0i64; 256];
-    let mut st_phase = [0u8; 256];
-    let mut sp: usize = 0;
-    let mut n = entry_n;
-    // Each zero-dispatch iterative step is ~8-10x faster than a Tier-1 bytecode
-    // step; scale internal step budget by 8x (~1 ms per yield) and charge `spent / 8`.
-    let step_budget_start = budget_start.max(1).saturating_mul(8);
+    let max_d = entry.max_frames.min(UNARY_MAX_DEPTH);
+    let mut st_n = [0i64; UNARY_MAX_DEPTH + 1];
+    let mut st_acc = [0i64; UNARY_MAX_DEPTH + 1];
+    let mut st_phase = [0u8; UNARY_MAX_DEPTH + 1];
+    for (slot, &(n, first)) in open.iter().enumerate().take(max_d) {
+        st_n[slot] = n;
+        if let Some(acc) = first {
+            st_acc[slot] = acc;
+            st_phase[slot] = 1;
+        }
+    }
+    let mut sp = open.len().min(max_d);
+    let step_budget_start = entry.step_budget();
     let mut budget = step_budget_start;
     let mut yield_now = false;
+    let (mut n, mut ret, mut returning) = match start {
+        UnaryStart::Call(n) => (n, 0, false),
+        UnaryStart::Return(ret) => (0, ret, true),
+    };
 
     let pause = 'run: loop {
-        let is_base = if cmp == CMP_LT { n < lim } else { n <= lim };
-        let mut ret = if is_base {
-            if base_is_param { n } else { base_val }
-        } else {
-            if sp >= max_d {
-                break 'run Pause::CallAtTop { n, ip: 0 };
-            }
-            let Some(arg1) = n.checked_sub(step1) else {
-                break 'run Pause::CallAtTop {
-                    n,
-                    ip: (call1_ret_ip as usize).saturating_sub(1),
-                };
+        if !returning {
+            let is_base = if k.cmp == CMP_LT {
+                n < k.lim
+            } else {
+                n <= k.lim
             };
-            st_n[sp] = n;
-            st_phase[sp] = 0;
-            sp += 1;
-            n = arg1;
-            budget -= 1;
-            if budget == 0 {
-                yield_now = true;
-                break 'run Pause::CallAtTop { n, ip: 0 };
+            if !is_base {
+                if sp >= max_d {
+                    break 'run Pause::CallAtTop { n, ip: 0 };
+                }
+                let Some(arg1) = n.checked_sub(k.step1) else {
+                    break 'run Pause::CallAtTop {
+                        n,
+                        ip: (k.call1_ret_ip as usize).saturating_sub(1),
+                    };
+                };
+                st_n[sp] = n;
+                st_phase[sp] = 0;
+                sp += 1;
+                n = arg1;
+                budget -= 1;
+                if budget == 0 {
+                    yield_now = true;
+                    break 'run Pause::CallAtTop { n, ip: 0 };
+                }
+                continue 'run;
             }
-            continue 'run;
-        };
+            ret = if k.base_is_param { n } else { k.base_val };
+        }
+        returning = false;
 
         loop {
             if sp == 0 {
-                let raw_spent = step_budget_start.saturating_sub(budget);
-                let spent = raw_spent >> 3;
-                *work_io = (*work_io).saturating_add(spent);
-                *executed_io += raw_spent.max(1) as u64;
-                stack.pop_for_return();
-                registers.truncate(entry_frame.start());
-                registers.put(caller_vm.base() + destination.index(), Value::Int(ret));
-                return FastExit::Returned(Position {
-                    frame: caller_vm,
-                    ip: caller_vm.ip(),
-                });
+                return entry.finish(ret, step_budget_start.saturating_sub(budget));
             }
             let top = sp - 1;
             if st_phase[top] == 0 {
-                let cur_n = st_n[top];
-                let Some(arg2) = cur_n.checked_sub(step2) else {
+                let Some(arg2) = st_n[top].checked_sub(k.step2) else {
                     break 'run Pause::Call2Overflow { ret1: ret };
                 };
                 st_acc[top] = ret;
@@ -1037,7 +1066,7 @@ fn run_unary_binop(
                 continue 'run;
             }
             let lhs = st_acc[top];
-            let combined = match combine {
+            let combined = match k.combine {
                 ROp::AddI64 => lhs.checked_add(ret),
                 ROp::SubI64 => lhs.checked_sub(ret),
                 ROp::MulI64 => lhs.checked_mul(ret),
@@ -1052,7 +1081,9 @@ fn run_unary_binop(
     };
 
     // Reconstruct exact `rec_regs` + `rec_frames` for materialization.
-    let stride = rec.reg_count as usize;
+    let rec_regs = &mut *entry.rec_regs;
+    let rec_frames = &mut *entry.rec_frames;
+    let stride = entry.rec.reg_count as usize;
     let needed = (sp + 2) * stride;
     if rec_regs.len() < needed {
         rec_regs.resize(needed, 0);
@@ -1070,53 +1101,40 @@ fn run_unary_binop(
             let cur_base = top * stride;
             rec_regs[cur_base..cur_base + stride].fill(0);
             rec_regs[cur_base] = st_n[top];
-            rec_regs[cur_base + call1_dst as usize] = ret1;
-            (top, cur_base, (call2_ret_ip as usize).saturating_sub(1))
+            rec_regs[cur_base + k.call1_dst as usize] = ret1;
+            (top, cur_base, (k.call2_ret_ip as usize).saturating_sub(1))
         }
         Pause::CombineOverflow { lhs, rhs } => {
             let top = sp - 1;
             let cur_base = top * stride;
             rec_regs[cur_base..cur_base + stride].fill(0);
             rec_regs[cur_base] = st_n[top];
-            rec_regs[cur_base + call1_dst as usize] = lhs;
-            rec_regs[cur_base + call2_dst as usize] = rhs;
-            (top, cur_base, combine_ip as usize)
+            rec_regs[cur_base + k.call1_dst as usize] = lhs;
+            rec_regs[cur_base + k.call2_dst as usize] = rhs;
+            (top, cur_base, k.combine_ip as usize)
         }
     };
-    for k in 0..saved_count {
-        let f_base = k * stride;
+    for slot in 0..saved_count {
+        let f_base = slot * stride;
         rec_regs[f_base..f_base + stride].fill(0);
-        rec_regs[f_base] = st_n[k];
-        if st_phase[k] == 0 {
+        rec_regs[f_base] = st_n[slot];
+        if st_phase[slot] == 0 {
             rec_frames.push(RecFrame {
                 base: f_base as u32,
-                ret_dst: call1_dst,
-                ret_ip: call1_ret_ip,
+                ret_dst: k.call1_dst,
+                ret_ip: k.call1_ret_ip,
             });
         } else {
-            rec_regs[f_base + call1_dst as usize] = st_acc[k];
+            rec_regs[f_base + k.call1_dst as usize] = st_acc[slot];
             rec_frames.push(RecFrame {
                 base: f_base as u32,
-                ret_dst: call2_dst,
-                ret_ip: call2_ret_ip,
+                ret_dst: k.call2_dst,
+                ret_ip: k.call2_ret_ip,
             });
         }
     }
-    materialize_int_rec(
-        rec,
-        fn_idx,
-        stack,
-        registers,
-        rec_regs,
-        rec_frames,
-        entry_frame,
-        cur_base,
-        cur_ip,
-        yield_now,
-        step_budget_start.saturating_sub(budget) >> 3,
-        work_io,
-        executed_io,
-    )
+    let steps = step_budget_start.saturating_sub(budget);
+    entry.materialize(cur_base, cur_ip, yield_now, steps)
 }
 
 /// Pure inline subtree evaluator for `Op::CallSelf1` inside `FastVm` so
@@ -1130,7 +1148,7 @@ pub(crate) fn try_eval_int_rec_1(
     max_frames: usize,
     budget_work: usize,
 ) -> Option<(i64, usize)> {
-    let RecKernel::UnaryBinOp {
+    let RecKernel::UnaryBinOp(UnaryBinOp {
         cmp,
         lim,
         base_is_param,
@@ -1139,7 +1157,7 @@ pub(crate) fn try_eval_int_rec_1(
         step2,
         combine,
         ..
-    } = rec.kernel
+    }) = rec.kernel
     else {
         return None;
     };
@@ -1202,20 +1220,20 @@ pub(crate) fn try_eval_int_rec_1(
 
 /// Pure inline subtree evaluator for `Op::CallSelf2` inside `FastVm` so
 /// post-yield sibling calls still execute inside the zero-dispatch kernel!
+/// `waiting` is reusable scratch for the frames waiting on an inner call.
 #[inline(never)]
 pub(crate) fn try_eval_int_rec_2(
     rec: &IntRecFunc,
+    waiting: &mut Vec<WaitingCall>,
     entry_m: i64,
     entry_n: i64,
     max_frames: usize,
     budget_work: usize,
 ) -> Option<(i64, usize)> {
-    let RecKernel::BinaryNested { c0, c1, s0, s1, .. } = rec.kernel else {
+    let RecKernel::BinaryNested(k) = rec.kernel else {
         return None;
     };
-    let max_d = max_frames.min(2047);
-    let mut st_m = [0i64; 2048];
-    let mut sp: usize = 0;
+    waiting.clear();
     let mut m = entry_m;
     let mut n = entry_n;
     let step_budget_start = budget_work.max(1).saturating_mul(8);
@@ -1223,25 +1241,23 @@ pub(crate) fn try_eval_int_rec_2(
 
     loop {
         if m == 0 {
-            let res = n.checked_add(c0)?;
-            if sp == 0 {
+            let res = n.checked_add(k.c0)?;
+            let Some(WaitingCall { outer_m, .. }) = waiting.pop() else {
                 let spent = step_budget_start.saturating_sub(budget) >> 3;
                 return Some((res, spent));
-            }
-            sp -= 1;
-            m = st_m[sp];
+            };
+            m = outer_m;
             n = res;
         } else if n == 0 {
-            m = m.checked_sub(s0)?;
-            n = c1;
+            m = m.checked_sub(k.s0)?;
+            n = k.c1;
         } else {
-            if sp >= max_d {
+            if waiting.len() >= max_frames {
                 return None;
             }
-            let outer_m = m.checked_sub(s0)?;
-            let inner_n = n.checked_sub(s1)?;
-            st_m[sp] = outer_m;
-            sp += 1;
+            let outer_m = m.checked_sub(k.s0)?;
+            let inner_n = n.checked_sub(k.s1)?;
+            waiting.push(WaitingCall { outer_m, n });
             n = inner_n;
         }
         budget -= 1;
@@ -1251,80 +1267,50 @@ pub(crate) fn try_eval_int_rec_2(
     }
 }
 
+/// Runs a [`BinaryNested`] recursion from a call of `f(m, n)`. `waiting`
+/// holds the frames already waiting for an inner call, bottom first.
 #[inline(never)]
-#[allow(clippy::too_many_arguments)]
 fn run_binary_nested(
-    rec: &IntRecFunc,
-    fn_idx: FunctionIndex,
-    stack: &mut CallStack,
-    registers: &mut Registers,
-    rec_regs: &mut Vec<i64>,
-    rec_frames: &mut Vec<RecFrame>,
-    entry_frame: Frame,
-    caller_vm: Frame,
-    destination: Reg,
+    entry: KernelEntry<'_>,
+    k: BinaryNested,
+    waiting: &mut Vec<WaitingCall>,
     entry_m: i64,
     entry_n: i64,
-    max_frames: usize,
-    budget_start: usize,
-    work_io: &mut usize,
-    executed_io: &mut u64,
-    c0: i64,
-    c1: i64,
-    s0: i64,
-    s1: i64,
-    outer_m_reg: u8,
-    inner_ret_dst: u8,
-    inner_call_ret_ip: u16,
 ) -> FastExit {
-    let max_d = max_frames.min(2047);
-    let mut st_m = [0i64; 2048];
-    let mut sp: usize = 0;
+    let max_d = entry.max_frames;
     let mut m = entry_m;
     let mut n = entry_n;
-    let step_budget_start = budget_start.max(1).saturating_mul(8);
+    let step_budget_start = entry.step_budget();
     let mut budget = step_budget_start;
     let mut yield_now = false;
 
     loop {
         if m == 0 {
-            let Some(res) = n.checked_add(c0) else {
+            let Some(res) = n.checked_add(k.c0) else {
                 break;
             };
-            if sp == 0 {
-                let raw_spent = step_budget_start.saturating_sub(budget);
-                let spent = raw_spent >> 3;
-                *work_io = (*work_io).saturating_add(spent);
-                *executed_io += raw_spent.max(1) as u64;
-                stack.pop_for_return();
-                registers.truncate(entry_frame.start());
-                registers.put(caller_vm.base() + destination.index(), Value::Int(res));
-                return FastExit::Returned(Position {
-                    frame: caller_vm,
-                    ip: caller_vm.ip(),
-                });
-            }
-            sp -= 1;
-            m = st_m[sp];
+            let Some(WaitingCall { outer_m, .. }) = waiting.pop() else {
+                return entry.finish(res, step_budget_start.saturating_sub(budget));
+            };
+            m = outer_m;
             n = res;
         } else if n == 0 {
-            let Some(nm) = m.checked_sub(s0) else {
+            let Some(nm) = m.checked_sub(k.s0) else {
                 break;
             };
             m = nm;
-            n = c1;
+            n = k.c1;
         } else {
-            if sp >= max_d {
+            if waiting.len() >= max_d {
                 break;
             }
-            let Some(outer_m) = m.checked_sub(s0) else {
+            let Some(outer_m) = m.checked_sub(k.s0) else {
                 break;
             };
-            let Some(inner_n) = n.checked_sub(s1) else {
+            let Some(inner_n) = n.checked_sub(k.s1) else {
                 break;
             };
-            st_m[sp] = outer_m;
-            sp += 1;
+            waiting.push(WaitingCall { outer_m, n });
             n = inner_n;
         }
         budget -= 1;
@@ -1335,42 +1321,227 @@ fn run_binary_nested(
     }
 
     // Reconstruct exact `rec_regs` + `rec_frames` for materialization.
-    let stride = rec.reg_count as usize;
+    let rec_regs = &mut *entry.rec_regs;
+    let rec_frames = &mut *entry.rec_frames;
+    let stride = entry.rec.reg_count as usize;
+    let sp = waiting.len();
     let needed = (sp + 2) * stride;
     if rec_regs.len() < needed {
         rec_regs.resize(needed, 0);
     }
     rec_frames.clear();
-    for (k, &outer_m) in st_m.iter().enumerate().take(sp) {
-        let f_base = k * stride;
+    for (slot, &WaitingCall { outer_m, n }) in waiting.iter().enumerate() {
+        let f_base = slot * stride;
         rec_regs[f_base..f_base + stride].fill(0);
-        rec_regs[f_base] = outer_m.wrapping_add(s0);
-        rec_regs[f_base + outer_m_reg as usize] = outer_m;
+        rec_regs[f_base] = outer_m.wrapping_add(k.s0);
+        rec_regs[f_base + 1] = n;
+        rec_regs[f_base + k.outer_m_reg as usize] = outer_m;
         rec_frames.push(RecFrame {
             base: f_base as u32,
-            ret_dst: inner_ret_dst,
-            ret_ip: inner_call_ret_ip,
+            ret_dst: k.inner_ret_dst,
+            ret_ip: k.inner_call_ret_ip,
         });
     }
     let cur_base = sp * stride;
     rec_regs[cur_base..cur_base + stride].fill(0);
     rec_regs[cur_base] = m;
     rec_regs[cur_base + 1] = n;
-    materialize_int_rec(
+    let steps = step_budget_start.saturating_sub(budget);
+    entry.materialize(cur_base, 0, yield_now, steps)
+}
+
+/// What a frame of a specialised kernel's function is waiting for, read
+/// from the instruction it continues at, with the register its callee's
+/// result goes to.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Parked {
+    /// A [`UnaryBinOp`] frame waiting for its first self-call.
+    First,
+    /// A [`UnaryBinOp`] frame waiting for its second self-call.
+    Second,
+    /// A [`BinaryNested`] frame waiting for its inner self-call.
+    Inner,
+}
+
+impl IntRecFunc {
+    /// The bytecode instruction a frame continues at after the self-call
+    /// whose return lands at `RecOp` index `ret_ip`.
+    fn resume_bc_ip(&self, ret_ip: u16) -> Option<usize> {
+        let call = (ret_ip as usize).checked_sub(1)?;
+        self.ret_bc_ip.get(call).map(|&ip| ip as usize)
+    }
+
+    /// Whether a frame continuing at `bc_ip` waits for one of the kernel's
+    /// self-calls, and the register that call's result goes to.
+    fn parked_at(&self, bc_ip: usize) -> Option<(Parked, u8)> {
+        match self.kernel {
+            RecKernel::UnaryBinOp(k) => {
+                if self.resume_bc_ip(k.call1_ret_ip) == Some(bc_ip) {
+                    Some((Parked::First, k.call1_dst))
+                } else if self.resume_bc_ip(k.call2_ret_ip) == Some(bc_ip) {
+                    Some((Parked::Second, k.call2_dst))
+                } else {
+                    None
+                }
+            }
+            RecKernel::BinaryNested(k) => (self.resume_bc_ip(k.inner_call_ret_ip) == Some(bc_ip))
+                .then_some((Parked::Inner, k.inner_ret_dst)),
+            RecKernel::General => None,
+        }
+    }
+
+    /// What a parked frame keeps for the kernel: `$n` and the first call's
+    /// result for a [`UnaryBinOp`] frame, the outer call's `$m` and `$n`
+    /// for a [`BinaryNested`] one. `None` when a register holds something
+    /// other than an int.
+    fn parked_state(
+        &self,
+        registers: &Registers,
+        base: usize,
+        parked: Parked,
+    ) -> Option<(i64, i64)> {
+        let int = |reg: u8| match registers.window(base + reg as usize, 1) {
+            [Some(Value::Int(value))] => Some(*value),
+            _ => None,
+        };
+        match (self.kernel, parked) {
+            (RecKernel::UnaryBinOp(_), Parked::First) => Some((int(0)?, 0)),
+            (RecKernel::UnaryBinOp(k), Parked::Second) => Some((int(0)?, int(k.call1_dst)?)),
+            (RecKernel::BinaryNested(k), Parked::Inner) => Some((int(k.outer_m_reg)?, int(1)?)),
+            _ => None,
+        }
+    }
+}
+
+/// A frame the kernel may take over: a plain call of `function` with a
+/// result register, nothing in the side table and every argument passed.
+fn plain_frame_of(frame: &Frame, function: FunctionIndex) -> bool {
+    frame.function == function
+        && frame.kind() == CallKind::Function
+        && frame.destination().is_some()
+        && !frame.has_extras()
+        && frame.passed().is_none()
+}
+
+/// Resumes a specialised kernel at a frame waiting for one of its
+/// self-calls: after a yield materialised the kernel's frames, the machine
+/// ran the innermost one, and its caller now continues here. The frames of
+/// the same function waiting below it are taken back into the kernel too,
+/// so the rest of the recursion runs in the kernel again instead of one
+/// frame at a time. `None`, with nothing changed, when the frames do not
+/// fit.
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn resume_int_rec(
+    rec: &IntRecFunc,
+    stack: &mut CallStack,
+    registers: &mut Registers,
+    rec_regs: &mut Vec<i64>,
+    rec_frames: &mut Vec<RecFrame>,
+    rec_stack: &mut Vec<WaitingCall>,
+    top_ip: usize,
+    stop: usize,
+    frame_limit: usize,
+    budget_start: usize,
+    work_io: &mut usize,
+    executed_io: &mut u64,
+) -> Option<FastExit> {
+    let top_depth = stack.depth().checked_sub(1)?;
+    let top = *stack.current()?;
+    let function = top.function;
+    if top_depth <= stop || !plain_frame_of(&top, function) {
+        return None;
+    }
+    let (top_parked, top_dst) = rec.parked_at(top_ip)?;
+    let returned = match registers.window(top.base() + top_dst as usize, 1) {
+        [Some(Value::Int(value))] => *value,
+        _ => return None,
+    };
+
+    // Walk down the waiting frames, innermost first: each must wait for
+    // the call the frame above it is. A unary kernel keeps its frames in
+    // fixed arrays, so it takes at most that many.
+    let most = match rec.kernel {
+        RecKernel::UnaryBinOp(_) => UNARY_MAX_DEPTH,
+        _ => usize::MAX,
+    };
+    let mut parked = vec![(
+        top_parked,
+        rec.parked_state(registers, top.base(), top_parked)?,
+    )];
+    let mut bottom = top_depth;
+    while bottom - 1 > stop && parked.len() < most {
+        let callee = *stack.at(bottom)?;
+        let frame = *stack.at(bottom - 1)?;
+        if !plain_frame_of(&frame, function) {
+            break;
+        }
+        let Some((kind, dst)) = rec.parked_at(frame.ip()) else {
+            break;
+        };
+        if callee.destination() != Some(Reg(u16::from(dst))) {
+            break;
+        }
+        let Some(state) = rec.parked_state(registers, frame.base(), kind) else {
+            break;
+        };
+        parked.push((kind, state));
+        bottom -= 1;
+    }
+    parked.reverse();
+    let entry_frame = *stack.at(bottom)?;
+    let caller_vm = *stack.at(bottom.checked_sub(1)?)?;
+    let destination = entry_frame.destination()?;
+    if stack.has_calls_from(entry_frame.start()) {
+        return None;
+    }
+    let max_frames = frame_limit.saturating_sub(bottom + 1);
+    if parked.len() > max_frames {
+        return None;
+    }
+
+    // The kernel now holds the waiting frames: leave all but the bottom one.
+    for _ in bottom..top_depth {
+        stack.pop_for_return();
+    }
+    registers.truncate(entry_frame.base() + rec.reg_count as usize);
+    let entry = KernelEntry {
         rec,
-        fn_idx,
+        fn_idx: function,
         stack,
         registers,
         rec_regs,
         rec_frames,
         entry_frame,
-        cur_base,
-        0,
-        yield_now,
-        step_budget_start.saturating_sub(budget) >> 3,
+        caller_vm,
+        destination,
+        max_frames,
+        budget_start,
         work_io,
         executed_io,
-    )
+    };
+    Some(match rec.kernel {
+        RecKernel::UnaryBinOp(k) => {
+            let open: Vec<(i64, Option<i64>)> = parked
+                .iter()
+                .map(|&(kind, (n, first))| (n, (kind == Parked::Second).then_some(first)))
+                .collect();
+            run_unary_binop(entry, k, &open, UnaryStart::Return(returned))
+        }
+        RecKernel::BinaryNested(k) => {
+            // The innermost frame makes its outer call with the value it got.
+            let (waiting, innermost) = parked.split_at(parked.len() - 1);
+            let (_, (outer_m, _)) = innermost[0];
+            rec_stack.clear();
+            rec_stack.extend(
+                waiting
+                    .iter()
+                    .map(|&(_, (outer_m, n))| WaitingCall { outer_m, n }),
+            );
+            run_binary_nested(entry, k, rec_stack, outer_m, returned)
+        }
+        RecKernel::General => return None,
+    })
 }
 
 #[cold]

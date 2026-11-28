@@ -6,7 +6,10 @@
 //! - Zero tag loads/stores or `TAG_HEAP` checks inside the loop
 //! - Hoisted float/int constants loaded once at loop entry
 //! - General 3-operand arithmetic fusions (`MulAddF64`, `SubAddF64`, `AddAddF64`,
-//!   `Mul2MulAddF64`, `AddCmpF64Exit`) and 1-op counter+accumulator loops
+//!   `Mul2MulAddF64`, `AddCmpF64Exit`), two-product ops (`MulMulAddF64`, ...)
+//!   and ops that also square their result (`SubAddSqrF64`, ...), which keep
+//!   a value in a register for the op that uses it
+//! - 1-op counter+accumulator loops, run in closed form when nothing overflows
 //! - Exact overflow, division-by-zero, and yield fallback back to `FastVm`
 
 use crate::fast_tier::{
@@ -38,6 +41,20 @@ pub(crate) enum SOp {
     SubAddF64,     // fv[a] = fv[b] - fv[c] + fv[imm]
     AddAddF64,     // fv[a] = fv[b] + fv[c] + fv[imm]
     Mul2MulAddF64, // fv[a] = (fv[b] + fv[b]) * fv[c] + fv[imm]
+    MulDblAddF64,  // p = fv[b] * fv[c]; fv[a] = (p + p) + fv[imm]   (`$x * $y * 2 + $z`)
+    // Two-product forms; `d(imm)` / `e(imm)` / `f(imm)` are slot bytes 0 / 1 / 2 of `imm`.
+    MulMulAddF64,    // fv[a] = fv[b] * fv[c] + fv[d] * fv[e]
+    MulMulSubF64,    // fv[a] = fv[b] * fv[c] - fv[d] * fv[e]
+    MulMulSubAddF64, // fv[a] = (fv[b] * fv[c] - fv[d] * fv[e]) + fv[f]
+    // An op fused with a following `y = x * x` of its own result `x`, which
+    // keeps `x` in a register instead of a store and reload: `r` is the
+    // result of the base op, written to fv[a], and fv[sq] = r * r.
+    AddSqrF64,    // r = fv[b] + fv[c];          sq = imm
+    SubSqrF64,    // r = fv[b] - fv[c];          sq = imm
+    MulSqrF64,    // r = fv[b] * fv[c];          sq = imm
+    MulAddSqrF64, // r = fv[b] * fv[c] + fv[d];  sq = e
+    SubAddSqrF64, // r = fv[b] - fv[c] + fv[d];  sq = e
+    AddAddSqrF64, // r = fv[b] + fv[c] + fv[d];  sq = e
 
     // Unboxed int arithmetic
     AddI64,
@@ -168,6 +185,13 @@ pub(crate) fn try_run_scalar_loop(
         }
     }
 
+    // 1b. A 1-op counted loop runs in closed form on the registers.
+    if let [op] = *sl.ops
+        && let Some(exit) = try_counted_loop(sl, op, t, v, budget)
+    {
+        return Some(exit);
+    }
+
     // 2. Load stack-local unboxed register arrays + hoisted constants.
     let mut iv = [0i64; MAX_SCALAR_SLOTS];
     let mut fv = [0.0f64; MAX_SCALAR_SLOTS];
@@ -208,6 +232,63 @@ pub(crate) fn try_run_scalar_loop(
     Some(exit)
 }
 
+/// Runs a 1-op counted loop, `do { $a++; $i++ } while ($i < $lim)` (or
+/// `<=`, with or without `$a`), as one step: the loop body runs `k` times
+/// with `k` known on entry, so the counters move by `k` at once. The
+/// iterations, the final values, the budget charged (one per back-edge)
+/// and the yield point are the ones the step-by-step loop gives. `None`
+/// for any other op, and when an increment would overflow, so that the
+/// step-by-step loop falls back at the exact iteration. Out of line: it
+/// runs once per loop entry, and `run_fast` inlines its caller.
+#[inline(never)]
+fn try_counted_loop(
+    sl: &ScalarLoop,
+    op: ScalarOp,
+    t: &mut [u8; 256],
+    v: &mut [u64; 256],
+    budget: usize,
+) -> Option<ScalarExit> {
+    let reg = |slot: u8| sl.int_regs.get(slot as usize).map(|&r| r as usize);
+    let (acc, counter, lim, inclusive) = match op.op {
+        SOp::IncIncLoopLtImm => (Some(reg(op.a)?), reg(op.b)?, i64::from(op.imm), false),
+        SOp::IncIncLoopLeImm => (Some(reg(op.a)?), reg(op.b)?, i64::from(op.imm), true),
+        SOp::IncIncLoopLtReg => (Some(reg(op.a)?), reg(op.b)?, v[reg(op.c)?] as i64, false),
+        SOp::IncIncLoopLeReg => (Some(reg(op.a)?), reg(op.b)?, v[reg(op.c)?] as i64, true),
+        SOp::IncOnlyLoopLtImm => (None, reg(op.a)?, i64::from(op.imm), false),
+        SOp::IncOnlyLoopLeImm => (None, reg(op.a)?, i64::from(op.imm), true),
+        _ => return None,
+    };
+    let i = v[counter] as i64;
+    // The body always runs once; it runs again while `$i` stays below the end.
+    let end = i128::from(lim) + i128::from(inclusive);
+    let runs = (end - i128::from(i)).max(1);
+    let budget = budget.max(1);
+    let (runs, exits) = if runs <= budget as i128 {
+        (runs as i64, true)
+    } else {
+        (budget as i64, false)
+    };
+    let new_i = i.checked_add(runs)?;
+    let new_acc = match acc {
+        Some(reg) => Some((reg, (v[reg] as i64).checked_add(runs)?)),
+        None => None,
+    };
+    t[counter] = TAG_INT;
+    v[counter] = new_i as u64;
+    if let Some((reg, value)) = new_acc {
+        t[reg] = TAG_INT;
+        v[reg] = value as u64;
+    }
+    Some(if exits {
+        ScalarExit::Exit {
+            next_fast_ip: usize::MAX,
+            spent: (runs - 1) as usize,
+        }
+    } else {
+        ScalarExit::Yield
+    })
+}
+
 #[inline(always)]
 fn eval_f64_cmp(cmp: u8, a: f64, b: f64) -> bool {
     match cmp {
@@ -232,6 +313,13 @@ fn eval_i64_cmp(cmp: u8, a: i64, b: i64) -> bool {
         CMP_GE => a >= b,
         _ => false,
     }
+}
+
+/// The extra operand slots a fused float op keeps in the bytes of `imm`,
+/// each masked to the `fv` range.
+#[inline(always)]
+fn slot_bytes(imm: i32) -> [usize; 4] {
+    imm.to_le_bytes().map(|b| (b & 31) as usize)
 }
 
 /// Tiny leaf unboxed inner-loop executor.
@@ -531,6 +619,68 @@ fn run_scalar_kernel(
                 let x = fv[(op.b & 31) as usize];
                 fv[(op.a & 31) as usize] =
                     (x + x) * fv[(op.c & 31) as usize] + fv[(op.imm & 31) as usize];
+                ip += 1;
+            }
+            SOp::MulDblAddF64 => {
+                let p = fv[(op.b & 31) as usize] * fv[(op.c & 31) as usize];
+                fv[(op.a & 31) as usize] = (p + p) + fv[(op.imm & 31) as usize];
+                ip += 1;
+            }
+            SOp::MulMulAddF64 => {
+                let [d, e, ..] = slot_bytes(op.imm);
+                fv[(op.a & 31) as usize] =
+                    fv[(op.b & 31) as usize] * fv[(op.c & 31) as usize] + fv[d] * fv[e];
+                ip += 1;
+            }
+            SOp::MulMulSubF64 => {
+                let [d, e, ..] = slot_bytes(op.imm);
+                fv[(op.a & 31) as usize] =
+                    fv[(op.b & 31) as usize] * fv[(op.c & 31) as usize] - fv[d] * fv[e];
+                ip += 1;
+            }
+            SOp::MulMulSubAddF64 => {
+                let [d, e, f, _] = slot_bytes(op.imm);
+                fv[(op.a & 31) as usize] =
+                    (fv[(op.b & 31) as usize] * fv[(op.c & 31) as usize] - fv[d] * fv[e]) + fv[f];
+                ip += 1;
+            }
+            SOp::AddSqrF64 => {
+                let r = fv[(op.b & 31) as usize] + fv[(op.c & 31) as usize];
+                fv[(op.a & 31) as usize] = r;
+                fv[(op.imm & 31) as usize] = r * r;
+                ip += 1;
+            }
+            SOp::SubSqrF64 => {
+                let r = fv[(op.b & 31) as usize] - fv[(op.c & 31) as usize];
+                fv[(op.a & 31) as usize] = r;
+                fv[(op.imm & 31) as usize] = r * r;
+                ip += 1;
+            }
+            SOp::MulSqrF64 => {
+                let r = fv[(op.b & 31) as usize] * fv[(op.c & 31) as usize];
+                fv[(op.a & 31) as usize] = r;
+                fv[(op.imm & 31) as usize] = r * r;
+                ip += 1;
+            }
+            SOp::MulAddSqrF64 => {
+                let [d, e, ..] = slot_bytes(op.imm);
+                let r = fv[(op.b & 31) as usize] * fv[(op.c & 31) as usize] + fv[d];
+                fv[(op.a & 31) as usize] = r;
+                fv[e] = r * r;
+                ip += 1;
+            }
+            SOp::SubAddSqrF64 => {
+                let [d, e, ..] = slot_bytes(op.imm);
+                let r = fv[(op.b & 31) as usize] - fv[(op.c & 31) as usize] + fv[d];
+                fv[(op.a & 31) as usize] = r;
+                fv[e] = r * r;
+                ip += 1;
+            }
+            SOp::AddAddSqrF64 => {
+                let [d, e, ..] = slot_bytes(op.imm);
+                let r = fv[(op.b & 31) as usize] + fv[(op.c & 31) as usize] + fv[d];
+                fv[(op.a & 31) as usize] = r;
+                fv[e] = r * r;
                 ip += 1;
             }
 
@@ -1434,7 +1584,13 @@ pub(crate) fn try_compile_scalar_loop(
     }
 
     // 3. Special case: 2-op counter + accumulator loop (`simple`, `nestedloop`).
-    if body.len() == 2 && body[0].op == Op::IncLocalFast && body[0].a != body[1].a {
+    // The fused op reads a register limit once, so the incremented local
+    // must not be the limit (`for (; $i < $n; $i++) $n++;`).
+    if body.len() == 2
+        && body[0].op == Op::IncLocalFast
+        && body[0].a != body[1].a
+        && !(matches!(body[1].op, Op::IncLoopLtReg | Op::IncLoopLeReg) && body[1].b == body[0].a)
+    {
         let a_slot = int_slot[body[0].a as usize];
         let i_slot = int_slot[body[1].a as usize];
         let fused = match body[1].op {
@@ -1609,12 +1765,74 @@ pub(crate) fn try_compile_scalar_loop(
             && (op2.a == op1.a || temp_dead_in_loop(body, &skip_mask, k + 2, op1.a))
         {
             let z = if op2.b == op1.a { op2.c } else { op2.b };
+            // `($x * $y) * 2` is not `($x + $x) * $y` when `$x + $x`
+            // overflows or the product is subnormal: double the product.
             sops.push(ScalarOp::new(
-                SOp::Mul2MulAddF64,
+                SOp::MulDblAddF64,
                 f64_slot[op2.a as usize],
                 f64_slot[op.b as usize],
                 f64_slot[op.c as usize],
                 i32::from(f64_slot[z as usize]),
+            ));
+            fast_ips.push(op_fast_ip);
+            k += 3;
+            continue;
+        }
+
+        // Fusion M: two products combined by the next op, `MulF64(t1, a, b) +
+        // MulF64(t2, c, d) + AddF64|SubF64(t3, t1, t2)`, optionally followed
+        // by `AddF64(dst, t3, e)` -> `MulMulAddF64` / `MulMulSubF64` /
+        // `MulMulSubAddF64` (dot products, determinants, complex products).
+        if op.op == Op::MulF64
+            && (op.a as usize) >= local_count as usize
+            && let Some(op1) = next
+            && op1.op == Op::MulF64
+            && (op1.a as usize) >= local_count as usize
+            && op1.a != op.a
+            && op1.b != op.a
+            && op1.c != op.a
+            && let Some(op2) = next2
+            && matches!(op2.op, Op::AddF64 | Op::SubF64)
+            && ((op2.b == op.a && op2.c == op1.a) || (op2.b == op1.a && op2.c == op.a))
+            && (op2.a == op.a || temp_dead_in_loop(body, &skip_mask, k + 2, op.a))
+            && (op2.a == op1.a || temp_dead_in_loop(body, &skip_mask, k + 2, op1.a))
+        {
+            // The product on the left of the `-` comes first; `+` commutes.
+            let (lhs, rhs) = if op2.b == op.a { (op, op1) } else { (op1, op) };
+            let slot = |r: u8| i32::from(f64_slot[r as usize]);
+            let products = slot(rhs.b) | (slot(rhs.c) << 8);
+            let op3 = body.get(k + 3).copied();
+            if op2.op == Op::SubF64
+                && (op2.a as usize) >= local_count as usize
+                && let Some(op3) = op3
+                && op3.op == Op::AddF64
+                && op3.b != op3.c
+                && (op3.b == op2.a || op3.c == op2.a)
+                && (op3.a == op2.a || temp_dead_in_loop(body, &skip_mask, k + 3, op2.a))
+            {
+                let z = if op3.b == op2.a { op3.c } else { op3.b };
+                sops.push(ScalarOp::new(
+                    SOp::MulMulSubAddF64,
+                    f64_slot[op3.a as usize],
+                    f64_slot[lhs.b as usize],
+                    f64_slot[lhs.c as usize],
+                    products | (slot(z) << 16),
+                ));
+                fast_ips.push(op_fast_ip);
+                k += 4;
+                continue;
+            }
+            let sop = if op2.op == Op::AddF64 {
+                SOp::MulMulAddF64
+            } else {
+                SOp::MulMulSubF64
+            };
+            sops.push(ScalarOp::new(
+                sop,
+                f64_slot[op2.a as usize],
+                f64_slot[lhs.b as usize],
+                f64_slot[lhs.c as usize],
+                products,
             ));
             fast_ips.push(op_fast_ip);
             k += 3;
@@ -1721,6 +1939,7 @@ pub(crate) fn try_compile_scalar_loop(
             && (op.a as usize) >= local_count as usize
             && let Some(op1) = next
             && op1.op == Op::AddF64
+            && op1.b != op1.c
             && (op1.b == op.a || op1.c == op.a)
             && (op1.a == op.a || temp_dead_in_loop(body, &skip_mask, k + 1, op.a))
         {
@@ -1742,6 +1961,7 @@ pub(crate) fn try_compile_scalar_loop(
             && (op.a as usize) >= local_count as usize
             && let Some(op1) = next
             && op1.op == Op::AddF64
+            && op1.b != op1.c
             && (op1.b == op.a || op1.c == op.a)
             && (op1.a == op.a || temp_dead_in_loop(body, &skip_mask, k + 1, op.a))
         {
@@ -1763,6 +1983,7 @@ pub(crate) fn try_compile_scalar_loop(
             && (op.a as usize) >= local_count as usize
             && let Some(op1) = next
             && op1.op == Op::AddF64
+            && op1.b != op1.c
             && (op1.b == op.a || op1.c == op.a)
             && (op1.a == op.a || temp_dead_in_loop(body, &skip_mask, k + 1, op.a))
         {
@@ -2240,6 +2461,7 @@ pub(crate) fn try_compile_scalar_loop(
     }
 
     let _ = temp_f64_const;
+    fuse_squares(&mut sops, &mut fast_ips);
     Some(ScalarLoop {
         ops: sops.into_boxed_slice(),
         fast_ips: fast_ips.into_boxed_slice(),
@@ -2253,6 +2475,46 @@ pub(crate) fn try_compile_scalar_loop(
         f64_consts: f64_consts.into_boxed_slice(),
         i64_consts: i64_consts.into_boxed_slice(),
     })
+}
+
+/// Folds `fv[e] = x * x` into the op right before it when that op produced
+/// `x`, so the square uses the result still in a register. Float ops never
+/// fall back, so the pair runs as one step and keeps the first op's
+/// `fast_ip`. The only branch target inside a scalar loop is op 0, which a
+/// fold never removes.
+fn fuse_squares(sops: &mut Vec<ScalarOp>, fast_ips: &mut Vec<u16>) {
+    let mut out_ops = Vec::with_capacity(sops.len());
+    let mut out_ips = Vec::with_capacity(fast_ips.len());
+    let mut k = 0;
+    while k < sops.len() {
+        let op = sops[k];
+        let square = sops
+            .get(k + 1)
+            .filter(|next| next.op == SOp::MulF64 && next.b == op.a && next.c == op.a)
+            .map(|next| i32::from(next.a));
+        let fused = square.and_then(|sq| {
+            let (sop, imm) = match op.op {
+                SOp::AddF64 => (SOp::AddSqrF64, sq),
+                SOp::SubF64 => (SOp::SubSqrF64, sq),
+                SOp::MulF64 => (SOp::MulSqrF64, sq),
+                SOp::MulAddF64 => (SOp::MulAddSqrF64, op.imm | (sq << 8)),
+                SOp::SubAddF64 => (SOp::SubAddSqrF64, op.imm | (sq << 8)),
+                SOp::AddAddF64 => (SOp::AddAddSqrF64, op.imm | (sq << 8)),
+                _ => return None,
+            };
+            Some(ScalarOp::new(sop, op.a, op.b, op.c, imm))
+        });
+        out_ips.push(fast_ips[k]);
+        if let Some(fused) = fused {
+            out_ops.push(fused);
+            k += 2;
+        } else {
+            out_ops.push(op);
+            k += 1;
+        }
+    }
+    *sops = out_ops;
+    *fast_ips = out_ips;
 }
 
 fn temp_dead_in_loop(body: &[FastOp], skip_mask: &[bool; 65], after_k: usize, reg: u8) -> bool {
