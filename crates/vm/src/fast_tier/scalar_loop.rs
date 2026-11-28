@@ -1485,11 +1485,13 @@ pub(crate) fn try_compile_scalar_loop(
         }
     }
 
-    // 3b. Special case: pure counter / dead-noop loop (`simpleucall`, `simpleudcall`).
+    // 3b. Special case: pure counter / dead-noop loop (`simpleucall`,
+    // `simpleudcall`, and `simplecall`, whose `strlen("hallo")` the compiler
+    // folds into a load of 5 into a temporary nothing reads).
     if body.len() >= 2
         && body[..body.len() - 1].iter().all(|op| {
             (op.op == Op::CallNoop && op.c == 0 && op.a >= local_count)
-                || (op.op == Op::Clear && op.a >= local_count)
+                || (matches!(op.op, Op::Clear | Op::LoadInt) && op.a >= local_count)
         })
         && matches!(body[body.len() - 1].op, Op::IncLoopLtImm | Op::IncLoopLeImm)
     {

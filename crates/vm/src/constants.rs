@@ -45,12 +45,21 @@ impl Vm {
         destination: Reg,
         constant: SymbolId,
     ) -> Result<(), NativeError> {
-        let unit = self
+        let frame = self
             .current()
-            .ok_or_else(|| internal_error!("constant frame"))?
-            .unit()
-            .clone();
-        let value = self.fetch_global_constant(unit, constant)?;
+            .ok_or_else(|| internal_error!("constant frame"))?;
+        let (unit, function) = (frame.unit().clone(), frame.frame.function);
+        let found = self.constants.fetch(unit, constant)?;
+        // The interpreter loop reads the value from the file's cache until
+        // the next definition (`Machine::fetch_known_constant`).
+        if found.deprecated.is_none() {
+            self.code.cache(function).remember_constant(
+                constant.index(),
+                self.constants.epoch(),
+                &found.value,
+            );
+        }
+        let value = self.report_global_constant(found);
         self.set(destination, value);
         Ok(())
     }

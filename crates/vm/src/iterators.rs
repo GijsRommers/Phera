@@ -121,6 +121,7 @@ impl crate::snapshot::ForkCopy for Iterators {
                     source: state.source.clone(),
                     position: state.position,
                     started: state.started,
+                    bulk_resume: state.bulk_resume,
                 })
             })
             .collect();

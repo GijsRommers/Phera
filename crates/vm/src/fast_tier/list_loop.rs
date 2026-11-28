@@ -128,6 +128,9 @@ pub(crate) enum ListExit {
     },
     Yield {
         resume_fast_ip: usize,
+        /// The list op the loop would run next, for going on in the
+        /// unboxed layout after a probe (see [`run_list_loop_typed`]).
+        resume_ip: usize,
     },
     Fallback {
         fallback_fast_ip: usize,
@@ -376,44 +379,99 @@ fn run_list_loop_typed<E: ListElem>(
 
     let mut dirty_int: u32 = 0;
     let mut dirty_elem: u32 = 0;
+    let slot_count = elements.slots().len();
     let unbox = ll.last_steps.load(Ordering::Relaxed) as usize
-        >= UNBOX_STEPS_PER_SLOT.saturating_mul(elements.slots().len())
+        >= UNBOX_STEPS_PER_SLOT.saturating_mul(slot_count)
         && unbox_into(elements.slots(), buf);
     macro_rules! run_on {
-        ($slots:expr) => {
+        ($slots:expr, $start_ip:expr, $budget:expr) => {
             exec_list_ops::<E, _>(
                 &ll.ops,
                 &ll.fast_ips,
                 ll.fallthrough_fast_ip as usize,
                 start,
                 $slots,
-                &mut iv,
-                &mut ev,
-                &mut dirty_int,
-                &mut dirty_elem,
-                budget_start,
+                (&mut iv, &mut ev),
+                (&mut dirty_int, &mut dirty_elem),
+                ($start_ip, $budget),
             )
         };
     }
+    // Steps run in either layout, for `last_steps`, and the work they
+    // cost, for the caller's budget.
+    let mut steps = 0;
+    let mut work = 0;
     let exit = match elements {
         Elements::Writable(slots) if unbox => {
-            let exit = run_on!(&mut Unboxed(buf.as_mut_slice()));
-            // Every slot holds an `E`, so each store updates a number in place.
-            for (slot, &value) in slots.iter_mut().zip(buf.iter()) {
-                value.store(slot);
-            }
+            let exit = run_on!(
+                &mut Unboxed(buf.as_mut_slice()),
+                0,
+                unboxed_budget(budget_start)
+            );
+            store_unboxed(slots, buf);
+            count_unboxed(&exit, budget_start, &mut steps, &mut work);
             exit
         }
-        Elements::Writable(slots) => run_on!(&mut Boxed(slots)),
-        Elements::ReadOnly(_) if unbox => run_on!(&mut Unboxed(buf.as_mut_slice())),
-        Elements::ReadOnly(slots) => run_on!(&mut Shared(slots)),
-    };
-    let steps = match exit {
-        ListExit::Exit { spent, .. } | ListExit::Fallback { spent, .. } => spent,
-        ListExit::Yield { .. } => budget_start,
+        Elements::Writable(slots) => {
+            // In place for at most one step per slot: a loop that has not
+            // finished by then does many steps per element (a sort), and
+            // goes on unboxed from where it stopped.
+            let probe = slot_count.clamp(1, budget_start.max(1));
+            let exit = run_on!(&mut Boxed(slots), 0, probe);
+            count_boxed(&exit, probe, &mut steps, &mut work);
+            match exit {
+                ListExit::Yield { resume_ip, .. } if probe < budget_start => {
+                    let rest = budget_start - probe;
+                    if unbox_into(slots, buf) {
+                        let exit = run_on!(
+                            &mut Unboxed(buf.as_mut_slice()),
+                            resume_ip,
+                            unboxed_budget(rest)
+                        );
+                        store_unboxed(slots, buf);
+                        count_unboxed(&exit, rest, &mut steps, &mut work);
+                        exit
+                    } else {
+                        // A hole or another type: the rest of the budget
+                        // in place.
+                        let exit = run_on!(&mut Boxed(slots), resume_ip, rest);
+                        count_boxed(&exit, rest, &mut steps, &mut work);
+                        exit
+                    }
+                }
+                exit => exit,
+            }
+        }
+        Elements::ReadOnly(_) if unbox => {
+            let exit = run_on!(
+                &mut Unboxed(buf.as_mut_slice()),
+                0,
+                unboxed_budget(budget_start)
+            );
+            count_unboxed(&exit, budget_start, &mut steps, &mut work);
+            exit
+        }
+        Elements::ReadOnly(slots) => {
+            let exit = run_on!(&mut Shared(slots), 0, budget_start);
+            count_boxed(&exit, budget_start, &mut steps, &mut work);
+            exit
+        }
     };
     ll.last_steps
         .store(u32::try_from(steps).unwrap_or(u32::MAX), Ordering::Relaxed);
+    let exit = match exit {
+        ListExit::Exit { next_fast_ip, .. } => ListExit::Exit {
+            next_fast_ip,
+            spent: work,
+        },
+        ListExit::Fallback {
+            fallback_fast_ip, ..
+        } => ListExit::Fallback {
+            fallback_fast_ip,
+            spent: work,
+        },
+        exit @ ListExit::Yield { .. } => exit,
+    };
 
     // Write back ONLY registers actually written during this invocation.
     for &slot in ll.written_ints.iter() {
@@ -434,6 +492,45 @@ fn run_list_loop_typed<E: ListElem>(
     }
 
     Some(exit)
+}
+
+/// An unboxed step is a plain load or store, several times cheaper than a
+/// step on the array's own slots: an unboxed run gets this many steps per
+/// step of the caller's budget, and is charged for them at that rate (as
+/// `int_rec` does).
+const UNBOXED_STEPS_PER_WORK: usize = 8;
+
+fn unboxed_budget(budget: usize) -> usize {
+    budget.max(1).saturating_mul(UNBOXED_STEPS_PER_WORK)
+}
+
+/// Adds the steps of a run in place to the entry's totals: a yield spent
+/// the whole `budget`.
+fn count_boxed(exit: &ListExit, budget: usize, steps: &mut usize, work: &mut usize) {
+    let spent = match *exit {
+        ListExit::Exit { spent, .. } | ListExit::Fallback { spent, .. } => spent,
+        ListExit::Yield { .. } => budget,
+    };
+    *steps += spent;
+    *work += spent;
+}
+
+/// Adds the steps of an unboxed run, charged at [`UNBOXED_STEPS_PER_WORK`].
+fn count_unboxed(exit: &ListExit, budget: usize, steps: &mut usize, work: &mut usize) {
+    let spent = match *exit {
+        ListExit::Exit { spent, .. } | ListExit::Fallback { spent, .. } => spent,
+        ListExit::Yield { .. } => unboxed_budget(budget),
+    };
+    *steps += spent;
+    *work += spent.div_ceil(UNBOXED_STEPS_PER_WORK);
+}
+
+/// Writes an unboxed copy back into the array's slots. Every slot holds an
+/// `E`, so each store updates a number in place.
+fn store_unboxed<E: ListElem>(slots: &mut [Option<Value>], buf: &[E]) {
+    for (slot, &value) in slots.iter_mut().zip(buf.iter()) {
+        value.store(slot);
+    }
 }
 
 /// Copies `slots` into `buf` as `E`s; `false` when a slot is a hole, a
@@ -543,13 +640,14 @@ fn exec_list_ops<E: ListElem, S: ListSlots<E>>(
     fallthrough_fast_ip: usize,
     start: i64,
     slots: &mut S,
-    iv: &mut [i64; MAX_LIST_INT_SLOTS],
-    ev: &mut [E; MAX_LIST_ELEM_SLOTS],
-    dirty_int: &mut u32,
-    dirty_elem: &mut u32,
-    budget_start: usize,
+    (iv, ev): (
+        &mut [i64; MAX_LIST_INT_SLOTS],
+        &mut [E; MAX_LIST_ELEM_SLOTS],
+    ),
+    (dirty_int, dirty_elem): (&mut u32, &mut u32),
+    (start_ip, budget_start): (usize, usize),
 ) -> ListExit {
-    let mut ip: usize = 0;
+    let mut ip: usize = start_ip;
     let mut budget = budget_start.max(1);
     let len = ops.len();
     // Leaves the list ops before the current one runs: FastVm executes it
@@ -627,6 +725,7 @@ fn exec_list_ops<E: ListElem, S: ListSlots<E>>(
                         if budget == 0 {
                             return ListExit::Yield {
                                 resume_fast_ip: fast_ips[target] as usize,
+                                resume_ip: target,
                             };
                         }
                     }
@@ -655,6 +754,7 @@ fn exec_list_ops<E: ListElem, S: ListSlots<E>>(
                         if budget == 0 {
                             return ListExit::Yield {
                                 resume_fast_ip: fast_ips[target] as usize,
+                                resume_ip: target,
                             };
                         }
                     }
@@ -694,6 +794,7 @@ fn exec_list_ops<E: ListElem, S: ListSlots<E>>(
                         *dirty_int |= 1u32 << k_slot;
                         return ListExit::Yield {
                             resume_fast_ip: fast_ips[ip] as usize,
+                            resume_ip: ip,
                         };
                     }
                 }
@@ -887,6 +988,7 @@ fn exec_list_ops<E: ListElem, S: ListSlots<E>>(
                     if budget == 0 {
                         return ListExit::Yield {
                             resume_fast_ip: fast_ips[target] as usize,
+                            resume_ip: target,
                         };
                     }
                 }
@@ -908,6 +1010,7 @@ fn exec_list_ops<E: ListElem, S: ListSlots<E>>(
                         if budget == 0 {
                             return ListExit::Yield {
                                 resume_fast_ip: fast_ips[target] as usize,
+                                resume_ip: target,
                             };
                         }
                     }
@@ -933,6 +1036,7 @@ fn exec_list_ops<E: ListElem, S: ListSlots<E>>(
                         if budget == 0 {
                             return ListExit::Yield {
                                 resume_fast_ip: fast_ips[target] as usize,
+                                resume_ip: target,
                             };
                         }
                     }
@@ -957,6 +1061,7 @@ fn exec_list_ops<E: ListElem, S: ListSlots<E>>(
                         if budget == 0 {
                             return ListExit::Yield {
                                 resume_fast_ip: fast_ips[target] as usize,
+                                resume_ip: target,
                             };
                         }
                     }
@@ -982,6 +1087,7 @@ fn exec_list_ops<E: ListElem, S: ListSlots<E>>(
                         if budget == 0 {
                             return ListExit::Yield {
                                 resume_fast_ip: fast_ips[target] as usize,
+                                resume_ip: target,
                             };
                         }
                     }
@@ -1026,6 +1132,7 @@ fn exec_list_ops<E: ListElem, S: ListSlots<E>>(
                         if budget == 0 {
                             return ListExit::Yield {
                                 resume_fast_ip: fast_ips[target] as usize,
+                                resume_ip: target,
                             };
                         }
                     }
@@ -1070,6 +1177,7 @@ fn exec_list_ops<E: ListElem, S: ListSlots<E>>(
                         if budget == 0 {
                             return ListExit::Yield {
                                 resume_fast_ip: fast_ips[target] as usize,
+                                resume_ip: target,
                             };
                         }
                     }

@@ -16,7 +16,7 @@
 use std::rc::Rc;
 
 use phera_bytecode::{ConstId, Reg, SymbolId};
-use phera_value::{NoDiagnostics, PhpArray, Value};
+use phera_value::{NoDiagnostics, PhpArray, Value, power_of_two_digits};
 
 use crate::calls::execution_loop::{Machine, Position, Step};
 use crate::calls::sync_native::PureNative;
@@ -348,6 +348,17 @@ fn eval_pure_native(pure: PureNative, values: &[Option<Value>]) -> Option<Value>
                 return None;
             }
             Some(Value::from(vec![codepoint as u8]))
+        }
+        // An int argument only: a float or numeric string is coerced, with
+        // possible deprecations, by the general handler.
+        PureNative::Dechex | PureNative::Decbin | PureNative::Decoct => {
+            let [n] = values else { return None };
+            let bits = match pure {
+                PureNative::Dechex => 4,
+                PureNative::Decoct => 3,
+                _ => 1,
+            };
+            Some(Value::String(power_of_two_digits(as_int(n)? as u64, bits)))
         }
         PureNative::Abs => {
             let [v] = values else { return None };

@@ -26,8 +26,56 @@ impl Vm {
         local: Reg,
         name: NameId,
     ) -> Result<(), NativeError> {
+        use crate::unit_caches::GlobalBinding;
+
+        /// Where a global variable lives before `global $name` binds it.
+        enum Place {
+            /// A declared variable of the file-scope code.
+            Register(GlobalBinding),
+            /// A variable that code made by name (`$$name`, `extract`).
+            ByName,
+            /// The request's globals table.
+            Table,
+        }
+
+        let index = name.index();
         let name = self.name(name)?;
-        self.bind_global(local, name)?;
+        let place = match self.global_frame() {
+            Some(frame) => match frame.declared_register(&name) {
+                Some(register) => Place::Register(GlobalBinding::Register {
+                    function: frame.frame.function,
+                    register,
+                }),
+                None if frame.named_register(&name).is_some() => Place::ByName,
+                None => Place::Table,
+            },
+            None => Place::Table,
+        };
+        // The interpreter loop binds the variable itself from now on
+        // (`Machine::bind_known_global`), while it stays where it is.
+        let binding = match place {
+            Place::Register(binding) => {
+                self.bind_global(local, name)?;
+                Some(binding)
+            }
+            Place::ByName => {
+                self.bind_global(local, name)?;
+                None
+            }
+            Place::Table => {
+                let value = self.globals.reference(name.clone());
+                self.set(local, value);
+                let index = self.globals.index_of(&name);
+                index
+                    .and_then(|index| u32::try_from(index).ok())
+                    .map(|index| GlobalBinding::Table { index })
+            }
+        };
+        if let (Some(binding), Some(frame)) = (binding, self.current()) {
+            self.code
+                .cache(frame.frame.function)
+                .remember_global(index, binding);
+        }
         Ok(())
     }
 

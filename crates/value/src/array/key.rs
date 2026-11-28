@@ -169,16 +169,27 @@ impl ArrayKey {
 /// not fit in `i64` (`"9223372036854775808"` stays a string).
 #[inline]
 pub(crate) fn numeric_string_key(bytes: &[u8]) -> Option<i64> {
-    let &first = bytes.first()?;
+    let (&first, rest) = bytes.split_first()?;
+    // Most numeric keys are short positive numbers: at most 18 digits
+    // cannot overflow `i64`, so the loop needs no range check.
+    if matches!(first, b'1'..=b'9') && rest.len() < 18 {
+        let mut acc = i64::from(first - b'0');
+        for &b in rest {
+            if !b.is_ascii_digit() {
+                return None;
+            }
+            acc = acc * 10 + i64::from(b - b'0');
+        }
+        return Some(acc);
+    }
     if !first.is_ascii_digit() && first != b'-' {
         return None;
     }
-    numeric_string_key_slow(bytes)
+    numeric_string_key_long(bytes)
 }
 
-#[cold]
-#[inline(never)]
-fn numeric_string_key_slow(bytes: &[u8]) -> Option<i64> {
+/// Keys starting with `0` or `-`, and keys of 19 or more digits.
+fn numeric_string_key_long(bytes: &[u8]) -> Option<i64> {
     let (digits, neg) = match bytes.split_first() {
         Some((b'-', rest)) => (rest, true),
         _ => (bytes, false),

@@ -852,6 +852,10 @@ fn lower_body(
                 ops.push(FastOp::new(Op::ReturnNull, 0, 0, 0, 0));
                 bc_ip.push(i as u32);
             }
+            I::Echo { src } => {
+                ops.push(FastOp::new(Op::Echo, src.0 as u8, 0, 0, 0));
+                bc_ip.push(i as u32);
+            }
             _ => {
                 ops.push(FastOp::new(Op::Deopt, 0, 0, 0, 0));
                 bc_ip.push(i as u32);

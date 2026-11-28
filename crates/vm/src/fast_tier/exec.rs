@@ -1572,6 +1572,34 @@ fn call_noop_slow(
 }
 
 /// Run the Tier-2 compact VM starting from `position` inside `entry_fast`.
+/// Out-of-line `Op::Echo` helper so string output collection never adds register
+/// pressure or I-cache bloat to `run_fast`'s hot dispatch loop.
+#[inline(never)]
+fn exec_fast_echo(
+    scratch: &mut crate::fast_tier::stack::FastScratch,
+    tag: u8,
+    index: usize,
+    unit_consts: &[Value],
+    heap: &[Option<Value>],
+) -> bool {
+    if !scratch.echo_open {
+        return false;
+    }
+    let bytes = match tag {
+        TAG_CONST => unit_consts.get(index).and_then(Value::as_str_bytes),
+        TAG_HEAP => heap
+            .get(index)
+            .and_then(Option::as_ref)
+            .and_then(Value::as_str_bytes),
+        _ => None,
+    };
+    let Some(bytes) = bytes else {
+        return false;
+    };
+    scratch.echo.extend_from_slice(bytes);
+    true
+}
+
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn run_fast(
@@ -1650,8 +1678,7 @@ pub(crate) fn run_fast(
             .expect("256-bit window");
         let heap = &mut fast_stack.heap;
         let free_heap = &mut fast_stack.free_heap;
-        let list_buf_i64 = &mut fast_stack.list_buf_i64;
-        let list_buf_f64 = &mut fast_stack.list_buf_f64;
+        let scratch = &mut fast_stack.scratch;
 
         loop {
             let Some(&op) = cur_ops.get(ip) else {
@@ -1706,8 +1733,8 @@ pub(crate) fn run_fast(
                         t,
                         v,
                         heap,
-                        list_buf_i64,
-                        list_buf_f64,
+                        &mut scratch.list_buf_i64,
+                        &mut scratch.list_buf_f64,
                         budget,
                     ) {
                         match exit {
@@ -1719,7 +1746,9 @@ pub(crate) fn run_fast(
                                 ip = next_fast_ip;
                                 continue;
                             }
-                            crate::fast_tier::list_loop::ListExit::Yield { resume_fast_ip } => {
+                            crate::fast_tier::list_loop::ListExit::Yield {
+                                resume_fast_ip, ..
+                            } => {
                                 ip = resume_fast_ip;
                                 work = 0;
                                 yield_now = true;
@@ -3021,6 +3050,22 @@ pub(crate) fn run_fast(
                         heap,
                         free_heap,
                     ) {
+                        break 'frame_loop;
+                    }
+                    ip += 1;
+                }
+                // A string goes to the collected output. Anything else, or
+                // output the VM did not open, runs in the VM, as a
+                // structural deopt: it says nothing about the code's types.
+                Op::Echo => {
+                    if !exec_fast_echo(
+                        scratch,
+                        t[op.a as usize],
+                        v[op.a as usize] as usize,
+                        unit_consts,
+                        heap,
+                    ) {
+                        structural_deopt = true;
                         break 'frame_loop;
                     }
                     ip += 1;

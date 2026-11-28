@@ -144,6 +144,9 @@ pub(crate) enum Op {
     CastFloat,
     CastBool,
     StrLen,
+    /// `echo` of a string into [`FastStack::echo`](crate::fast_tier::FastStack),
+    /// when the VM opened it for this run.
+    Echo,
 
     // Inc/Dec
     IncLocalFast,

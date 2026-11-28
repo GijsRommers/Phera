@@ -63,6 +63,22 @@ impl Globals {
         }
     }
 
+    /// Where symbol `name` is in the table, which stays its place until it is
+    /// unset.
+    pub(crate) fn index_of(&self, name: &str) -> Option<usize> {
+        self.values.get_index_of(name)
+    }
+
+    /// The PHP reference that global `name` holds, when it is still at
+    /// `index` and its value is in the table, not in a frame.
+    #[inline]
+    pub(crate) fn reference_at(&self, index: usize, name: &[u8]) -> Option<&Rc<RefCell<Value>>> {
+        match self.values.get_index(index)? {
+            (key, Some(Value::Reference(cell))) if key.as_bytes() == name => Some(cell),
+            _ => None,
+        }
+    }
+
     /// Repeated global declarations share the same cell, including a missing global.
     pub(crate) fn reference(&mut self, name: String) -> Value {
         let value = self

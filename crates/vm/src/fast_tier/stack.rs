@@ -21,6 +21,24 @@ pub(crate) struct FastFrame {
     pub(crate) return_bc_ip: u32,
 }
 
+/// Cold scratch buffers shared behind one pointer in `run_fast` so list-loop
+/// unboxing and buffered `echo` add zero extra live registers to the hot Tier-2
+/// dispatch loop.
+pub(crate) struct FastScratch {
+    /// Reusable unboxed `i64` scratch slice for `list_loop::try_run_list_loop`.
+    pub(crate) list_buf_i64: Vec<i64>,
+    /// Reusable unboxed `f64` scratch slice for `list_loop::try_run_list_loop`.
+    pub(crate) list_buf_f64: Vec<f64>,
+    /// What `echo` wrote during one run of the interpreter loop, which the
+    /// VM sends to the request's output when the loop hands back, before
+    /// anything else can write (`Vm::write_fast_echo`).
+    pub(crate) echo: Vec<u8>,
+    /// Whether `echo` may collect output in this run: the VM sets it when
+    /// a later write of the same bytes is the same as writing them now (see
+    /// `Vm::fast_echo_allowed`).
+    pub(crate) echo_open: bool,
+}
+
 /// Reusable per-VM Tier-2 register and frame storage. Lazily boxed inside
 /// `Vm::fast_stack` (`None` on every HTTP request and non-Tier-2 script).
 pub(crate) struct FastStack {
@@ -33,10 +51,8 @@ pub(crate) struct FastStack {
     pub(crate) rec_regs: Vec<i64>,
     /// Reusable compact 8-byte call frames for `int_rec::run_int_rec`.
     pub(crate) rec_frames: Vec<RecFrame>,
-    /// Reusable unboxed `i64` scratch slice for `list_loop::try_run_list_loop`.
-    pub(crate) list_buf_i64: Vec<i64>,
-    /// Reusable unboxed `f64` scratch slice for `list_loop::try_run_list_loop`.
-    pub(crate) list_buf_f64: Vec<f64>,
+    /// Bundled scratch buffers for list loops and buffered `Op::Echo`.
+    pub(crate) scratch: FastScratch,
 }
 
 impl FastStack {
@@ -49,8 +65,12 @@ impl FastStack {
             frames: Vec::new(),
             rec_regs: Vec::new(),
             rec_frames: Vec::new(),
-            list_buf_i64: Vec::new(),
-            list_buf_f64: Vec::new(),
+            scratch: FastScratch {
+                list_buf_i64: Vec::new(),
+                list_buf_f64: Vec::new(),
+                echo: Vec::new(),
+                echo_open: false,
+            },
         }
     }
 

@@ -33,7 +33,7 @@ pub use float_format::{
     float_repr, float_repr_with_precision, float_to_string_precision14, with_float_repr,
 };
 pub use fork::{Fork, NativeFork, Refusal};
-pub use integer_text::{integer_string, push_integer};
+pub use integer_text::{integer_string, power_of_two_digits, push_integer};
 pub use intern::{InternedStr, StrRef};
 pub use lazy_object::{LazyObject, LazyStrategy};
 pub use object::{

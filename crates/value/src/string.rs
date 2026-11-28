@@ -6,6 +6,8 @@ use std::rc::Rc;
 #[derive(Default, Clone)]
 pub struct PhpString(Rc<Vec<u8>>);
 
+const _: () = assert!(std::mem::size_of::<PhpString>() == 8);
+
 impl PhpString {
     pub fn new() -> Self {
         PhpString(Rc::new(Vec::new()))
@@ -33,10 +35,12 @@ impl PhpString {
         Rc::try_unwrap(self.0).unwrap_or_else(|shared| shared.as_ref().clone())
     }
 
+    #[inline(always)]
     pub fn as_bytes(&self) -> &[u8] {
         &self.0
     }
 
+    #[inline(always)]
     pub fn len(&self) -> usize {
         self.0.len()
     }
@@ -46,6 +50,7 @@ impl PhpString {
         Rc::strong_count(&self.0)
     }
 
+    #[inline]
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
@@ -80,8 +85,9 @@ impl From<&[u8]> for PhpString {
 }
 
 impl PartialEq for PhpString {
+    #[inline]
     fn eq(&self, other: &Self) -> bool {
-        self.0 == other.0
+        Rc::ptr_eq(&self.0, &other.0) || self.0 == other.0
     }
 }
 
@@ -107,6 +113,7 @@ impl std::hash::Hash for PhpString {
 
 impl std::ops::Deref for PhpString {
     type Target = [u8];
+    #[inline(always)]
     fn deref(&self) -> &[u8] {
         &self.0
     }

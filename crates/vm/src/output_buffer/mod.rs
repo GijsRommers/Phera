@@ -137,6 +137,20 @@ impl Buffers {
     }
 
     /// Returns false when the bytes have reached the bottom of the stack.
+    /// Whether a write goes into a buffer as plain bytes, with nothing run
+    /// or flushed because of it: no handler is running, and the buffer a
+    /// write lands in has no chunk size.
+    pub(crate) fn writes_plainly(&self) -> bool {
+        self.running.is_none()
+            && self.pending.is_none()
+            && self
+                .stack
+                .iter()
+                .rev()
+                .find(|buffer| !buffer.disabled)
+                .is_some_and(|buffer| buffer.chunk == 0)
+    }
+
     pub(crate) fn write(&mut self, depth: usize, bytes: &[u8]) -> bool {
         if let Some(running) = &self.running
             && let Some(buffer) = self.stack.get_mut(running.index)

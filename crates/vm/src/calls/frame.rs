@@ -50,6 +50,9 @@ pub(crate) struct IteratorState {
     pub(crate) position: Option<usize>,
     /// Distinguishes an untouched iterator from an exhausted one.
     pub(crate) started: bool,
+    /// A bulk `$sum[$key] += $value` run (`iteration::keyed_add_loop_step`)
+    /// spent its budget at `position` and goes on from there.
+    pub(crate) bulk_resume: bool,
 }
 
 /// One running PHP function: which code, where its registers start, where it

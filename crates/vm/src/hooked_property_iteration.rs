@@ -210,6 +210,7 @@ impl Vm {
                 source: None,
                 position: None,
                 started: false,
+                bulk_resume: false,
             },
         );
     }

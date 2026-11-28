@@ -73,6 +73,13 @@ impl<'a> FrameView<'a> {
     }
 
     pub(crate) fn named_register(&self, name: &str) -> Option<Reg> {
+        self.declared_register(name)
+            .or_else(|| self.extras.dynamic.get(name).copied())
+    }
+
+    /// The register of variable `name` when the code declares it, which
+    /// it keeps for as long as the code runs.
+    pub(crate) fn declared_register(&self, name: &str) -> Option<Reg> {
         self.function()
             .locals
             .iter()
@@ -83,7 +90,6 @@ impl<'a> FrameView<'a> {
                     .is_some_and(|value| value == name)
             })
             .map(|index| Reg(index as u16))
-            .or_else(|| self.extras.dynamic.get(name).copied())
     }
 
     /// The function's number within its file; `None` for top-level code.

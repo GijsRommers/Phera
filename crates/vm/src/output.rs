@@ -27,16 +27,21 @@ impl Vm {
 
     /// Implements PHP Echo semantics outside the dispatch loop.
     pub(crate) fn echo_value(&mut self, source: Reg) -> Result<(), NativeError> {
+        // An interned string lives for the whole process, so its bytes go
+        // straight to the output without a copy or a reference count.
         let text = match &*self.operand(source) {
-            Value::InternedStr(text) => Some(text.to_php_string()),
-            Value::String(text) => Some(text.clone()),
+            Value::InternedStr(text) => Some(EchoText::Static(text.as_bytes())),
+            Value::String(text) => Some(EchoText::Shared(text.clone())),
             _ => None,
         };
         if let Some(text) = text {
             if self.diagnostic_reporter.has_pending() {
                 self.flush_operator_diagnostics();
             }
-            self.out(text.as_bytes());
+            match text {
+                EchoText::Static(bytes) => self.out(bytes),
+                EchoText::Shared(text) => self.out(text.as_bytes()),
+            }
             return Ok(());
         }
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
@@ -45,6 +50,51 @@ impl Vm {
         self.out(text.as_bytes());
         Ok(())
     }
+}
+
+impl Vm {
+    /// Whether `echo` in the Tier-2 loop may collect its output and leave
+    /// it to [`Vm::write_fast_echo`] when the loop hands back: true when
+    /// writing the bytes later, in one piece, is the same as writing each
+    /// now. That holds for a buffer of `ob_start()` without a chunk size
+    /// (its callback runs when the buffer is flushed, not on a write) and
+    /// for output that has started and is not flushed on every write. No
+    /// operator diagnostic may be waiting to be written first, and no
+    /// debugger may be capturing the output.
+    pub(crate) fn fast_echo_allowed(&self) -> bool {
+        if self.diagnostic_reporter.has_pending() || self.output_writer.debugger.is_some() {
+            return false;
+        }
+        if self.output_writer.buffers.len() > 0 {
+            return self.output_writer.buffers.writes_plainly();
+        }
+        self.output_writer.origin.is_some()
+            && !self.output_writer.implicit_flush
+            && !self.output_writer.flushes_writes()
+    }
+
+    /// Writes what `echo` collected in the Tier-2 loop.
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn write_fast_echo(&mut self) {
+        let Some(fast_stack) = self.fast_stack.as_deref_mut() else {
+            return;
+        };
+        let bytes = std::mem::take(&mut fast_stack.scratch.echo);
+        self.out(&bytes);
+        if let Some(fast_stack) = self.fast_stack.as_deref_mut() {
+            // Keep the allocation for the next run.
+            let mut bytes = bytes;
+            bytes.clear();
+            fast_stack.scratch.echo = bytes;
+        }
+    }
+}
+
+/// The bytes of a string operand of `echo`, held without copying them.
+enum EchoText {
+    Static(&'static [u8]),
+    Shared(phera_value::PhpString),
 }
 
 /// Output forwarding is separate from the public capture buffer required by embedders.
